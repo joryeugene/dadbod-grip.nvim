@@ -159,11 +159,19 @@ All commands are global and available after the plugin loads.
   types, primary keys, foreign keys, indexes, row estimate, and table size.
   Uses the current grip table if no argument is provided.
 
+                                                              *:GripHistory*
+:GripHistory
+  Browse query history. Every query executed via :Grip, the query pad,
+  and staged DML is recorded in .grip/history.jsonl. Shows a picker
+  (telescope/fzf-lua/native) with timestamp and SQL preview. Selecting
+  an entry opens it in the query pad for review and re-execution.
+
                                                                 *:GripDiff*
 :GripDiff {table1} {table2}
   Compare two tables row-by-row using primary keys. Shows changed cells,
   added rows, and deleted rows with color-coded diff highlighting.
-  Navigate changes with ]c and [c.
+  Auto-selects compact mode on narrow terminals (<120 columns).
+  Navigate changes with ]c and [c. Toggle compact/wide with gv.
 
                                                               *:GripRename*
 :GripRename {old_name} [new_name]
@@ -245,7 +253,8 @@ ANALYSIS AND EXPORT ~
                   Shows count, distinct, nulls, min/max, top values
   gx              Explain current query plan
   gD              Diff current table against another table
-  gE              Export table in 5 formats (see |grip-export|)
+  gh              Query history browser
+  gE              Export table in 6 formats (see |grip-export|)
 
 INSPECTION ~
                                                         *grip-inspection*
@@ -277,6 +286,7 @@ SCHEMA AND WORKFLOW ~
   go              Toggle schema browser sidebar
   gT              Open table picker (fuzzy finder)
   gQ              Open query pad (pre-filled with current query)
+  gh              Query history browser
 
 ADVANCED ~
                                                           *grip-advanced*

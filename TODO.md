@@ -35,8 +35,17 @@ create table.
 Remote file querying via DuckDB httpfs, saved filter presets (gp/gP),
 Grip Table box-drawing export format, Telescope saved queries picker.
 
+### v2.3.0 - Query History & Compact Diff
+Query history with JSONL storage and Telescope search (gh, :GripHistory).
+Auto-records every :Grip query, query pad execution, staged DML, and EXPLAIN.
+Consecutive dedup, password redaction, 500-entry cap.
+
+Compact diff mode for narrow terminals (<120 cols). Stacked key-value layout
+showing PK context + changed columns with old -> new format. Auto-detects
+terminal width, toggle with gv.
+
 ### Ongoing
-- 240 unit tests across 9 spec files
+- 279 unit tests across 11 spec files
 - Adapter-specific type_zoo seeds (PG: 34 types, MySQL: 28 types, DuckDB: 34 types, SQLite: 26 types + coercion row)
 - Committed SQLite test DB (tests/seed_sqlite.db) for zero-setup testing
 - Structural sharing in data.lua, sampled column widths
@@ -50,11 +59,11 @@ Unimplemented ideas from prior research and specs. Not committed to any
 release. Roughly ordered by expected impact.
 
 ### High Value -- Features
-- [ ] Query history with Telescope search (store in `.grip/history.jsonl`, auto-record every `:Grip` and query pad execution, `gH` to browse, dedup, timestamp)
+- [x] Query history with Telescope search (gh, :GripHistory) -- v2.3.0
+- [x] Compact diff mode for narrow terminals (gv toggle) -- v2.3.0
 - [ ] Generate sync SQL from diff (make table A match table B, emit INSERT/UPDATE/DELETE migration from `gD` output)
 - [ ] Import from clipboard/pipe (`gI` in empty grid or `:GripImport`, detect CSV/JSON/TSV, preview before INSERT, map columns)
 - [ ] Row duplication keymap (`yy`-style: duplicate current row as new INSERT with PK cleared)
-- [ ] Compact diff mode for narrow terminals (<120 cols, vertical stacked layout)
 
 ### High Value -- Adapters
 - [ ] MSSQL adapter (sqlcmd CLI, `mssql://` scheme, sys.tables/sys.columns metadata, SET STATISTICS for explain, TOP N pagination, `##temp` table support)

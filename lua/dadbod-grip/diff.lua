@@ -1,5 +1,6 @@
--- diff.lua — data diff engine.
+-- diff.lua -- data diff engine.
 -- Compares two result sets by primary key and renders differences.
+-- Supports wide (columnar) and compact (stacked key-value) modes.
 
 local db   = require("dadbod-grip.db")
 local data = require("dadbod-grip.data")
@@ -116,12 +117,27 @@ local function ensure_diff_highlights()
   end
 end
 
--- ── unified diff rendering ──────────────────────────────────────────────────
+-- ── wide (columnar) diff rendering ──────────────────────────────────────────
 
-local function render_unified(diff_result, left, right, columns)
+--- Shrink column widths proportionally if total exceeds available width.
+local function adjust_widths(widths, columns, avail_width)
+  local overhead = 2 + (#columns - 1) * 3 + 12  -- prefix + separators + suffix
+  local total = overhead
+  for _, col in ipairs(columns) do total = total + widths[col] end
+  if total <= avail_width then return end
+  local content_w = total - overhead
+  local target = avail_width - overhead
+  if target < #columns * 6 then target = #columns * 6 end
+  local ratio = target / content_w
+  for _, col in ipairs(columns) do
+    widths[col] = math.max(6, math.floor(widths[col] * ratio))
+  end
+end
+
+local function render_unified(diff_result, left, right, columns, avail_width)
   local lines = {}
-  local marks = {}  -- {line, start_col, end_col, hl_group}
-  local diff_line_indices = {}  -- lines that are diff rows (for ]c/[c)
+  local marks = {}
+  local diff_line_indices = {}
 
   local function add(s) table.insert(lines, s) end
   local function add_mark(hl, sc, ec)
@@ -139,12 +155,17 @@ local function render_unified(diff_result, left, right, columns)
 
   for _, rows in ipairs({ left.rows, right.rows }) do
     for _, row in ipairs(rows) do
-      for ci, col in ipairs(columns) do
+      for _, col in ipairs(columns) do
         local idx = col_idx_l[col] or col_idx_r[col]
         local v = idx and row[idx] or ""
         widths[col] = math.min(math.max(widths[col], vim.fn.strdisplaywidth(v)), 30)
       end
     end
+  end
+
+  -- Shrink columns if too wide for the terminal
+  if avail_width then
+    adjust_widths(widths, columns, avail_width)
   end
 
   -- Render header
@@ -154,6 +175,9 @@ local function render_unified(diff_result, left, right, columns)
     for _, col in ipairs(columns) do
       local idx = col_idx_map[col]
       local v = idx and row_data[idx] or ""
+      if vim.fn.strdisplaywidth(v) > widths[col] then
+        v = v:sub(1, widths[col] - 1) .. "~"
+      end
       table.insert(parts, pad(v, widths[col]))
     end
     local line = "  " .. table.concat(parts, " | ")
@@ -169,8 +193,6 @@ local function render_unified(diff_result, left, right, columns)
     return "  " .. table.concat(parts, " | ")
   end
 
-  -- Summary
-  local s = diff_result.summary
   add(format_header())
   add("  " .. string.rep("-", #lines[1] - 2))
 
@@ -203,6 +225,97 @@ local function render_unified(diff_result, left, right, columns)
   local same_count = diff_result.summary.same
   if same_count > 0 then
     add("")
+    add("  ... " .. same_count .. " unchanged row(s) hidden")
+  end
+
+  return lines, marks, diff_line_indices
+end
+
+-- ── compact (stacked key-value) diff rendering ──────────────────────────────
+
+local function render_compact(diff_result, left, right, columns)
+  local lines = {}
+  local marks = {}
+  local diff_line_indices = {}
+
+  local col_idx_l, col_idx_r = {}, {}
+  for i, col in ipairs(left.columns) do col_idx_l[col] = i end
+  for i, col in ipairs(right.columns) do col_idx_r[col] = i end
+
+  local function add(s) table.insert(lines, s) end
+  local function add_mark(hl, sc, ec)
+    table.insert(marks, { line = #lines, hl = hl, start_col = sc or 0, end_col = ec or -1 })
+  end
+
+  -- Find max column name width for alignment
+  local max_name_w = 0
+  for _, col in ipairs(columns) do
+    max_name_w = math.max(max_name_w, vim.fn.strdisplaywidth(col))
+  end
+
+  local function pad_name(name)
+    return name .. string.rep(" ", max_name_w - vim.fn.strdisplaywidth(name))
+  end
+
+  -- PK lookup
+  local pk_set = {}
+  for _, pk in ipairs(left.pks) do pk_set[pk] = true end
+
+  -- Changed rows
+  for _, m in ipairs(diff_result.matched) do
+    if m.has_diffs then
+      add("  -- Row (changed) " .. string.rep("-", 30))
+      add_mark("GripDiffSep", 0, -1)
+      table.insert(diff_line_indices, #lines)
+
+      for _, col in ipairs(columns) do
+        local li = col_idx_l[col]
+        local ri = col_idx_r[col]
+        local lv = li and left.rows[m.left_row][li] or ""
+        local rv = ri and right.rows[m.right_row][ri] or ""
+
+        if m.diffs[col] then
+          add("  " .. pad_name(col) .. "  " .. rv .. "  ->  " .. lv)
+          add_mark("GripDiffChanged", 0, -1)
+        elseif pk_set[col] then
+          add("  " .. pad_name(col) .. "  " .. lv)
+        end
+      end
+      add("")
+    end
+  end
+
+  -- Deleted rows (only in left/current)
+  for _, d in ipairs(diff_result.left_only) do
+    add("  -- Row (deleted) " .. string.rep("-", 30))
+    add_mark("GripDiffDeleted", 0, -1)
+    table.insert(diff_line_indices, #lines)
+    for _, col in ipairs(columns) do
+      local li = col_idx_l[col]
+      local v = li and left.rows[d.row][li] or ""
+      add("  " .. pad_name(col) .. "  " .. v)
+      add_mark("GripDiffDeleted", 0, -1)
+    end
+    add("")
+  end
+
+  -- Added rows (only in right)
+  for _, a in ipairs(diff_result.right_only) do
+    add("  -- Row (added) " .. string.rep("-", 30))
+    add_mark("GripDiffAdded", 0, -1)
+    table.insert(diff_line_indices, #lines)
+    for _, col in ipairs(columns) do
+      local ri = col_idx_r[col]
+      local v = ri and right.rows[a.row][ri] or ""
+      add("  " .. pad_name(col) .. "  " .. v)
+      add_mark("GripDiffAdded", 0, -1)
+    end
+    add("")
+  end
+
+  -- Same rows summary
+  local same_count = diff_result.summary.same
+  if same_count > 0 then
     add("  ... " .. same_count .. " unchanged row(s) hidden")
   end
 
@@ -261,11 +374,7 @@ function M.open(left_arg, right_arg, url)
     return
   end
 
-  -- Render
   local columns = left_state.columns
-  local lines, marks, diff_lines = render_unified(diff_result, left_state, right_state, columns)
-
-  -- Add title and summary
   local summary = diff_result.summary
   local title_str = left_arg .. " vs " .. right_arg
   local summary_str = string.format(
@@ -273,12 +382,27 @@ function M.open(left_arg, right_arg, url)
     summary.total, summary.changed, summary.deleted, summary.added
   )
 
-  table.insert(lines, 1, "")
-  table.insert(lines, 1, "  " .. summary_str)
-  table.insert(lines, 1, "  " .. title_str)
-  -- Shift marks and diff_lines by 3 (header lines added)
-  for _, m in ipairs(marks) do m.line = m.line + 3 end
-  for i, dl in ipairs(diff_lines) do diff_lines[i] = dl + 3 end
+  -- Auto-detect mode based on terminal width
+  local use_compact = vim.o.columns < 120
+
+  -- Render function for either mode
+  local function do_render(compact)
+    local r_lines, r_marks, r_diff_lines
+    if compact then
+      r_lines, r_marks, r_diff_lines = render_compact(diff_result, left_state, right_state, columns)
+    else
+      r_lines, r_marks, r_diff_lines = render_unified(diff_result, left_state, right_state, columns, vim.o.columns)
+    end
+    -- Prepend title and summary (3 header lines)
+    table.insert(r_lines, 1, "")
+    table.insert(r_lines, 1, "  " .. summary_str)
+    table.insert(r_lines, 1, "  " .. title_str)
+    for _, m in ipairs(r_marks) do m.line = m.line + 3 end
+    for i, dl in ipairs(r_diff_lines) do r_diff_lines[i] = dl + 3 end
+    return r_lines, r_marks, r_diff_lines
+  end
+
+  local lines, marks, diff_lines = do_render(use_compact)
 
   -- Create buffer
   local bufnr = vim.api.nvim_create_buf(false, true)
@@ -297,12 +421,16 @@ function M.open(left_arg, right_arg, url)
 
   -- Apply highlights
   local ns = vim.api.nvim_create_namespace("grip_diff")
-  for _, m in ipairs(marks) do
-    pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, m.line - 1, m.start_col, {
-      end_col = m.end_col == -1 and #(lines[m.line] or "") or m.end_col,
-      hl_group = m.hl,
-    })
+  local function apply_highlights(hl_lines, hl_marks)
+    vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+    for _, m in ipairs(hl_marks) do
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, m.line - 1, m.start_col, {
+        end_col = m.end_col == -1 and #(hl_lines[m.line] or "") or m.end_col,
+        hl_group = m.hl,
+      })
+    end
   end
+  apply_highlights(lines, marks)
 
   -- Keymaps
   local function map(key, fn, desc)
@@ -338,17 +466,44 @@ function M.open(left_arg, right_arg, url)
     vim.notify("No previous changes", vim.log.levels.INFO)
   end, "Previous change")
 
+  -- gv: toggle between compact and wide mode
+  map("gv", function()
+    use_compact = not use_compact
+    local new_lines, new_marks, new_diff_lines = do_render(use_compact)
+
+    vim.api.nvim_set_option_value("modifiable", true, { buf = bufnr })
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
+    vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
+
+    apply_highlights(new_lines, new_marks)
+
+    -- Update mutable state for navigation
+    diff_lines = new_diff_lines
+    lines = new_lines
+
+    vim.api.nvim_win_set_height(winid, math.min(30, #new_lines + 2))
+
+    local mode_name = use_compact and "compact" or "wide"
+    vim.notify("Diff: " .. mode_name .. " mode", vim.log.levels.INFO)
+  end, "Toggle compact/wide diff")
+
   -- Help
   map("?", function()
     vim.notify(table.concat({
       "Diff: " .. title_str,
       "]c  next change",
       "[c  prev change",
+      "gv  toggle compact/wide",
       "q   close",
     }, "\n"), vim.log.levels.INFO)
   end, "Help")
 
   return bufnr
 end
+
+-- Exposed for testing
+M._render_unified = render_unified
+M._render_compact = render_compact
+M._adjust_widths = adjust_widths
 
 return M

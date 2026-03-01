@@ -119,6 +119,7 @@ Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
 ### Query and Navigation
 - **Sort, filter, and pagination** using `s`/`S` to sort, `f`/`<C-f>`/`F` to filter, `gp`/`gP` for saved filter presets, and `]p`/`[p` to page.
 - **Foreign key navigation** via `gf` to follow a FK to its referenced row, and `<C-o>` to go back.
+- **Query history** via `gh` or `:GripHistory` browsing all executed queries with Telescope search, stored in `.grip/history.jsonl`.
 - **Column statistics** via `gS` showing count, distinct, nulls, min/max, and top values.
 - **Aggregate on selection** via `ga` in visual mode showing count/sum/avg/min/max.
 - **EXPLAIN plan viewer** via `:GripExplain` rendering color-coded query plans.
@@ -129,7 +130,7 @@ Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
 - **SQL query pad** via `:GripQuery` or `gQ` opening a scratch buffer that pipes results into editable grids.
 - **Saved queries** via `:GripSave` and `:GripLoad` persisting to project-local `.grip/queries/` files.
 - **Connection profiles** via `:GripConnect` storing connections in `.grip/connections.json` with `g:dbs` backward compatibility.
-- **Data diff** via `:GripDiff` or `gD` comparing two tables by primary key with color-coded change highlighting.
+- **Data diff** via `:GripDiff` or `gD` comparing two tables by primary key with color-coded change highlighting. Auto-switches to compact layout on narrow terminals (<120 cols), toggle with `gv`.
 
 ### Schema Operations (DDL)
 - **Table properties** via `gI` or `:GripProperties` showing columns, indexes, row count, and table size.
@@ -237,6 +238,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gS` | Column statistics popup |
 | `gx` | Explain current query plan |
 | `gD` | Diff against another table |
+| `gh` | Query history browser |
 | `gE` | Export table (CSV, TSV, JSON, SQL INSERT, Markdown, Grip Table) |
 
 ### Inspection
@@ -263,6 +265,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `go` | Toggle schema browser sidebar |
 | `gT` | Pick table (fuzzy finder) |
 | `gQ` | Open query pad (pre-filled with current query) |
+| `gh` | Query history browser |
 
 ### Advanced
 
@@ -292,11 +295,13 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `:GripQuery [sql]` | Open SQL query pad |
 | `:GripSave [name]` | Save query pad content to `.grip/queries/` |
 | `:GripLoad [name]` | Load a saved query (picker if no name) |
+| `:GripHistory` | Browse query history (telescope/fzf-lua/native) |
 | `:GripConnect [url]` | Switch database connection (picker if no arg) |
 | `:GripExplain [sql]` | Render EXPLAIN plan for current or given query |
 | `:GripProperties [table]` | Show table properties (columns, indexes, stats) |
 | `:GripRename old new` | Rename a column in the current table |
 | `:GripCreate` | Create a new table interactively |
+| `:GripDiff {table1} {table2}` | Compare two tables by PK (compact/wide, toggle `gv`) |
 | `:GripDrop [table]` | Drop a table with typed confirmation |
 
 ## Requirements
@@ -414,7 +419,7 @@ grip.open_smart()
 
 ## Architecture
 
-Seventeen modules with strict boundaries:
+Eighteen modules with strict boundaries:
 
 ```
 init.lua        → Entry point. Commands, callbacks, orchestration.
@@ -433,6 +438,7 @@ filters.lua     → Saved filter presets. .grip/filters.json per table.
 properties.lua  → Table properties float. Columns, indexes, stats, DDL keymaps.
 ddl.lua         → Schema operations. Rename, add/drop column, create/drop table.
 diff.lua        → Data diff engine. PK-matched row comparison with color coding.
+history.lua     → Query history. JSONL storage, recording, 3-tier picker.
 adapters/       → Per-database: postgresql, sqlite, mysql, duckdb.
 ```
 
