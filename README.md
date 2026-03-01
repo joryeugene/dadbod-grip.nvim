@@ -233,7 +233,7 @@ dadbod-grip is a **data editor**, not a viewer. The rest of the ecosystem displa
 
 ### Ecosystem Comparison
 
-| Feature | dadbod-grip | [neosql.nvim](https://github.com/rsdkm/neosql.nvim) | [nvim-dbee](https://github.com/kndndrj/nvim-dbee) | [vim-dadbod-ui](https://github.com/kristijanhusak/vim-dadbod-ui) | [lazysql](https://github.com/jorgerojas26/lazysql) | [nvim-dadbod-bg](https://github.com/napisani/nvim-dadbod-bg) |
+| Feature | dadbod-grip | [neosql.nvim](https://github.com/h4kbas/neosql.nvim) | [nvim-dbee](https://github.com/kndndrj/nvim-dbee) | [vim-dadbod-ui](https://github.com/kristijanhusak/vim-dadbod-ui) | [lazysql](https://github.com/jorgerojas26/lazysql) | [nvim-dadbod-bg](https://github.com/napisani/nvim-dadbod-bg) |
 |---|---|---|---|---|---|---|
 | **Cell editing** | Yes | Yes | No | No | Yes (TUI) | No |
 | **Change staging** | Yes (visual) | Yes | No | No | No | No |
