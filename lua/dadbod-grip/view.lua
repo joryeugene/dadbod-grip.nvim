@@ -2336,6 +2336,17 @@ function M._setup_keymaps(bufnr)
     query_pad.open(s_url, initial_sql and { initial_sql = initial_sql } or nil)
   end, "Open query pad")
 
+  -- gh: query history browser
+  map("gh", function()
+    local hist = require("dadbod-grip.history")
+    local session_h = M._sessions[bufnr]
+    local s_url = session_h and session_h.url
+    hist.pick(function(sql_content)
+      local query_pad = require("dadbod-grip.query_pad")
+      query_pad.open(s_url, { initial_sql = sql_content })
+    end)
+  end, "Query history")
+
   -- ?: help popup
   map("?", function()
     local grip_win = vim.api.nvim_get_current_win()  -- save for restore on close
@@ -2400,6 +2411,7 @@ function M._setup_keymaps(bufnr)
       "  go        Toggle schema browser",
       "  gT        Pick table (fuzzy finder)",
       "  gQ        Open query pad",
+      "  gh        Query history browser",
       "",
       "  Actions",
       "  r         Refresh (re-run query)",

@@ -132,12 +132,16 @@ local function do_apply(bufnr, url)
     return
   end
 
-  -- Success — notify and refresh
+  -- Success — notify, record history, and refresh
   local parts = {}
   if #updates > 0 then table.insert(parts, #updates .. " update(s)") end
   if #deletes > 0 then table.insert(parts, #deletes .. " delete(s)") end
   if #inserts > 0 then table.insert(parts, #inserts .. " insert(s)") end
   vim.notify("Applied " .. table.concat(parts, ", "), vim.log.levels.INFO)
+
+  local history = require("dadbod-grip.history")
+  history.record({ sql = txn_sql, url = url, table_name = st.table_name, type = "dml" })
+
   session.on_refresh(bufnr)
 end
 
@@ -235,6 +239,9 @@ function M.open(arg, url, opts)
   result.table_name = table_name_arg
   result.url = conn
   result.sql = query_sql
+
+  local history = require("dadbod-grip.history")
+  history.record({ sql = query_sql, url = conn, table_name = table_name_arg, type = "query" })
 
   local state = data.new(result)
 
@@ -477,6 +484,9 @@ function M.setup(opts)
       return
     end
 
+    local hist = require("dadbod-grip.history")
+    hist.record({ sql = arg, url = conn, type = "explain" })
+
     -- Render in a float with color coding
     local explain_lines = result.lines
     local explain_buf = vim.api.nvim_create_buf(false, true)
@@ -596,6 +606,19 @@ function M.setup(opts)
   end, {
     nargs = "?",
     desc  = "Load a saved query",
+  })
+
+  -- Register :GripHistory command
+  vim.api.nvim_create_user_command("GripHistory", function()
+    local hist = require("dadbod-grip.history")
+    hist.pick(function(content)
+      local query_pad = require("dadbod-grip.query_pad")
+      local url = db.get_url()
+      query_pad.open(url, { initial_sql = content })
+    end)
+  end, {
+    nargs = 0,
+    desc  = "Browse query history",
   })
 
   -- Register :GripDiff command
