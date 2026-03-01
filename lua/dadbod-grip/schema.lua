@@ -408,7 +408,7 @@ local function setup_keymaps(url)
       " r        Refresh schema",
       " gT       Table picker",
       " gQ       Query pad",
-      " q        Close",
+      " q / Esc  Close",
     }
     vim.notify(table.concat(help, "\n"), vim.log.levels.INFO)
   end)

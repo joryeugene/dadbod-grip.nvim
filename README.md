@@ -183,6 +183,14 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `q` | Close grip buffer |
 | `?` | Show help |
 
+### Query Pad
+
+| Key | Action |
+|-----|--------|
+| `<C-CR>` | Execute buffer into grip grid (normal/insert) |
+| `<C-CR>` | Execute visual selection into grip grid (visual) |
+| `<C-s>` | Save query with `:GripSave` |
+
 ### Commands
 
 | Command | Description |
