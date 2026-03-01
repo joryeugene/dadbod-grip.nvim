@@ -754,4 +754,8 @@ function M.setup(opts)
   })
 end
 
+-- Exposed for testing
+M._is_queryable_file = is_queryable_file
+M._resolve_query = resolve_query
+
 return M

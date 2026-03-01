@@ -236,6 +236,39 @@ end
 
 -- ── create table ────────────────────────────────────────────────────────────
 
+local function build_create_sql(table_name, columns, url, on_done)
+  local col_defs = {}
+  local pk_cols = {}
+
+  for _, col in ipairs(columns) do
+    local def = sql.quote_ident(col.name) .. " " .. col.type
+    table.insert(col_defs, def)
+    if col.pk then
+      table.insert(pk_cols, sql.quote_ident(col.name))
+    end
+  end
+
+  if #pk_cols > 0 then
+    table.insert(col_defs, "PRIMARY KEY (" .. table.concat(pk_cols, ", ") .. ")")
+  end
+
+  local ddl_sql = string.format(
+    "CREATE TABLE %s (\n  %s\n)",
+    sql.quote_ident(table_name),
+    table.concat(col_defs, ",\n  ")
+  )
+
+  confirm_ddl("Create Table", ddl_sql, function()
+    local _, err = db.execute(ddl_sql, url)
+    if err then
+      vim.notify("Create table failed: " .. err, vim.log.levels.ERROR)
+      return
+    end
+    vim.notify("Created table " .. table_name, vim.log.levels.INFO)
+    if on_done then on_done() end
+  end)
+end
+
 function M.create_table(url, on_done)
   vim.ui.input({ prompt = "Table name: " }, function(table_name)
     if not table_name or table_name == "" then return end
@@ -269,37 +302,7 @@ function M.create_table(url, on_done)
   end)
 end
 
-local function build_create_sql(table_name, columns, url, on_done)
-  local col_defs = {}
-  local pk_cols = {}
-
-  for _, col in ipairs(columns) do
-    local def = sql.quote_ident(col.name) .. " " .. col.type
-    table.insert(col_defs, def)
-    if col.pk then
-      table.insert(pk_cols, sql.quote_ident(col.name))
-    end
-  end
-
-  if #pk_cols > 0 then
-    table.insert(col_defs, "PRIMARY KEY (" .. table.concat(pk_cols, ", ") .. ")")
-  end
-
-  local ddl_sql = string.format(
-    "CREATE TABLE %s (\n  %s\n)",
-    sql.quote_ident(table_name),
-    table.concat(col_defs, ",\n  ")
-  )
-
-  confirm_ddl("Create Table", ddl_sql, function()
-    local _, err = db.execute(ddl_sql, url)
-    if err then
-      vim.notify("Create table failed: " .. err, vim.log.levels.ERROR)
-      return
-    end
-    vim.notify("Created table " .. table_name, vim.log.levels.INFO)
-    if on_done then on_done() end
-  end)
-end
+-- Exposed for testing
+M._build_create_sql = build_create_sql
 
 return M

@@ -2394,4 +2394,7 @@ function M.set_callbacks(bufnr, callbacks)
   end
 end
 
+-- Exposed for testing
+M._classify_cell = classify_cell
+
 return M

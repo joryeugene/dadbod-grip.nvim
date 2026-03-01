@@ -433,4 +433,7 @@ function M.execute(sql_str, url)
   return { affected = tonumber(n) or 0, message = n .. " row(s) affected" }, nil
 end
 
+-- Exposed for testing
+M._parse_url = parse_url
+
 return M

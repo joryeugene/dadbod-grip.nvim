@@ -289,4 +289,7 @@ function M.execute(sql_str, url)
   return { affected = n, message = n .. " row(s) affected" }, nil
 end
 
+-- Exposed for testing
+M._extract_path = extract_path
+
 return M
