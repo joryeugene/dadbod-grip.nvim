@@ -19,7 +19,7 @@ lint:
 # Seed PostgreSQL test database
 seed-pg:
     createdb grip_test 2>/dev/null || true
-    psql grip_test < tests/seed.sql
+    psql grip_test < tests/seed_pg.sql
 
 # Seed SQLite test database
 seed-sqlite:
@@ -50,9 +50,8 @@ seed-httpfs:
 # Seed all test databases
 seed-all: seed-pg seed-sqlite seed-mysql seed-duckdb
 
-# Remove test database files
-clean:
-    rm -f tests/seed_sqlite.db tests/seed_duckdb.duckdb
+# Regenerate committed test databases from seed SQL
+reseed: seed-sqlite
 
 # Open Neovim with the plugin loaded from this directory
 dev:

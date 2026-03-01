@@ -1,5 +1,5 @@
--- seed.sql — pathological test fixtures for dadbod-grip.
--- Usage: createdb grip_test && psql grip_test < tests/seed.sql
+-- seed_pg.sql — pathological test fixtures for dadbod-grip (PostgreSQL).
+-- Usage: createdb grip_test && psql grip_test < tests/seed_pg.sql
 --
 -- Covers: CRUD, composite PKs, JSON, unicode, wide tables,
 -- binary data, empty tables, type diversity, long values,

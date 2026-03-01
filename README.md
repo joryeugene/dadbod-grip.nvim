@@ -449,7 +449,7 @@ Design principles:
 
 ```bash
 createdb grip_test
-psql grip_test < tests/seed.sql
+psql grip_test < tests/seed_pg.sql
 ```
 
 ### SQLite
