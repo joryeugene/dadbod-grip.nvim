@@ -1489,6 +1489,80 @@ function M._setup_keymaps(bufnr)
     M.apply_edit(bufnr, new_state)
   end, "Paste into cell")
 
+  -- P: paste multi-line clipboard into consecutive rows (spread down)
+  map("P", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    if session.state.readonly then
+      vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
+      return
+    end
+    local cell = M.get_cell(bufnr)
+    if not cell then
+      vim.notify("Move cursor to a data row", vim.log.levels.INFO)
+      return
+    end
+    local clipboard = vim.fn.getreg("+")
+    if clipboard == "" then
+      vim.notify("Clipboard is empty", vim.log.levels.INFO)
+      return
+    end
+    -- Split clipboard by newlines into values
+    local values = {}
+    for line in (clipboard .. "\n"):gmatch("([^\n]*)\n") do
+      table.insert(values, line)
+    end
+    -- Trim trailing empty entry from final newline
+    if #values > 0 and values[#values] == "" then
+      table.remove(values)
+    end
+    if #values <= 1 then
+      -- Single value: just paste into one cell (same as p)
+      local val = values[1] or clipboard:gsub("\n$", "")
+      local new_state = data.add_change(session.state, cell.row_idx, cell.col_name, val)
+      M.apply_edit(bufnr, new_state)
+      vim.notify(cell.col_name .. " = " .. val:sub(1, 30), vim.log.levels.INFO)
+      return
+    end
+    -- Multiple values: spread into consecutive rows
+    local r = session._render
+    if not r then return end
+    local ds = r.data_start or 4
+    local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
+    local start_order = cursor_line - ds + 1
+    if start_order < 1 then return end
+    local st = session.state
+    local pasted = 0
+    for i, val in ipairs(values) do
+      local order_idx = start_order + i - 1
+      if order_idx > #r.ordered then break end
+      local row_idx = r.ordered[order_idx]
+      st = data.add_change(st, row_idx, cell.col_name, val)
+      pasted = pasted + 1
+    end
+    M.apply_edit(bufnr, st)
+    vim.notify("Pasted " .. pasted .. " values into " .. cell.col_name, vim.log.levels.INFO)
+  end, "Paste multi-line into consecutive rows")
+
+  -- Visual y: yank selected cells in column (newline-separated)
+  vmap("y", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    local cell = M.get_cell(bufnr)
+    if not cell then return end
+    local row_indices = get_visual_rows()
+    if not row_indices or #row_indices == 0 then return end
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+    local values = {}
+    for _, ri in ipairs(row_indices) do
+      local val = data.effective_value(session.state, ri, cell.col_name)
+      table.insert(values, val or "")
+    end
+    local text = table.concat(values, "\n")
+    vim.fn.setreg("+", text)
+    vim.notify("Yanked " .. #values .. " cells from " .. cell.col_name, vim.log.levels.INFO)
+  end, "Yank selected cells in column")
+
   -- gl: toggle live SQL preview float
   map("gl", function()
     local session = M._sessions[bufnr]
@@ -2138,6 +2212,7 @@ function M._setup_keymaps(bufnr)
         "  e         Edit cell under cursor",
         "  n         Set cell to NULL",
         "  p         Paste clipboard into cell",
+        "  P         Paste multi-line into rows",
         "  o         Insert new row after cursor",
         "  d         Toggle delete on current row",
         "  u         Undo last edit (multi-level)",
@@ -2148,6 +2223,7 @@ function M._setup_keymaps(bufnr)
         "  e         Set selected cells to same value",
         "  d         Toggle delete on selected rows",
         "  n         Set selected cells to NULL",
+        "  y         Yank selected cells in column",
         "",
         "  Inspection",
         "  gs        Preview staged SQL",

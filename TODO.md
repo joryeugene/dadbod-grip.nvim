@@ -63,7 +63,7 @@ The single biggest gap in the Neovim database ecosystem. DataGrip, DBeaver, Post
 - [ ] Column hide/show toggle
 - [x] Conditional cell formatting: negatives red, booleans colored, dates dimmed if past, URLs underlined
 - [x] Batch edit: visual select rows, set all selected cells to same value (e/d/n in visual mode)
-- [ ] Copy/paste between cells
+- [x] Copy/paste between cells: visual y yanks column slice, P pastes into consecutive rows
 - [x] Undo history: multi-level undo stack (50 deep), u pops, U resets
 
 ## v2.0.0 - Standalone Workflow - Done

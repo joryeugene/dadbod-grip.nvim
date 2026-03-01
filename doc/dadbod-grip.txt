@@ -176,6 +176,7 @@ EDITING ~
   e               Edit cell under cursor (opens float editor)
   n               Set cell to NULL
   p               Paste clipboard value into cell
+  P               Paste multi-line clipboard into consecutive rows
   o               Insert new blank row after cursor
   d               Toggle delete on current row
   u               Undo last edit (multi-level, pops undo stack)
@@ -187,6 +188,7 @@ BATCH EDITING (visual mode) ~
   e               Set all selected cells in column to same value
   d               Toggle delete on all selected rows
   n               Set all selected cells in column to NULL
+  y               Yank selected cells in column (newline-separated)
 
 SORT / FILTER / PAGINATION ~
                                                        *grip-sort-filter*

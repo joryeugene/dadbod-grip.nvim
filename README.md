@@ -104,6 +104,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `e` | Edit cell under cursor |
 | `n` | Set cell to NULL |
 | `p` | Paste clipboard into cell |
+| `P` | Paste multi-line clipboard into consecutive rows |
 | `o` | Insert new row after cursor |
 | `d` | Toggle delete on current row |
 | `u` | Undo last edit (multi-level) |
@@ -117,6 +118,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `e` | Set all selected cells in column to same value |
 | `d` | Toggle delete on all selected rows |
 | `n` | Set all selected cells in column to NULL |
+| `y` | Yank selected cells in column (newline-separated) |
 
 ### Sort / Filter / Pagination
 
