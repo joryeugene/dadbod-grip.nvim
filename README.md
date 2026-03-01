@@ -455,7 +455,7 @@ psql grip_test < tests/seed.sql
 ### SQLite
 
 ```bash
-sqlite3 tests/grip_test.db < tests/seed_sqlite.sql
+sqlite3 tests/seed_sqlite.db < tests/seed_sqlite.sql
 ```
 
 ### MySQL
@@ -468,10 +468,10 @@ mysql -u root grip_test < tests/seed_mysql.sql
 ### DuckDB
 
 ```bash
-duckdb tests/grip_test.duckdb < tests/seed_duckdb.sql
+duckdb tests/seed_duckdb.duckdb < tests/seed_duckdb.sql
 ```
 
-Test tables cover: normal CRUD, composite PKs, JSON/JSONB, unicode, FK relationships (users → orders → order_items → products), 150+ rows for pagination, and SQL injection attempts. All four seed files have identical table structure for cross-adapter verification.
+The SQLite DB (`tests/seed_sqlite.db`) is committed to the repo for zero-setup testing. Seed files share the same 13 tables + 1 view but each has adapter-specific types in `type_zoo` (e.g. PostgreSQL TSVECTOR/RANGE/MACADDR, MySQL SET/YEAR/GEOMETRY, DuckDB HUGEINT/STRUCT/MAP/UNION, SQLite type affinity coercion).
 
 Open each table with `:Grip <table_name>` and verify rendering, editing, sort/filter/pagination, and FK navigation.
 

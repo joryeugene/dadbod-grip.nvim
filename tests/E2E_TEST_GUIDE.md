@@ -32,10 +32,10 @@ Then work through the checklists below. Each section is independent.
 ### Seed Databases
 
 ```bash
-just seed-sqlite                # -> tests/grip_test.db
+just seed-sqlite                # -> tests/seed_sqlite.db
 just seed-pg                    # -> grip_test database
 just seed-mysql                 # -> grip_test database
-just seed-duckdb                # -> tests/grip_test.duckdb
+just seed-duckdb                # -> tests/seed_duckdb.duckdb
 ```
 
 All seeds create the same 13 tables + 1 view:
@@ -60,10 +60,10 @@ All seeds create the same 13 tables + 1 view:
 
 | DB | URL |
 |----|-----|
-| SQLite | `sqlite:tests/grip_test.db` |
+| SQLite | `sqlite:tests/seed_sqlite.db` |
 | PostgreSQL | `postgresql://localhost/grip_test` |
 | MySQL | `mysql://root@localhost/grip_test` |
-| DuckDB | `duckdb:tests/grip_test.duckdb` |
+| DuckDB | `duckdb:tests/seed_duckdb.duckdb` |
 
 ---
 
@@ -294,7 +294,7 @@ Open a table: `:Grip users`
 
 ## 11. Connection Profiles Checklist
 
-- [ ] `:GripConnect sqlite:tests/grip_test.db` switches connection
+- [ ] `:GripConnect sqlite:tests/seed_sqlite.db` switches connection
 - [ ] `:GripConnect` with no arg opens connection picker
 - [ ] Saved connections persist in `.grip/connections.json`
 - [ ] `vim.g.db` and `g:dbs` are respected as fallbacks
@@ -307,7 +307,7 @@ Run each adapter through the core flow: open table, edit, apply, verify.
 
 ### SQLite
 ```
-:GripConnect sqlite:tests/grip_test.db
+:GripConnect sqlite:tests/seed_sqlite.db
 :Grip users
 ```
 - [ ] Grid renders 15 rows
@@ -340,7 +340,7 @@ Run each adapter through the core flow: open table, edit, apply, verify.
 
 ### DuckDB
 ```
-:GripConnect duckdb:tests/grip_test.duckdb
+:GripConnect duckdb:tests/seed_duckdb.duckdb
 :Grip users
 ```
 - [ ] Grid renders 15 rows

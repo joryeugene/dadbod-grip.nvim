@@ -1,5 +1,5 @@
 -- seed_duckdb.sql — pathological test fixtures for dadbod-grip (DuckDB).
--- Usage: duckdb tests/grip_test.duckdb < tests/seed_duckdb.sql
+-- Usage: duckdb tests/seed_duckdb.duckdb < tests/seed_duckdb.sql
 --
 -- Covers: CRUD, composite PKs, JSON, unicode, wide tables,
 -- binary data, empty tables, type diversity, long values,

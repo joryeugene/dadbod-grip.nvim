@@ -38,7 +38,7 @@ Grip Table box-drawing export format, Telescope saved queries picker.
 ### Ongoing
 - 240 unit tests across 9 spec files
 - Adapter-specific type_zoo seeds (PG: 34 types, MySQL: 28 types, DuckDB: 34 types, SQLite: 26 types + coercion row)
-- Committed SQLite test DB (tests/grip_test.db) for zero-setup testing
+- Committed SQLite test DB (tests/seed_sqlite.db) for zero-setup testing
 - Structural sharing in data.lua, sampled column widths
 - Vimdoc help file (doc/dadbod-grip.txt)
 

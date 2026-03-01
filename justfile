@@ -23,7 +23,7 @@ seed-pg:
 
 # Seed SQLite test database
 seed-sqlite:
-    sqlite3 tests/grip_test.db < tests/seed_sqlite.sql
+    sqlite3 tests/seed_sqlite.db < tests/seed_sqlite.sql
 
 # Seed MySQL test database
 seed-mysql:
@@ -32,8 +32,8 @@ seed-mysql:
 
 # Seed DuckDB test database
 seed-duckdb:
-    rm -f tests/grip_test.duckdb
-    duckdb tests/grip_test.duckdb < tests/seed_duckdb.sql
+    rm -f tests/seed_duckdb.duckdb
+    duckdb tests/seed_duckdb.duckdb < tests/seed_duckdb.sql
 
 # Seed httpfs demo: DuckDB connection + saved queries for remote URLs
 seed-httpfs:
@@ -52,7 +52,7 @@ seed-all: seed-pg seed-sqlite seed-mysql seed-duckdb
 
 # Remove test database files
 clean:
-    rm -f tests/grip_test.db tests/grip_test.duckdb
+    rm -f tests/seed_sqlite.db tests/seed_duckdb.duckdb
 
 # Open Neovim with the plugin loaded from this directory
 dev:
@@ -64,7 +64,7 @@ dev-httpfs: seed-httpfs
 
 # Open Neovim and immediately connect to a SQLite test DB
 dev-sqlite: seed-sqlite
-    nvim --cmd "set rtp^=." -c "lua require('dadbod-grip').setup()" -c "let g:db='sqlite:tests/grip_test.db'"
+    nvim --cmd "set rtp^=." -c "lua require('dadbod-grip').setup()" -c "let g:db='sqlite:tests/seed_sqlite.db'"
 
 # Show git log for the current feature branch
 log:
