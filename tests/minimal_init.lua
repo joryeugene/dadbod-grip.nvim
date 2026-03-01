@@ -1,6 +1,5 @@
--- Minimal init for VHS/testing: loads plugin from repo root
+-- Minimal init for headless testing: loads plugin from repo root
 vim.opt.rtp:prepend(".")
 local lazy_path = vim.fn.stdpath("data") .. "/lazy"
 vim.opt.rtp:prepend(lazy_path .. "/vim-dadbod")
-require("dadbod-grip").setup()
-vim.g.db = "postgresql://localhost/grip_test"
+-- Do not call setup() for pure module tests (avoids needing vim-dadbod)
