@@ -26,36 +26,52 @@
 ## Quickstart
 
 ```lua
--- lazy.nvim — this is all you need:
+-- lazy.nvim
 { "joryeugene/dadbod-grip.nvim", dependencies = { "tpope/vim-dadbod" } }
 ```
 
-Then `:Grip` from any DBUI buffer. That's it.
+Then `:GripConnect` to set your database, `:GripSchema` to browse, and `:Grip` to open a table. Works standalone or alongside vim-dadbod-ui.
 
 ## Features
 
-- **Inline cell editing** with a popup editor, NULL handling, and type-aware display
-- **Immutable state management** with full undo (per-row and global)
-- **Stage changes visually** with color-coded rows (blue=modified, red=deleted, green=inserted)
-- **Pure SQL generation** with preview before apply
-- **Sort, filter, pagination** — `s`/`S` sort, `f`/`<C-f>`/`F` filter, `]p`/`[p` pages
-- **Foreign key navigation** — `gf` follows FK to referenced row, `<C-o>` goes back
-- **Column statistics** — `gS` shows count, distinct, nulls, min/max, top values
-- **Aggregate on selection** — `ga` in visual mode shows count/sum/avg/min/max
-- **Export formats** — `gE` picker: CSV, TSV, JSON, SQL INSERT, Markdown
-- **EXPLAIN plan viewer** — `:GripExplain` renders color-coded query plans
-- **Column pinning** — `1`-`9` freezes leftmost N columns with thick separator, `0` unpins
-- **Conditional formatting** — negatives red, booleans colored, past dates dimmed, URLs underlined
-- **Multi-database** — PostgreSQL, SQLite, MySQL/MariaDB, DuckDB adapters
-- **File-as-table** — `:Grip /path/to/data.parquet` opens Parquet/CSV/JSON/XLSX via DuckDB
-- **Composite primary key support** for multi-column WHERE clauses
-- **Read-only mode** auto-detected when no primary key exists
-- **DBUI integration** via `open_smart()` for seamless two-pane workflow
-- **Live SQL floating preview** (`gl`) shows real-time SQL as you stage changes
-- **Column type annotations** (`T`) overlays type info on headers
-- **Row view transpose** (`K`) vertical column-by-column view of current row
-- **Vim-native grid navigation** (`gg`/`G`/`0`/`$`/`{`/`}`/`p`)
-- **Enterable info floats** with `Esc` dismiss and scroll support
+### Data Editing
+- **Inline cell editing** with a popup editor, NULL handling, and type-aware display.
+- **Visual change staging** with color-coded rows (blue=modified, red=deleted, green=inserted).
+- **Pure SQL generation** with live preview before applying changes.
+- **Transaction safety** wraps all DML in BEGIN/COMMIT with ROLLBACK on error.
+- **Immutable state management** with full undo (per-row and global).
+
+### Query and Navigation
+- **Sort, filter, and pagination** using `s`/`S` to sort, `f`/`<C-f>`/`F` to filter, and `]p`/`[p` to page.
+- **Foreign key navigation** via `gf` to follow a FK to its referenced row, and `<C-o>` to go back.
+- **Column statistics** via `gS` showing count, distinct, nulls, min/max, and top values.
+- **Aggregate on selection** via `ga` in visual mode showing count/sum/avg/min/max.
+- **EXPLAIN plan viewer** via `:GripExplain` rendering color-coded query plans.
+
+### Schema and Workflow
+- **Schema browser** via `:GripSchema` or `go` showing a sidebar tree with columns, types, and PK/FK markers.
+- **Table picker** via `:GripTables` or `gT` providing a fuzzy finder with column preview.
+- **SQL query pad** via `:GripQuery` or `gQ` opening a scratch buffer that pipes results into editable grids.
+- **Saved queries** via `:GripSave` and `:GripLoad` persisting to project-local `.grip/queries/` files.
+- **Connection profiles** via `:GripConnect` storing connections in `.grip/connections.json` with `g:dbs` backward compatibility.
+
+### Display
+- **Column pinning** using `1`-`9` to freeze leftmost N columns with a thick separator, and `0` to unpin.
+- **Conditional formatting** that colors negatives red, booleans green/red, past dates dim, and URLs underlined.
+- **Smart column auto-fit** that distributes extra terminal width to truncated columns.
+- **Export** in 5 formats via `gE`: CSV, TSV, JSON, SQL INSERT, and Markdown.
+
+### Multi-Database
+- **PostgreSQL, SQLite, MySQL/MariaDB, and DuckDB** adapters with adapter-specific metadata queries.
+- **File-as-table** support where `:Grip /path/to/data.parquet` opens Parquet/CSV/JSON/XLSX files via DuckDB.
+
+### Additional
+- **Composite primary key support** for multi-column WHERE clauses.
+- **Read-only mode** is auto-detected when no primary key exists.
+- **DBUI integration** via `open_smart()` is optional since grip works standalone.
+- **Live SQL floating preview** via `gl` shows real-time SQL as you stage changes.
+- **Column type annotations** via `T` overlays type info on headers.
+- **Row view transpose** via `K` shows a vertical column-by-column view of the current row.
 
 ## Keybindings
 
@@ -138,6 +154,14 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `1`-`9` | Pin/freeze N leftmost columns |
 | `0` | Unpin all (or first column if none pinned) |
 
+### Schema & Workflow
+
+| Key | Action |
+|-----|--------|
+| `go` | Toggle schema browser sidebar |
+| `gT` | Pick table (fuzzy finder) |
+| `gQ` | Open query pad (pre-filled with current query) |
+
 ### Advanced
 
 | Key | Action |
@@ -152,7 +176,14 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 
 | Command | Description |
 |---------|-------------|
-| `:GripExplain` | Render EXPLAIN plan for current query or given SQL |
+| `:Grip [table\|SQL\|file]` | Open table, run query, or open file as table |
+| `:GripSchema` | Toggle schema browser sidebar |
+| `:GripTables` | Open table picker (telescope/fzf-lua/native) |
+| `:GripQuery [sql]` | Open SQL query pad |
+| `:GripSave [name]` | Save query pad content to `.grip/queries/` |
+| `:GripLoad [name]` | Load a saved query (picker if no name) |
+| `:GripConnect [url]` | Switch database connection (picker if no arg) |
+| `:GripExplain [sql]` | Render EXPLAIN plan for current or given query |
 
 ## Requirements
 
@@ -172,9 +203,26 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 {
   "joryeugene/dadbod-grip.nvim",
   dependencies = { "tpope/vim-dadbod" },
-  -- Optional: override defaults
-  -- opts = { limit = 100, max_col_width = 40, timeout = 10000 },
+  cmd = { "Grip", "GripSchema", "GripTables", "GripQuery", "GripConnect" },
+  keys = {
+    { "<leader>lg", function() require("dadbod-grip").open_smart() end, desc = "Grip: Open grid" },
+    { "<leader>gs", "<cmd>GripSchema<cr>", desc = "Grip: Schema browser" },
+    { "<leader>gt", "<cmd>GripTables<cr>", desc = "Grip: Table picker" },
+    { "<leader>gq", "<cmd>GripQuery<cr>", desc = "Grip: Query pad" },
+    { "<leader>gc", "<cmd>GripConnect<cr>", desc = "Grip: Connect" },
+  },
+  opts = {},
 }
+```
+
+**Recommended extras:**
+
+```lua
+-- SQL completion in query pad (auto-completes table/column names)
+{ "kristijanhusak/vim-dadbod-completion", ft = { "sql" } }
+
+-- Better picker UX (optional, grip falls back to vim.ui.select)
+{ "nvim-telescope/telescope.nvim" }  -- or { "ibhagwan/fzf-lua" }
 ```
 
 ### packer.nvim
@@ -206,31 +254,32 @@ vim.keymap.set("n", "<leader>lg", "<cmd>Grip<cr>", { desc = "Open Grip grid" })
 
 ## Usage
 
-### Commands
+### Standalone Workflow (no DBUI needed)
 
-| Command | Description |
-|---------|-------------|
-| `:Grip` | Smart open: detects DBUI context or uses word under cursor |
-| `:Grip users` | Open a specific table |
-| `:Grip SELECT * FROM users WHERE active` | Run arbitrary SQL |
-| `:Grip /path/to/data.parquet` | Open file as table via DuckDB (Parquet, CSV, JSON, XLSX) |
-| `:GripExplain` | Show EXPLAIN plan for current grid's query |
-| `:GripExplain SELECT ...` | Show EXPLAIN plan for arbitrary SQL |
-
-### DBUI Integration
-
-For the best experience with [vim-dadbod-ui](https://github.com/kristijanhusak/vim-dadbod-ui), use `open_smart()`:
-
-```lua
-vim.keymap.set("n", "<leader>lg", function()
-  require("dadbod-grip").open_smart()
-end, { desc = "Grip: open table grid" })
+```
+:GripConnect                   → pick or add a database connection
+:GripSchema  (or go in grid)   → browse tables with columns + types
+:GripTables  (or gT in grid)   → fuzzy-pick a table → opens grid
+:GripQuery   (or gQ in grid)   → open SQL scratch pad → C-CR runs → grid
+:GripSave name                 → save query to .grip/queries/
+:GripLoad                      → pick and load a saved query
 ```
 
-`open_smart()` detects three contexts:
+### Quick Examples
 
-1. **DBUI SQL buffer** (`b:dbui_table_name` set): opens that table, reuses the dbout window
-2. **dbout result buffer** (`b:db` is a dict): traces back to the source table name
+```
+:Grip users                           → open table in editable grid
+:Grip SELECT * FROM orders LIMIT 50   → run arbitrary SQL
+:Grip /path/to/data.parquet           → open file via DuckDB
+:GripExplain                          → EXPLAIN current query
+```
+
+### DBUI Integration (optional)
+
+If you also use [vim-dadbod-ui](https://github.com/kristijanhusak/vim-dadbod-ui), `open_smart()` detects DBUI context:
+
+1. **DBUI SQL buffer**: opens that table, reuses the dbout window
+2. **dbout result buffer**: traces back to the source table name
 3. **Normal buffer**: uses the word under cursor as a table name
 
 ### Public API
@@ -250,24 +299,30 @@ grip.open_smart()
 
 ## Architecture
 
-Nine modules with strict boundaries:
+Fourteen modules with strict boundaries:
 
 ```
-init.lua    → Entry point. Parses args, wires callbacks, orchestrates modules.
-view.lua    → Buffer rendering, keymaps, highlights. One buffer per session.
-editor.lua  → Float cell editor. Minimal: one purpose, no state leaked.
-data.lua    → Immutable state transforms. All functions: state in, state out.
-query.lua   → Pure query composition. Spec (value) → SQL string. No I/O.
-db.lua      → I/O boundary + adapter dispatch. Delegates to adapters by URL scheme.
-sql.lua     → Pure SQL generation. No DB calls, no state, pure string builders.
-adapters/   → Per-database implementations (postgresql, sqlite, mysql, duckdb).
+init.lua       → Entry point. Commands, callbacks, orchestration.
+view.lua       → Buffer rendering, keymaps, highlights. One buffer per session.
+editor.lua     → Float cell editor. One purpose, no state leaked.
+data.lua       → Immutable state transforms. State in, state out.
+query.lua      → Pure query composition. Spec (value) → SQL string.
+db.lua         → I/O boundary + adapter dispatch by URL scheme.
+sql.lua        → Pure SQL generation. No DB calls, no state.
+schema.lua     → Sidebar tree browser. Tables, columns, PK/FK markers.
+picker.lua     → Table picker. Telescope → fzf-lua → vim.ui.select.
+query_pad.lua  → SQL scratch buffer → grip grid results.
+saved.lua      → Query persistence in .grip/queries/*.sql.
+connections.lua → Connection profiles. .grip/connections.json + g:dbs.
+adapters/      → Per-database: postgresql, sqlite, mysql, duckdb.
 ```
 
 Design principles:
 - **Immutable state**: `data.lua` never mutates. Every operation returns a new state table.
 - **Query as value**: `query.lua` treats query specs as plain Lua tables composed by pure functions.
 - **I/O at the boundary**: Only `db.lua` and adapters run shell commands. Everything else is pure.
-- **Adapter pattern**: URL scheme → adapter module. Each adapter implements query, execute, get_primary_keys, get_column_info, get_foreign_keys, and explain.
+- **Adapter pattern**: URL scheme → adapter module. Each adapter implements query, execute, get_primary_keys, get_column_info, get_foreign_keys, list_tables, and explain.
+- **Transaction safety**: Apply wraps all DML in BEGIN/COMMIT with ROLLBACK on error.
 
 ## Testing
 
@@ -301,34 +356,47 @@ Test tables cover: normal CRUD, composite PKs, JSON/JSONB, unicode, FK relations
 
 Open each table with `:Grip <table_name>` and verify rendering, editing, sort/filter/pagination, and FK navigation.
 
-## Related
+## Ecosystem
 
-- [vim-dadbod](https://github.com/tpope/vim-dadbod) — Database adapter layer (`:DB` command, connection URLs, raw query output)
-- [vim-dadbod-ui](https://github.com/kristijanhusak/vim-dadbod-ui) — Sidebar tree browser, saved queries, two-pane SQL workflow
-- [nvim-dadbod-bg](https://github.com/napisani/nvim-dadbod-bg) — Browser-based result viewer (Go webserver + React UI)
+### Required
 
-dadbod-grip is a **data editor**, not a viewer. The rest of the ecosystem displays query results as read-only text. Grip lets you edit cells, stage changes, preview the SQL, and apply it back to the database.
+- **[vim-dadbod](https://github.com/tpope/vim-dadbod)** provides the database adapter layer (`:DB` command, connection URLs).
 
-### Ecosystem Comparison
+### Recommended
 
-| Feature | dadbod-grip | [neosql.nvim](https://github.com/h4kbas/neosql.nvim) | [nvim-dbee](https://github.com/kndndrj/nvim-dbee) | [vim-dadbod-ui](https://github.com/kristijanhusak/vim-dadbod-ui) | [lazysql](https://github.com/jorgerojas26/lazysql) | [nvim-dadbod-bg](https://github.com/napisani/nvim-dadbod-bg) |
-|---|---|---|---|---|---|---|
-| **Cell editing** | Yes | Yes | No | No | Yes (TUI) | No |
-| **Change staging** | Yes (visual) | Yes | No | No | No | No |
-| **SQL preview** | Yes (live) | No | No | No | No | No |
-| **Sort/filter** | Yes | No | No | No | Yes (TUI) | No |
-| **Pagination** | Yes | No | No | No | Yes (TUI) | No |
-| **FK navigation** | Yes | No | No | No | No | No |
-| **Column stats** | Yes | No | No | No | No | No |
-| **EXPLAIN viewer** | Yes | No | No | No | No | No |
-| **Export formats** | 5 formats | No | No | No | CSV | No |
-| **Grid view** | Unicode box | Markdown table | Columnar | Raw text | TUI grid | React table |
-| **Column pinning** | Yes (1-9) | No | No | No | No | No |
-| **Cell formatting** | Yes (auto) | No | No | No | No | No |
-| **File-as-table** | Yes (DuckDB) | No | No | No | No | No |
-| **Multi-DB** | PG, SQLite, MySQL, DuckDB | PG only | Yes (Go) | Yes (dadbod) | 3 DBs | Yes (dadbod) |
-| **Backend** | Pure Lua | Lua | Go binary | Vimscript | Go TUI | Go + React |
-| **Dependencies** | vim-dadbod | psql | None | vim-dadbod | lazysql | vim-dadbod |
+- **[vim-dadbod-completion](https://github.com/kristijanhusak/vim-dadbod-completion)** adds SQL table and column completion in the query pad.
+- **[telescope.nvim](https://github.com/nvim-telescope/telescope.nvim)** or **[fzf-lua](https://github.com/ibhagwan/fzf-lua)** for better fuzzy picker UX in `:GripTables` and `:GripLoad`.
+
+### Other tools in the ecosystem
+
+- [vim-dadbod-ui](https://github.com/kristijanhusak/vim-dadbod-ui) is a sidebar tree browser with saved queries and two-pane SQL workflow. Optional since grip has its own schema browser and query pad.
+- [nvim-dadbod-bg](https://github.com/napisani/nvim-dadbod-bg) is a browser-based result viewer built with Go and React.
+- [neosql.nvim](https://github.com/h4kbas/neosql.nvim) is a Lua-based cell editor for PostgreSQL only.
+- [nvim-dbee](https://github.com/kndndrj/nvim-dbee) uses a Go binary backend with columnar display.
+- [lazysql](https://github.com/jorgerojas26/lazysql) is a standalone Go TUI database client.
+
+### Comparison
+
+| Feature | dadbod-grip | neosql.nvim | nvim-dbee | vim-dadbod-ui | lazysql |
+|---|---|---|---|---|---|
+| **Cell editing** | Yes | Yes | No | No | Yes (TUI) |
+| **Change staging** | Yes (visual) | Yes | No | No | No |
+| **SQL preview** | Yes (live) | No | No | No | No |
+| **Sort/filter** | Yes | No | No | No | Yes (TUI) |
+| **FK navigation** | Yes | No | No | No | No |
+| **Schema browser** | Yes (columns+types) | No | No | Yes (names only) | Yes |
+| **Query pad** | Yes (→ grid) | No | No | Yes (→ text) | Yes |
+| **Saved queries** | Yes | No | No | Yes | No |
+| **Connections** | Yes | No | No | Yes | Yes |
+| **Column stats** | Yes | No | No | No | No |
+| **EXPLAIN** | Yes (colored) | No | No | No | No |
+| **Export** | 5 formats | No | No | No | CSV |
+| **Column pinning** | Yes (1-9) | No | No | No | No |
+| **Cell formatting** | Yes (auto) | No | No | No | No |
+| **File-as-table** | Yes (DuckDB) | No | No | No | No |
+| **Transactions** | Yes (atomic) | No | No | No | No |
+| **Multi-DB** | PG, SQLite, MySQL, DuckDB | PG only | Yes (Go) | Yes (dadbod) | 3 DBs |
+| **Backend** | Pure Lua | Lua | Go binary | Vimscript | Go TUI |
 
 ## License
 

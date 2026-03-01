@@ -1,6 +1,6 @@
-# dadbod-grip.nvim — Roadmap
+# dadbod-grip.nvim - Roadmap
 
-## v1.0.0 — Done
+## v1.0.0 - Done
 
 - [x] DataGrip-style editable data grids with box-drawing UI
 - [x] Inline cell editing via float editor (e, CR to save, Esc cancel)
@@ -19,69 +19,73 @@
 - [x] NULL handling with sentinel values
 - [x] Help popup (?) with ASCII art
 
-## v1.1.0 — Multi-Database — Done
+## v1.1.0 - Multi-Database - Done
 
 - [x] Adapter system (db.lua facade + adapters/ registry)
 - [x] SQLite adapter (sqlite3 CLI, PRAGMA metadata, changes())
 - [x] RFC 4180 CSV parser (multiline quoted fields)
 - [x] Multiline cell display (↵ indicator)
-- [x] SQLite test fixtures (seed_sqlite.sql — mirrors PG seed)
+- [x] SQLite test fixtures (seed_sqlite.sql, mirrors PG seed)
 - [x] DuckDB adapter (duckdb CLI, information_schema, parquet/csv queries)
   - [x] File-as-table querying: `:Grip /path/to/data.parquet` (CSV, JSON, Parquet, Excel via DuckDB)
 - [x] MySQL/MariaDB adapter (mysql CLI, information_schema)
 - [x] MySQL test fixtures (seed_mysql.sql)
 - [x] DuckDB test fixtures (seed_duckdb.sql)
 
-## v1.2.0 — Sort, Filter, Paginate — Done
+## v1.2.0 - Sort, Filter, Paginate - Done
 
 Low complexity, high impact. Every desktop GUI has these; no Neovim plugin does.
 
-- [x] Sort by column — `s` toggles ASC/DESC/off, re-runs query with ORDER BY
-- [x] Stacked sort — `S` adds secondary sort column
-- [x] Quick filter — `f` on a cell to filter by "column = this value"
-- [x] Filter rows — `<C-f>` opens freeform WHERE clause input
-- [x] Clear filter — `F` removes filter and refreshes
-- [x] Pagination — `]p`/`[p` next/prev page, status line shows "Page 1 of N"
-- [x] Search within grid — `/` native vim search works on rendered buffer
-- [x] Query composition module (query.lua) — pure functions, spec → SQL
+- [x] Sort by column: `s` toggles ASC/DESC/off, re-runs query with ORDER BY
+- [x] Stacked sort: `S` adds secondary sort column
+- [x] Quick filter: `f` on a cell to filter by "column = this value"
+- [x] Filter rows: `<C-f>` opens freeform WHERE clause input
+- [x] Clear filter: `F` removes filter and refreshes
+- [x] Pagination: `]p`/`[p` next/prev page, status line shows "Page 1 of N"
+- [x] Search within grid: `/` native vim search works on rendered buffer
+- [x] Query composition module (query.lua) with pure functions, spec to SQL
 
-## v1.3.0 — Foreign Key Navigation & Data Intelligence — Done
+## v1.3.0 - Foreign Key Navigation & Data Intelligence - Done
 
 The single biggest gap in the Neovim database ecosystem. DataGrip, DBeaver, Postico, TablePlus all have FK navigation.
 
-- [x] FK navigation — `gf` on a FK cell opens referenced row in new grid
+- [x] FK navigation: `gf` on a FK cell opens referenced row in new grid
 - [x] FK metadata query per adapter (information_schema / PRAGMA foreign_key_list)
 - [x] Navigation stack with `<C-o>` to go back, breadcrumb in title bar
-- [x] Aggregate on selection — `ga` in visual mode shows count/sum/avg/min/max
-- [x] Column statistics — `gS` on a column for count, distinct, nulls, min/max, top values (validated by MotherDuck's Column Explorer)
-- [x] Additional export formats — `gE` picker: CSV, TSV, JSON, SQL INSERT, Markdown
+- [x] Aggregate on selection: `ga` in visual mode shows count/sum/avg/min/max
+- [x] Column statistics: `gS` on a column for count, distinct, nulls, min/max, top values
+- [x] Additional export formats: `gE` picker for CSV, TSV, JSON, SQL INSERT, Markdown
 
-## v1.4.0 — Grid Enhancements
+## v1.4.0 - Grid Enhancements
 
-- [x] Column pinning/freezing — number keys (1-9) to freeze N leftmost columns (pspg-style)
-- [ ] Column resize / auto-fit
+- [x] Column pinning/freezing: number keys (1-9) to freeze N leftmost columns (pspg-style)
+- [x] Smart column auto-fit: distributes extra terminal width to truncated columns
 - [ ] Column hide/show toggle
-- [x] Conditional cell formatting — negatives red, booleans colored, dates dimmed if past, URLs underlined
-- [ ] Batch edit — visual block select, set all selected cells to same value
+- [x] Conditional cell formatting: negatives red, booleans colored, dates dimmed if past, URLs underlined
+- [ ] Batch edit: visual block select, set all selected cells to same value
 - [ ] Copy/paste between cells
 - [ ] Undo history (multi-level, not just per-row)
 
-## v2.0.0 — Advanced Features
+## v2.0.0 - Standalone Workflow - Done
 
-- [x] EXPLAIN plan viewer — `:GripExplain` renders query plan as color-coded tree
-- [ ] Data diff — `:GripDiff` opens two grids side-by-side with diff highlighting
-- [ ] Transaction wrapper — BEGIN/COMMIT/ROLLBACK around staged changes
-- [ ] Telescope/fzf picker for tables and columns
-- [ ] Schema browser (tree view of tables/views/indexes)
-- [ ] Saved filters/queries per table (`:GripSave`/`:GripLoad`)
-- [ ] Connection profiles (project-level saved connections)
+Makes vim-dadbod-ui optional. grip + vim-dadbod = complete DB workflow.
 
-## Future — Schema Operations (DDL)
+- [x] EXPLAIN plan viewer: `:GripExplain` renders query plan as color-coded tree
+- [x] Transaction wrapper: BEGIN/COMMIT/ROLLBACK around staged changes (atomic apply)
+- [x] Schema browser: `:GripSchema` / `go` sidebar tree with columns, types, PK/FK markers
+- [x] Table picker: `:GripTables` / `gT` telescope/fzf-lua/native fuzzy picker with column preview
+- [x] SQL query pad: `:GripQuery` / `gQ` scratch buffer into grip grid results
+- [x] Saved queries: `:GripSave` / `:GripLoad` persists to .grip/queries/*.sql
+- [x] Connection profiles: `:GripConnect` with .grip/connections.json + g:dbs compat
+- [x] list_tables() adapter method for all 4 databases
+- [ ] Data diff: `:GripDiff` opens two grids side-by-side with diff highlighting
+
+## Future - Schema Operations (DDL)
 
 - [ ] Table properties view (columns, types, constraints, defaults)
 - [ ] Column rename (ALTER TABLE ... RENAME COLUMN)
 - [ ] Column add/drop with type/nullable/default
-- [ ] Edit column properties — adapter-aware DDL generation
+- [ ] Edit column properties with adapter-aware DDL generation
 - [ ] Create/drop table with confirmation
 
 ## Ongoing
