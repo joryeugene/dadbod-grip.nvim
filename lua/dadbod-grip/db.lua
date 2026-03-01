@@ -15,7 +15,7 @@ function M.get_url(url)
   if type(buf_url) == "string" and buf_url ~= "" then return buf_url end
   local global_url = vim.g.db
   if type(global_url) == "string" and global_url ~= "" then return global_url end
-  return nil, "No database connection. Open DBUI first or set vim.g.db."
+  return nil, "No database connection. Use :GripConnect or set vim.g.db."
 end
 
 --- Parse CSV output into rows + columns.
@@ -166,6 +166,13 @@ function M.get_foreign_keys(table_name, url)
   if not adapter then return {}, err end
   if not adapter.get_foreign_keys then return {}, "Adapter does not support FK lookup" end
   return adapter.get_foreign_keys(table_name, conn)
+end
+
+function M.list_tables(url)
+  local adapter, conn, err = resolve(url)
+  if not adapter then return nil, err end
+  if not adapter.list_tables then return nil, "Adapter does not support list_tables" end
+  return adapter.list_tables(conn)
 end
 
 function M.explain(sql_str, url)

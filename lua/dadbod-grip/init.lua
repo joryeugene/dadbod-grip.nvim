@@ -219,7 +219,7 @@ function M.open(arg, url, opts)
   end
 
   if not conn or conn == "" then
-    vim.notify("Grip: no database connection. Open DBUI first or set vim.g.db.", vim.log.levels.WARN)
+    vim.notify("Grip: no database connection. Use :GripConnect or set vim.g.db.", vim.log.levels.WARN)
     return
   end
 
@@ -531,6 +531,102 @@ function M.setup(opts)
   end, {
     nargs = "?",
     desc  = "Show EXPLAIN plan for a query",
+  })
+
+  -- Register :GripSchema command
+  vim.api.nvim_create_user_command("GripSchema", function()
+    local schema = require("dadbod-grip.schema")
+    schema.toggle()
+  end, {
+    nargs = 0,
+    desc  = "Toggle schema browser sidebar",
+  })
+
+  -- Register :GripTables command
+  vim.api.nvim_create_user_command("GripTables", function()
+    local picker = require("dadbod-grip.picker")
+    local url = db.get_url()
+    if not url then
+      vim.notify("Grip: no database connection. Use :GripConnect or set vim.g.db.", vim.log.levels.WARN)
+      return
+    end
+    picker.pick_table(url, function(name) M.open(name, url) end)
+  end, {
+    nargs = 0,
+    desc  = "Open table picker",
+  })
+
+  -- Register :GripQuery command
+  vim.api.nvim_create_user_command("GripQuery", function(cmd_opts)
+    local query_pad = require("dadbod-grip.query_pad")
+    local url = db.get_url()
+    local initial = vim.trim(cmd_opts.args or "")
+    query_pad.open(url, initial ~= "" and { initial_sql = initial } or nil)
+  end, {
+    nargs = "?",
+    desc  = "Open SQL query pad",
+  })
+
+  -- Register :GripSave command
+  vim.api.nvim_create_user_command("GripSave", function(cmd_opts)
+    local saved = require("dadbod-grip.saved")
+    local name = vim.trim(cmd_opts.args or "")
+    if name == "" then
+      local bufnr = vim.api.nvim_get_current_buf()
+      saved.save_prompt(bufnr)
+    else
+      local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+      saved.save(name, table.concat(lines, "\n"))
+    end
+  end, {
+    nargs = "?",
+    desc  = "Save current query",
+  })
+
+  -- Register :GripLoad command
+  vim.api.nvim_create_user_command("GripLoad", function(cmd_opts)
+    local saved = require("dadbod-grip.saved")
+    local name = vim.trim(cmd_opts.args or "")
+    if name ~= "" then
+      local content = saved.load(name)
+      if content then
+        local query_pad = require("dadbod-grip.query_pad")
+        local url = db.get_url()
+        query_pad.open(url, { initial_sql = content })
+      end
+    else
+      saved.pick(function(content)
+        local query_pad = require("dadbod-grip.query_pad")
+        local url = db.get_url()
+        query_pad.open(url, { initial_sql = content })
+      end)
+    end
+  end, {
+    nargs = "?",
+    desc  = "Load a saved query",
+  })
+
+  -- Register :GripConnect command
+  vim.api.nvim_create_user_command("GripConnect", function(cmd_opts)
+    local connections = require("dadbod-grip.connections")
+    local arg = vim.trim(cmd_opts.args or "")
+    if arg ~= "" then
+      -- Direct URL or name
+      local conns = connections.list()
+      for _, c in ipairs(conns) do
+        if c.name == arg then
+          connections.switch(c.url, c.name)
+          return
+        end
+      end
+      -- Treat as URL
+      connections.switch(arg)
+    else
+      connections.pick()
+    end
+  end, {
+    nargs = "?",
+    desc  = "Switch database connection",
   })
 end
 

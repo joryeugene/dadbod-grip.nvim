@@ -306,6 +306,29 @@ function M.explain(sql_str, url)
   return { lines = lines }, nil
 end
 
+function M.list_tables(url)
+  local parsed = parse_url(url)
+  if not parsed then return nil, "Invalid MySQL URL: " .. url end
+  local sql_str = [[
+    SELECT table_name,
+      CASE table_type WHEN 'BASE TABLE' THEN 'table' ELSE 'view' END AS table_type
+    FROM information_schema.tables
+    WHERE table_schema = DATABASE()
+    ORDER BY table_type DESC, table_name
+  ]]
+  local stdout, stderr, code = mysql_query(parsed, sql_str)
+  if code ~= 0 then
+    return nil, stderr ~= "" and stderr or "Failed to list tables"
+  end
+  local result_csv = db_util.parse_csv(stdout)
+  if not result_csv then return nil, "Failed to parse table list" end
+  local result = {}
+  for _, row in ipairs(result_csv.rows) do
+    table.insert(result, { name = row[1] or "", type = row[2] or "table" })
+  end
+  return result, nil
+end
+
 function M.execute(sql_str, url)
   if vim.fn.executable("mysql") == 0 then
     return nil, "mysql not found. Install mysql-client."

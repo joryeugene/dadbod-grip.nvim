@@ -1898,6 +1898,34 @@ function M._setup_keymaps(bufnr)
     vim.cmd("GripExplain " .. explain_sql)
   end, "Explain current query")
 
+  -- go: toggle schema sidebar
+  map("go", function()
+    local schema = require("dadbod-grip.schema")
+    schema.toggle(url)
+  end, "Toggle schema browser")
+
+  -- gT: table picker
+  map("gT", function()
+    local picker = require("dadbod-grip.picker")
+    picker.pick_table(url, function(name)
+      local grip = require("dadbod-grip")
+      grip.open(name, url)
+    end)
+  end, "Pick table")
+
+  -- gQ: open query pad with current query pre-filled
+  map("gQ", function()
+    local query_pad = require("dadbod-grip.query_pad")
+    local session_q = M._sessions[bufnr]
+    local initial_sql
+    if session_q and session_q.query_spec then
+      initial_sql = qmod.build_sql(session_q.query_spec)
+    elseif session_q and session_q.query_sql then
+      initial_sql = session_q.query_sql
+    end
+    query_pad.open(url, initial_sql and { initial_sql = initial_sql } or nil)
+  end, "Open query pad")
+
   -- ?: help popup
   map("?", function()
     local grip_win = vim.api.nvim_get_current_win()  -- save for restore on close
@@ -1951,6 +1979,11 @@ function M._setup_keymaps(bufnr)
       "  gS        Column statistics popup",
       "  gx        Explain current query plan",
       "  gE        Export table (CSV, JSON, SQL, Markdown)",
+      "",
+      "  Schema & Workflow",
+      "  go        Toggle schema browser",
+      "  gT        Pick table (fuzzy finder)",
+      "  gQ        Open query pad",
       "",
       "  Actions",
       "  r         Refresh (re-run query)",

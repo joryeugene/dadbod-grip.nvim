@@ -163,6 +163,27 @@ function M.explain(sql_str, url)
   return { lines = lines }, nil
 end
 
+function M.list_tables(url)
+  local db_path = extract_path(url)
+  if not db_path then return nil, "Invalid SQLite URL: " .. url end
+  local sql_str = [[
+    SELECT name, type FROM sqlite_master
+    WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'
+    ORDER BY type DESC, name
+  ]]
+  local stdout, stderr, code = sqlite3(db_path, sql_str)
+  if code ~= 0 then
+    return nil, stderr ~= "" and stderr or "Failed to list tables"
+  end
+  local parsed = db_util.parse_csv(stdout)
+  if not parsed then return nil, "Failed to parse table list" end
+  local result = {}
+  for _, row in ipairs(parsed.rows) do
+    table.insert(result, { name = row[1] or "", type = row[2] or "table" })
+  end
+  return result, nil
+end
+
 function M.execute(sql_str, url)
   if vim.fn.executable("sqlite3") == 0 then
     return nil, "sqlite3 not found. Install sqlite."
