@@ -32,6 +32,80 @@
 
 Then `:GripConnect` to set your database, `:GripSchema` to browse, and `:Grip` to open a table. Works standalone or alongside vim-dadbod-ui.
 
+## What it looks like
+
+### Editable data grid with staged changes
+
+```
+╔═ users [3 staged] ══════════════════════════════════════════╗
+║ id   │ name          │ email                │ age ▲         ║
+╠══════╪═══════════════╪══════════════════════╪═══════════════╣
+║ 1    │ alice         │ alice@example.com    │ 30            ║
+║ 2    │ bob_updated   │ bob@example.com      │ ·NULL·        ║
+║ +    │ carol         │ carol@example.com    │ 28            ║
+║ ×    │ dave          │ dave@example.com     │ 55            ║
+╚══════╧═══════════════╧══════════════════════╧═══════════════╝
+ Page 1/3 (75 rows)  │  3 staged  │  sorted: age ASC
+ e:edit  o:insert  d:delete  a:apply  u:undo  r:refresh  ?:help
+```
+
+`bob_updated` = modified (blue), `+` = inserted (green), `×` = deleted (red), `·NULL·` = null (dim)
+
+### Schema browser sidebar with grid
+
+```
+ mydb                ╔═ orders ═════════════════════════════╗
+                     ║ id │ customer  │ total    │ status   ║
+ Tables (5)          ╠════╪═══════════╪══════════╪══════════╣
+ ▶ customers         ║ 1  │ Alice     │  99.50   │ active   ║
+ ▼ orders            ║ 2  │ Bob       │ -12.00   │ pending  ║
+   🔑 id       int   ║ 3  │ Carol     │ 250.00   │ active   ║
+   🔗 cust_id  int   ╚════╧═══════════╧══════════╧══════════╝
+ ▶ products           Page 1/2  │  filter: status='active'
+```
+
+Left: schema sidebar with PK/FK markers. Right: filtered grid. `-12.00` = negative (red).
+
+### Foreign key navigation breadcrumb trail
+
+```
+╔═ users > orders > items ═══════════════════════════════════╗
+║ id │ order_id │ product    │ qty │ price                   ║
+╠════╪══════════╪════════════╪═════╪═════════════════════════╣
+║ 1  │ 42       │ Widget     │ 3   │  9.99                   ║
+║ 2  │ 42       │ Gadget     │ 1   │ 24.50                   ║
+╚════╧══════════╧════════════╧═════╧═════════════════════════╝
+ 2 rows  │  read-only: no PK
+ gf:follow FK  <C-o>:go back  q:close
+```
+
+Title bar shows the full navigation path. `gf` on any FK cell drills into the referenced table.
+
+### Table properties float
+
+```
+╭────────────── Table Properties ──────────────╮
+│                                              │
+│  Table: users     Rows: ~12.5K  Size: 2.3MB  │
+│                                              │
+│  Columns                                     │
+│  # Name       Type         Null Default      │
+│  ─────────────────────────────────────────── │
+│  1 id         integer      NO           PK   │
+│  2 name       varchar(50)  NO                │
+│  3 email      varchar(255) YES               │
+│  4 org_id     integer      YES          FK   │
+│                                              │
+│  Primary Key: (id)                           │
+│  Foreign Keys: org_id -> orgs(id)            │
+│  Indexes: users_pkey ... PRIMARY (id)        │
+│                                              │
+│  q:close  R:rename  +:add  x:drop            │
+╰──────────────────────────────────────────────╯
+```
+
+Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
+
 ## Features
 
 ### Data Editing
