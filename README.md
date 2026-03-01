@@ -239,7 +239,6 @@ dadbod-grip is a **data editor**, not a viewer. The rest of the ecosystem displa
 | **Change staging** | Yes (visual) | Yes | No | No | No | No |
 | **SQL preview** | Yes (live) | No | No | No | No | No |
 | **Grid view** | Unicode box | Markdown table | Columnar | Raw text | TUI grid | React table |
-| **Sidebar tree** | No | No | Yes | Yes | No | No |
 | **Multi-DB** | PG only | PG only | Yes (Go) | Yes (dadbod) | 3 DBs | Yes (dadbod) |
 | **Backend** | Pure Lua | Lua | Go binary | Vimscript | Go TUI | Go + React |
 | **Dependencies** | vim-dadbod | psql | None | vim-dadbod | lazysql | vim-dadbod |
