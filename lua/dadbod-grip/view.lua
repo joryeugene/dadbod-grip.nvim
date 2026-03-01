@@ -967,7 +967,7 @@ function M._setup_keymaps(bufnr)
 
   -- ── visual mode batch editing ──────────────────────────────────────────
   local function vmap(key, fn, desc)
-    vim.keymap.set("v", key, fn, { buffer = bufnr, desc = desc, nowait = true })
+    vim.keymap.set("x", key, fn, { buffer = bufnr, desc = desc, nowait = true })
   end
 
   -- Helper: collect row indices from visual selection
