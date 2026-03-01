@@ -4,7 +4,7 @@
 # Default recipe: run tests
 default: test
 
-# Run all unit tests (104 specs across 4 modules)
+# Run all unit tests (197 specs across 8 modules)
 test:
     nvim --headless -u tests/minimal_init.lua -l tests/run_specs.lua
 

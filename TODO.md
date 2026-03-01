@@ -1,95 +1,60 @@
-# dadbod-grip.nvim - Roadmap
+# dadbod-grip.nvim
 
-## v1.0.0 - Done
+## Released
 
-- [x] DataGrip-style editable data grids with box-drawing UI
-- [x] Inline cell editing via float editor (e, CR to save, Esc cancel)
-- [x] Visual change staging (modified=blue, deleted=red, inserted=green)
-- [x] Live SQL preview (gs=preview, gc=copy, gl=live toggle)
-- [x] Immutable state management (deep_copy on every transition)
-- [x] PostgreSQL support (psql CLI)
-- [x] DBUI integration (smart context detection from query/dbout buffers)
-- [x] Composite primary key support
-- [x] Read-only auto-detection (views, no-PK tables)
-- [x] Row view transpose (K), column type annotations (T)
-- [x] CSV export (y=cell, Y=row, gY=table)
-- [x] Cell explain (ge), table info (gi)
-- [x] Paste (p), undo (u/U), insert (o), delete (d), apply (a)
-- [x] Full navigation: j/k/h/l/w/b/Tab/S-Tab/gg/G/0/^/$/{/}
-- [x] NULL handling with sentinel values
-- [x] Help popup (?) with ASCII art
+### v1.0.0 - Editable Data Grids
+DataGrip-style grids with box-drawing UI, inline cell editing, visual change
+staging, live SQL preview, PostgreSQL support, DBUI integration, composite PK
+support, read-only auto-detection, navigation, CSV export, undo, help popup.
 
-## v1.1.0 - Multi-Database - Done
+### v1.1.0 - Multi-Database
+Adapter system with SQLite, DuckDB, MySQL/MariaDB adapters. RFC 4180 CSV
+parser. DuckDB file-as-table querying (`:Grip /path/to/data.parquet`).
 
-- [x] Adapter system (db.lua facade + adapters/ registry)
-- [x] SQLite adapter (sqlite3 CLI, PRAGMA metadata, changes())
-- [x] RFC 4180 CSV parser (multiline quoted fields)
-- [x] Multiline cell display (↵ indicator)
-- [x] SQLite test fixtures (seed_sqlite.sql, mirrors PG seed)
-- [x] DuckDB adapter (duckdb CLI, information_schema, parquet/csv queries)
-  - [x] File-as-table querying: `:Grip /path/to/data.parquet` (CSV, JSON, Parquet, Excel via DuckDB)
-- [x] MySQL/MariaDB adapter (mysql CLI, information_schema)
-- [x] MySQL test fixtures (seed_mysql.sql)
-- [x] DuckDB test fixtures (seed_duckdb.sql)
+### v1.2.0 - Sort, Filter, Paginate
+Column sort (s/S), quick filter (f), freeform WHERE (C-f), clear filter (F),
+pagination (]p/[p), query composition module.
 
-## v1.2.0 - Sort, Filter, Paginate - Done
+### v1.3.0 - FK Navigation & Data Intelligence
+FK navigation (gf) with breadcrumb trail and back stack (C-o). Aggregate on
+selection (ga), column statistics (gS), multi-format export (gE).
 
-Low complexity, high impact. Every desktop GUI has these; no Neovim plugin does.
+### v1.4.0 - Grid Enhancements
+Column pinning (1-9/0), auto-fit, column hide/show (-/g-/gH), conditional
+cell formatting, batch edit, visual copy/paste, multi-level undo (50 deep).
 
-- [x] Sort by column: `s` toggles ASC/DESC/off, re-runs query with ORDER BY
-- [x] Stacked sort: `S` adds secondary sort column
-- [x] Quick filter: `f` on a cell to filter by "column = this value"
-- [x] Filter rows: `<C-f>` opens freeform WHERE clause input
-- [x] Clear filter: `F` removes filter and refreshes
-- [x] Pagination: `]p`/`[p` next/prev page, status line shows "Page 1 of N"
-- [x] Search within grid: `/` native vim search works on rendered buffer
-- [x] Query composition module (query.lua) with pure functions, spec to SQL
+### v2.0.0 - Standalone Workflow
+EXPLAIN viewer, transaction wrapper, schema browser (go), table picker (gT),
+query pad (gQ), saved queries, connection profiles, data diff (gD).
 
-## v1.3.0 - Foreign Key Navigation & Data Intelligence - Done
+### v3.0.0 - Schema Operations (DDL)
+Table properties (gI), column rename (R), column add/drop (+/x), drop table,
+create table.
 
-The single biggest gap in the Neovim database ecosystem. DataGrip, DBeaver, Postico, TablePlus all have FK navigation.
+### Ongoing
+- 197 unit tests across 8 spec files
+- Structural sharing in data.lua, sampled column widths
+- Vimdoc help file (doc/dadbod-grip.txt)
 
-- [x] FK navigation: `gf` on a FK cell opens referenced row in new grid
-- [x] FK metadata query per adapter (information_schema / PRAGMA foreign_key_list)
-- [x] Navigation stack with `<C-o>` to go back, breadcrumb in title bar
-- [x] Aggregate on selection: `ga` in visual mode shows count/sum/avg/min/max
-- [x] Column statistics: `gS` on a column for count, distinct, nulls, min/max, top values
-- [x] Additional export formats: `gE` picker for CSV, TSV, JSON, SQL INSERT, Markdown
+---
 
-## v1.4.0 - Grid Enhancements - Done
+## Ideas Backlog
 
-- [x] Column pinning/freezing: number keys (1-9) to freeze N leftmost columns (pspg-style)
-- [x] Smart column auto-fit: distributes extra terminal width to truncated columns
-- [x] Column hide/show toggle: `-` hide, `g-` restore, `gH` picker
-- [x] Conditional cell formatting: negatives red, booleans colored, dates dimmed if past, URLs underlined
-- [x] Batch edit: visual select rows, set all selected cells to same value (e/d/n in visual mode)
-- [x] Copy/paste between cells: visual y yanks column slice, P pastes into consecutive rows
-- [x] Undo history: multi-level undo stack (50 deep), u pops, U resets
+Unimplemented ideas from prior research and specs. Not committed to any
+release. Roughly ordered by expected impact.
 
-## v2.0.0 - Standalone Workflow - Done
+### High Value
+- [ ] Remote file querying via DuckDB httpfs: `:Grip https://example.com/data.csv`
+- [ ] Generate sync SQL from diff (make table A match table B)
+- [ ] Saved filter presets per table (named WHERE clauses)
+- [ ] Compact diff mode for narrow terminals (<120 cols)
 
-Makes vim-dadbod-ui optional. grip + vim-dadbod = complete DB workflow.
-
-- [x] EXPLAIN plan viewer: `:GripExplain` renders query plan as color-coded tree
-- [x] Transaction wrapper: BEGIN/COMMIT/ROLLBACK around staged changes (atomic apply)
-- [x] Schema browser: `:GripSchema` / `go` sidebar tree with columns, types, PK/FK markers
-- [x] Table picker: `:GripTables` / `gT` telescope/fzf-lua/native fuzzy picker with column preview
-- [x] SQL query pad: `:GripQuery` / `gQ` scratch buffer into grip grid results
-- [x] Saved queries: `:GripSave` / `:GripLoad` persists to .grip/queries/*.sql
-- [x] Connection profiles: `:GripConnect` with .grip/connections.json + g:dbs compat
-- [x] list_tables() adapter method for all 4 databases
-- [x] Data diff: `:GripDiff` / `gD` compares tables with PK-matched row highlighting
-
-## v3.0.0 - Schema Operations (DDL) - Done
-
-- [x] Table properties view: `gI` / `:GripProperties` float with columns, indexes, stats
-- [x] Column rename: R in properties view, `:GripRename` command
-- [x] Column add/drop: + and x in properties view with DDL preview
-- [x] Drop table: `:GripDrop` with typed confirmation and CASCADE awareness
-- [x] Create table: `:GripCreate` interactive column designer
-
-## Ongoing
-
-- [x] Automated tests: 104 unit tests across 4 spec files, GitHub Actions CI
-- [x] Performance: structural sharing in data.lua, sampled column widths, profiling
-- [x] Documentation: vimdoc help file (doc/dadbod-grip.txt)
+### Exploration
+- [ ] Turso/libSQL adapter compatibility testing
+- [ ] Neon database branching integration (`:GripBranch`)
+- [ ] MSSQL adapter (sqlcmd CLI)
+- [ ] Column reordering via drag or keymap
+- [ ] Row duplication keymap (yy-style for grid rows)
+- [ ] Inline column resize with +/- on header
+- [ ] Export to clipboard as markdown table
+- [ ] Telescope integration for saved queries picker
