@@ -246,43 +246,103 @@ CREATE TABLE empty_table (
 );
 
 -- ── type_zoo ─────────────────────────────────────────────────────────────
--- boolean, integer, bigint, decimal, real, date, time, timestamptz,
--- interval, uuid, varchar (inet), array, enum
+-- DuckDB-specific: BOOLEAN, TINYINT through HUGEINT, UINTEGER variants,
+-- DOUBLE, DECIMAL, DATE, TIME, TIMETZ, TIMESTAMP variants (S/MS/NS),
+-- INTERVAL, UUID, BLOB, BIT, ENUM, JSON, LIST, STRUCT, MAP, UNION
 CREATE TYPE mood AS ENUM ('happy', 'sad', 'neutral');
 
 CREATE TABLE type_zoo (
-  id           INTEGER PRIMARY KEY,
-  flag         BOOLEAN,
-  small_num    INTEGER,
-  big_num      BIGINT,
-  precise_num  DECIMAL(10,4),
-  approx_num   REAL,
-  day          DATE,
-  tod          TIME,
-  moment       TIMESTAMPTZ,
-  duration     INTERVAL,
-  guid         UUID,
-  ip_addr      VARCHAR(45),
-  int_list     INTEGER[],
-  txt_list     TEXT[],
-  feeling      mood
+  id              INTEGER PRIMARY KEY,
+  -- booleans and integers (all sizes)
+  flag            BOOLEAN,
+  tiny_num        TINYINT,
+  small_num       SMALLINT,
+  regular_num     INTEGER,
+  big_num         BIGINT,
+  huge_num        HUGEINT,
+  -- unsigned integers
+  utiny_num       UTINYINT,
+  usmall_num      USMALLINT,
+  uregular_num    UINTEGER,
+  ubig_num        UBIGINT,
+  -- decimals
+  precise_num     DECIMAL(10,4),
+  approx_float    REAL,
+  approx_double   DOUBLE,
+  -- date/time
+  day             DATE,
+  tod             TIME,
+  tod_tz          TIMETZ,
+  moment          TIMESTAMPTZ,
+  moment_s        TIMESTAMP_S,
+  moment_ms       TIMESTAMP_MS,
+  moment_ns       TIMESTAMP_NS,
+  duration        INTERVAL,
+  -- identifiers
+  guid            UUID,
+  -- binary
+  raw_bytes       BLOB,
+  bits            BIT,
+  -- enum
+  feeling         mood,
+  -- json
+  doc_json        JSON,
+  -- nested types
+  int_list        INTEGER[],
+  txt_list        TEXT[],
+  nested_list     INTEGER[][],
+  record          STRUCT(name VARCHAR, age INTEGER),
+  kv_map          MAP(VARCHAR, INTEGER),
+  flexible        UNION(num INTEGER, str VARCHAR, flag BOOLEAN),
+  -- ip (stored as VARCHAR, DuckDB has no native INET)
+  ip_addr         VARCHAR(45)
 );
 
-INSERT INTO type_zoo (id, flag, small_num, big_num, precise_num, approx_num,
-                      day, tod, moment, duration, guid, ip_addr,
-                      int_list, txt_list, feeling) VALUES
-  (1, TRUE,  42,     9223372036854775807, 3.1416, 2.718,
-      '2025-01-15', '14:30:00', '2025-01-15 14:30:00+00', INTERVAL '2 hours 30 minutes',
-      'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '192.168.1.1',
-      [1, 2, 3], ['hello', 'world'], 'happy'),
-  (2, FALSE, -1,     0,                   0.0001, -0.5,
-      '1970-01-01', '00:00:00', '1970-01-01 00:00:00+00', INTERVAL '0 seconds',
-      '00000000-0000-0000-0000-000000000000', '::1',
-      [], [], 'sad'),
-  (3, NULL,  NULL,   NULL,                NULL,   NULL,
-      NULL,         NULL,       NULL,                      NULL,
-      NULL,                                                NULL,
-      NULL, NULL, NULL);
+INSERT INTO type_zoo (
+  id, flag, tiny_num, small_num, regular_num, big_num, huge_num,
+  utiny_num, usmall_num, uregular_num, ubig_num,
+  precise_num, approx_float, approx_double,
+  day, tod, tod_tz, moment, moment_s, moment_ms, moment_ns, duration,
+  guid, raw_bytes, bits, feeling, doc_json,
+  int_list, txt_list, nested_list, record, kv_map, flexible, ip_addr
+) VALUES
+  -- row 1: typical values
+  (1, TRUE, 127, 32767, 42, 9223372036854775807,
+      170141183460469231731687303715884105727::HUGEINT,
+   255, 65535, 4294967295, 18446744073709551615::UBIGINT,
+   3.1416, 2.718, 1.7976931348623157e+308,
+   '2025-01-15', '14:30:00', '14:30:00+05:30',
+   '2025-01-15 14:30:00+00', '2025-01-15 14:30:00', '2025-01-15 14:30:00',
+   '2025-01-15 14:30:00', INTERVAL '2 hours 30 minutes',
+   'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+   '\x48656c6c6f'::BLOB, '10101010'::BIT,
+   'happy', '{"key": "value", "list": [1,2,3]}',
+   [1, 2, 3], ['hello', 'world'], [[1,2],[3,4]],
+   {'name': 'Alice', 'age': 30}, MAP {'a': 1, 'b': 2},
+   1::UNION(num INTEGER, str VARCHAR, flag BOOLEAN),
+   '192.168.1.1'),
+  -- row 2: edge/boundary values
+  (2, FALSE, -128, -32768, -1, 0,
+      -170141183460469231731687303715884105727::HUGEINT,
+   0, 0, 0, 0::UBIGINT,
+   0.0001, -0.5, -1.0e-307,
+   '1970-01-01', '00:00:00', '00:00:00+00',
+   '1970-01-01 00:00:00+00', '1970-01-01 00:00:00', '1970-01-01 00:00:00',
+   '1970-01-01 00:00:00', INTERVAL '0 seconds',
+   '00000000-0000-0000-0000-000000000000',
+   '\x00'::BLOB, '0'::BIT,
+   'sad', '[]',
+   [], [], [[]],
+   {'name': '', 'age': 0}, MAP {},
+   'empty'::UNION(num INTEGER, str VARCHAR, flag BOOLEAN),
+   '::1'),
+  -- row 3: all NULLs
+  (3, NULL, NULL, NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL,
+   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
 -- ── long_values ──────────────────────────────────────────────────────────
 -- Cells with 500+ char strings, multiline text, SQL injection attempts

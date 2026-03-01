@@ -1,5 +1,5 @@
 -- seed_sqlite.sql — pathological test fixtures for dadbod-grip (SQLite).
--- Usage: sqlite3 ~/tmp/dev.db < tests/seed_sqlite.sql
+-- Usage: sqlite3 tests/grip_test.db < tests/seed_sqlite.sql
 --
 -- Mirrors tests/seed.sql (PostgreSQL) as closely as SQLite allows.
 -- Covers: CRUD, composite PKs, JSON, unicode, wide tables,
@@ -247,41 +247,83 @@ CREATE TABLE empty_table (
 );
 
 -- ── type_zoo ─────────────────────────────────────────────────────────────
--- SQLite has dynamic typing (INTEGER, TEXT, REAL, BLOB, NULL)
--- but we use column affinities that mirror the PG schema
+-- SQLite-specific: dynamic typing with 5 storage classes (NULL, INTEGER,
+-- REAL, TEXT, BLOB). Declared column types control affinity but do not
+-- constrain values. This table tests affinity edge cases, type coercion,
+-- CHECK constraints, and values stored in non-obvious affinities.
 CREATE TABLE type_zoo (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  flag         INTEGER,
-  small_num    INTEGER,
-  big_num      INTEGER,
-  precise_num  REAL,
-  approx_num   REAL,
-  day          TEXT,
-  tod          TEXT,
-  moment       TEXT,
-  duration     TEXT,
-  guid         TEXT,
-  ip_addr      TEXT,
-  int_list     TEXT,
-  txt_list     TEXT,
-  feeling      TEXT
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- INTEGER affinity
+  flag           INTEGER,                           -- boolean as 0/1
+  tiny_num       TINYINT,                           -- affinity: INTEGER
+  small_num      SMALLINT,                          -- affinity: INTEGER
+  medium_num     MEDIUMINT,                         -- affinity: INTEGER
+  big_num        BIGINT,                            -- affinity: INTEGER
+  unsigned_num   UNSIGNED BIG INT,                  -- affinity: INTEGER
+  -- REAL affinity
+  precise_num    NUMERIC(10,4),                     -- affinity: NUMERIC
+  approx_num     REAL,
+  double_num     DOUBLE PRECISION,                  -- affinity: REAL
+  float_num      FLOAT,                             -- affinity: REAL
+  -- TEXT affinity
+  day            DATE,                              -- affinity: NUMERIC (stored as TEXT)
+  tod            TIME,                              -- affinity: NUMERIC (stored as TEXT)
+  moment         DATETIME,                          -- affinity: NUMERIC (stored as TEXT)
+  guid           TEXT,
+  ip_addr        TEXT,
+  feeling        TEXT CHECK(feeling IN ('happy','sad','neutral')),
+  json_val       TEXT,                              -- JSON stored as TEXT
+  -- BLOB affinity
+  raw_bytes      BLOB,
+  -- NONE affinity (no declared type)
+  untyped        ,                                  -- truly dynamic, no affinity
+  -- exotic declared types (affinity rules)
+  varchar_col    VARCHAR(255),                      -- affinity: TEXT
+  nchar_col      NCHAR(50),                         -- affinity: TEXT
+  clob_col       CLOB,                              -- affinity: TEXT
+  native_char    CHARACTER(20),                     -- affinity: TEXT
+  bool_col       BOOLEAN,                           -- affinity: NUMERIC
+  decimal_col    DECIMAL(10,2)                      -- affinity: NUMERIC
 );
 
-INSERT INTO type_zoo (flag, small_num, big_num, precise_num, approx_num,
-                      day, tod, moment, duration, guid, ip_addr,
-                      int_list, txt_list, feeling) VALUES
-  (1,    42,     9223372036854775807, 3.1416, 2.718,
-   '2025-01-15', '14:30:00', '2025-01-15T14:30:00+00:00', '2 hours 30 minutes',
+INSERT INTO type_zoo (
+  flag, tiny_num, small_num, medium_num, big_num, unsigned_num,
+  precise_num, approx_num, double_num, float_num,
+  day, tod, moment, guid, ip_addr, feeling, json_val,
+  raw_bytes, untyped,
+  varchar_col, nchar_col, clob_col, native_char, bool_col, decimal_col
+) VALUES
+  -- row 1: typical values, all within affinity expectations
+  (1, 127, 32767, 8388607, 9223372036854775807, 4294967295,
+   3.1416, 2.718, 1.7976931e+308, 0.1,
+   '2025-01-15', '14:30:00', '2025-01-15T14:30:00+00:00',
    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '192.168.1.1',
-   '[1, 2, 3]', '["hello", "world"]', 'happy'),
-  (0,    -1,     0,                   0.0001, -0.5,
-   '1970-01-01', '00:00:00', '1970-01-01T00:00:00+00:00', '0 seconds',
+   'happy', '{"key": "value", "list": [1,2,3]}',
+   X'48656c6c6f', 'anything goes',
+   'hello world', 'fixed width', 'large text block', 'char type', 1, 19.99),
+  -- row 2: edge/boundary values, type coercion tests
+  (0, -128, -32768, 0, 0, 0,
+   0.0001, -0.5, -1.0e-307, -0.0,
+   '1970-01-01', '00:00:00', '1970-01-01T00:00:00+00:00',
    '00000000-0000-0000-0000-000000000000', '::1',
-   '[]', '[]', 'sad'),
-  (NULL, NULL,   NULL,                NULL,   NULL,
-   NULL,         NULL,       NULL,                         NULL,
-   NULL,                                                   NULL,
-   NULL, NULL, NULL);
+   'sad', '[]',
+   X'00', 42,
+   '', '', '', '', 0, 0.00),
+  -- row 3: text stored in INTEGER column (SQLite allows this)
+  (NULL, NULL, NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL, NULL, NULL,
+   NULL, NULL,
+   NULL, NULL,
+   NULL, NULL, NULL, NULL, NULL, NULL),
+  -- row 4: type coercion oddities (SQLite does not enforce types)
+  ('yes', 'not a number', 3.14, 'text in int', -9223372036854775808, 18446744073709551615,
+   'not a number', 'text in real', 'also text', 'still text',
+   12345, 67890, 99999,
+   12345, 67890,
+   'neutral', 'plain text not json',
+   X'89504e470d0a1a0a', X'DEADBEEF',
+   12345, 67890, 99999, 0, 'maybe', 'free text');
 
 -- ── long_values ──────────────────────────────────────────────────────────
 -- Cells with 500+ char strings, multiline text, SQL injection attempts

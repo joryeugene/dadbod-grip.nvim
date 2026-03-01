@@ -43,18 +43,18 @@ All seeds create the same 13 tables + 1 view:
 | Table | Rows | Tests |
 |-------|------|-------|
 | `users` | 15 | CRUD, sort, filter, FK parent |
-| `products` | 10 | FK parent for orders |
-| `orders` | 12 | FK middle, references users and products |
-| `order_items` | 20 | FK leaf, composite PK |
-| `composite_pk` | 5 | Two-column PK editing |
-| `json_data` | 5 | JSON/JSONB cell display |
-| `unicode_fun` | 5 | Multibyte characters, emoji |
-| `wide_table` | 10 | 15+ columns, horizontal scroll |
+| `products` | 20 | FK parent for orders |
+| `orders` | 150 | FK middle, pagination (2 pages at 100/page) |
+| `order_items` | 300 | FK leaf, multi-level FK navigation |
+| `composite_pk` | 4 | Two-column PK editing |
+| `json_data` | 4 | JSON/JSONB cell display |
+| `unicode_fun` | 7 | Multibyte characters, emoji, RTL, math symbols |
+| `wide_table` | 2 | 15+ columns, horizontal scroll |
 | `binary_blobs` | 3 | Binary display, read-only cells |
 | `empty_table` | 0 | Empty state rendering |
-| `type_zoo` | 5 | Every data type the adapter supports |
-| `long_values` | 5 | Truncation, cell expand |
-| `no_pk_view` | 15 | Read-only mode (view, no PK) |
+| `type_zoo` | 3 (4 SQLite) | Adapter-specific types; SQLite has extra type coercion row |
+| `long_values` | 6 | Truncation, cell expand, SQL injection strings |
+| `no_pk_view` | 13 | Read-only mode (view, no PK, filters NULL ages) |
 
 ### Connection URLs
 
@@ -169,7 +169,7 @@ Open a table: `:Grip users`
 - [ ] `y` yanks cell value to clipboard
 - [ ] `Y` yanks row as CSV
 - [ ] `gY` yanks entire table as CSV
-- [ ] `gE` opens export format picker (CSV, TSV, JSON, SQL INSERT, Markdown)
+- [ ] `gE` opens export format picker (CSV, TSV, JSON, SQL INSERT, Markdown, Grip Table)
 
 ### Inspection
 - [ ] `gs` shows staged SQL preview in float

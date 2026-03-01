@@ -2,5 +2,3 @@
 *.swp
 *.swo
 .grip/
-tests/grip_test.db
-tests/grip_test.duckdb

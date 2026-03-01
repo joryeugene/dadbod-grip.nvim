@@ -240,43 +240,102 @@ CREATE TABLE empty_table (
 );
 
 -- ── type_zoo ─────────────────────────────────────────────────────────────
--- boolean, integer, bigint, numeric, real, date, time, timestamptz,
--- interval, uuid, inet, array, enum
+-- PostgreSQL-specific: boolean, integer, bigint, numeric, real, double,
+-- smallint, date, time, timetz, timestamptz, interval, uuid, inet, cidr,
+-- macaddr, array, enum, json, jsonb, bytea, bit, varbit, money, xml,
+-- tsvector, tsquery, int4range, tstzrange, point, line, box, citext
 CREATE TYPE mood AS ENUM ('happy', 'sad', 'neutral');
 
 CREATE TABLE type_zoo (
-  id           SERIAL PRIMARY KEY,
-  flag         BOOLEAN,
-  small_num    INTEGER,
-  big_num      BIGINT,
-  precise_num  NUMERIC(10,4),
-  approx_num   REAL,
-  day          DATE,
-  tod          TIME,
-  moment       TIMESTAMPTZ,
-  duration     INTERVAL,
-  guid         UUID,
-  ip_addr      INET,
-  int_list     INTEGER[],
-  txt_list     TEXT[],
-  feeling      mood
+  id            SERIAL PRIMARY KEY,
+  -- booleans and integers
+  flag          BOOLEAN,
+  tiny_num      SMALLINT,
+  small_num     INTEGER,
+  big_num       BIGINT,
+  -- decimals
+  precise_num   NUMERIC(10,4),
+  approx_num    REAL,
+  double_num    DOUBLE PRECISION,
+  money_val     MONEY,
+  -- date/time
+  day           DATE,
+  tod           TIME,
+  tod_tz        TIMETZ,
+  moment        TIMESTAMPTZ,
+  duration      INTERVAL,
+  -- identifiers
+  guid          UUID,
+  -- network
+  ip_addr       INET,
+  network       CIDR,
+  mac           MACADDR,
+  -- arrays
+  int_list      INTEGER[],
+  txt_list      TEXT[],
+  -- enum
+  feeling       mood,
+  -- json
+  doc_json      JSON,
+  doc_jsonb     JSONB,
+  -- binary
+  raw_bytes     BYTEA,
+  -- bit strings
+  bits_fixed    BIT(8),
+  bits_var      VARBIT(16),
+  -- full-text search
+  tsv           TSVECTOR,
+  tsq           TSQUERY,
+  -- range
+  int_range     INT4RANGE,
+  ts_range      TSTZRANGE,
+  -- geometric
+  pt            POINT,
+  ln            LINE,
+  bx            BOX,
+  -- xml
+  markup        XML
 );
 
-INSERT INTO type_zoo (flag, small_num, big_num, precise_num, approx_num,
-                      day, tod, moment, duration, guid, ip_addr,
-                      int_list, txt_list, feeling) VALUES
-  (TRUE,  42,     9223372036854775807, 3.1416, 2.718,
-   '2025-01-15', '14:30:00', '2025-01-15 14:30:00+00', '2 hours 30 minutes',
-   'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '192.168.1.1',
-   '{1, 2, 3}', '{"hello", "world"}', 'happy'),
-  (FALSE, -1,     0,                   0.0001, -0.5,
-   '1970-01-01', '00:00:00', '1970-01-01 00:00:00+00', '0 seconds',
-   '00000000-0000-0000-0000-000000000000', '::1',
-   '{}', '{}', 'sad'),
-  (NULL,  NULL,   NULL,                NULL,   NULL,
-   NULL,         NULL,       NULL,                      NULL,
-   NULL,                                                NULL,
-   NULL, NULL, NULL);
+INSERT INTO type_zoo (
+  flag, tiny_num, small_num, big_num, precise_num, approx_num, double_num, money_val,
+  day, tod, tod_tz, moment, duration, guid,
+  ip_addr, network, mac, int_list, txt_list, feeling,
+  doc_json, doc_jsonb, raw_bytes, bits_fixed, bits_var,
+  tsv, tsq, int_range, ts_range, pt, ln, bx, markup
+) VALUES
+  -- row 1: typical values
+  (TRUE, 127, 42, 9223372036854775807, 3.1416, 2.718, 1.7976931e+308, '$19.99',
+   '2025-01-15', '14:30:00', '14:30:00+05:30', '2025-01-15 14:30:00+00',
+   '2 hours 30 minutes',
+   'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+   '192.168.1.1', '10.0.0.0/8', '08:00:2b:01:02:03',
+   '{1, 2, 3}', '{"hello", "world"}', 'happy',
+   '{"key": "value"}', '{"nested": {"deep": true}}',
+   '\x48656c6c6f', B'10101010', B'110011',
+   'fat:1 cat:2 sat:3'::tsvector, 'fat & cat'::tsquery,
+   '[1,10)', '[2025-01-01 00:00:00+00, 2025-12-31 23:59:59+00]',
+   '(1.5, 2.5)', '{1, -1, 0}', '(0,0),(1,1)',
+   '<root><item id="1">hello</item></root>'),
+  -- row 2: edge/boundary values
+  (FALSE, -128, -1, 0, 0.0001, -0.5, -1.0e-307, '$0.00',
+   '1970-01-01', '00:00:00', '00:00:00+00', '1970-01-01 00:00:00+00',
+   '0 seconds',
+   '00000000-0000-0000-0000-000000000000',
+   '::1', '::1/128', '00:00:00:00:00:00',
+   '{}', '{}', 'sad',
+   '{}', '[]',
+   '\x00', B'00000000', B'0',
+   ''::tsvector, 'a | b'::tsquery,
+   'empty', 'empty',
+   '(0, 0)', '{0, 0, 0}', '(0,0),(0,0)',
+   '<empty/>'),
+  -- row 3: all NULLs
+  (NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
 -- ── long_values ──────────────────────────────────────────────────────────
 -- Cells with 500+ char strings, multiline text, SQL injection attempts

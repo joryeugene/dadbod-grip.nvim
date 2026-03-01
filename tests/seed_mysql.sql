@@ -246,41 +246,88 @@ CREATE TABLE "empty_table" (
 );
 
 -- ── type_zoo ─────────────────────────────────────────────────────────────
--- boolean, integer, bigint, decimal, float, date, time, timestamp,
--- interval (varchar), uuid (char), json (arrays), enum
+-- MySQL/MariaDB-specific: TINYINT(1) boolean, all integer sizes (signed
+-- and unsigned), DOUBLE vs FLOAT, DECIMAL, YEAR, all text sizes
+-- (TINYTEXT to LONGTEXT), BINARY/VARBINARY, ENUM, SET, JSON, DATETIME
+-- vs TIMESTAMP, BIT, GEOMETRY (POINT)
 CREATE TABLE "type_zoo" (
-  "id"           INT AUTO_INCREMENT PRIMARY KEY,
-  "flag"         TINYINT(1),
-  "small_num"    INT,
-  "big_num"      BIGINT,
-  "precise_num"  DECIMAL(10,4),
-  "approx_num"   FLOAT,
-  "day"          DATE,
-  "tod"          TIME,
-  "moment"       TIMESTAMP NULL,
-  "duration"     VARCHAR(100),
-  "guid"         CHAR(36),
-  "ip_addr"      VARCHAR(45),
-  "int_list"     JSON,
-  "txt_list"     JSON,
-  "feeling"      ENUM('happy', 'sad', 'neutral')
+  "id"              INT AUTO_INCREMENT PRIMARY KEY,
+  -- boolean (MySQL convention)
+  "flag"            TINYINT(1),
+  -- integer sizes (signed)
+  "tiny_num"        TINYINT,
+  "small_num"       SMALLINT,
+  "medium_num"      MEDIUMINT,
+  "regular_num"     INT,
+  "big_num"         BIGINT,
+  -- integer sizes (unsigned)
+  "tiny_unsigned"   TINYINT UNSIGNED,
+  "big_unsigned"    BIGINT UNSIGNED,
+  -- decimals
+  "precise_num"     DECIMAL(10,4),
+  "approx_float"    FLOAT,
+  "approx_double"   DOUBLE,
+  -- date/time
+  "day"             DATE,
+  "tod"             TIME,
+  "moment_ts"       TIMESTAMP NULL,
+  "moment_dt"       DATETIME,
+  "yr"              YEAR,
+  -- strings
+  "guid"            CHAR(36),
+  "ip_addr"         VARCHAR(45),
+  "tiny_text"       TINYTEXT,
+  "medium_text"     MEDIUMTEXT,
+  "long_text"       LONGTEXT,
+  -- binary
+  "raw_binary"      BINARY(8),
+  "raw_varbinary"   VARBINARY(255),
+  -- bit
+  "bits"            BIT(8),
+  -- json
+  "doc_json"        JSON,
+  -- enum and set
+  "feeling"         ENUM('happy', 'sad', 'neutral'),
+  "permissions"     SET('read', 'write', 'execute', 'admin'),
+  -- geometry
+  "location"        POINT
 );
 
-INSERT INTO "type_zoo" ("flag", "small_num", "big_num", "precise_num", "approx_num",
-                        "day", "tod", "moment", "duration", "guid", "ip_addr",
-                        "int_list", "txt_list", "feeling") VALUES
-  (1,    42,     9223372036854775807, 3.1416, 2.718,
-   '2025-01-15', '14:30:00', '2025-01-15 14:30:00', '2 hours 30 minutes',
+INSERT INTO "type_zoo" (
+  "flag", "tiny_num", "small_num", "medium_num", "regular_num", "big_num",
+  "tiny_unsigned", "big_unsigned",
+  "precise_num", "approx_float", "approx_double",
+  "day", "tod", "moment_ts", "moment_dt", "yr",
+  "guid", "ip_addr", "tiny_text", "medium_text", "long_text",
+  "raw_binary", "raw_varbinary", "bits",
+  "doc_json", "feeling", "permissions", "location"
+) VALUES
+  -- row 1: typical values
+  (1, 127, 32767, 8388607, 42, 9223372036854775807,
+   255, 18446744073709551615,
+   3.1416, 2.718, 1.7976931348623157e+308,
+   '2025-01-15', '14:30:00', '2025-01-15 14:30:00', '2025-01-15 14:30:00', 2025,
    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '192.168.1.1',
-   '[1, 2, 3]', '["hello", "world"]', 'happy'),
-  (0,    -1,     0,                   0.0001, -0.5,
-   '1970-01-01', '00:00:00', '1970-01-01 00:00:00', '0 seconds',
+   'tiny', 'medium length text', 'long text content',
+   X'48656c6c6f000000', X'48656c6c6f', b'10101010',
+   '{"key": "value", "list": [1,2,3]}', 'happy', 'read,write', POINT(40.7128, -74.0060)),
+  -- row 2: edge/boundary values
+  (0, -128, -32768, -8388608, -1, 0,
+   0, 0,
+   0.0001, -0.5, -1.0e-307,
+   '1970-01-01', '00:00:00', '1970-01-01 00:00:01', '1000-01-01 00:00:00', 1901,
    '00000000-0000-0000-0000-000000000000', '::1',
-   '[]', '[]', 'sad'),
-  (NULL, NULL,   NULL,                NULL,   NULL,
-   NULL,         NULL,       NULL,            NULL,
-   NULL,                                      NULL,
-   NULL, NULL, NULL);
+   '', '', '',
+   X'0000000000000000', X'00', b'00000000',
+   '[]', 'sad', '', POINT(0, 0)),
+  -- row 3: all NULLs
+  (NULL, NULL, NULL, NULL, NULL, NULL,
+   NULL, NULL,
+   NULL, NULL, NULL,
+   NULL, NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL, NULL, NULL,
+   NULL, NULL, NULL,
+   NULL, NULL, NULL, NULL);
 
 -- ── long_values ──────────────────────────────────────────────────────────
 -- Cells with 500+ char strings, multiline text, SQL injection attempts
