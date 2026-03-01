@@ -148,6 +148,15 @@ function M.filter_summary(spec)
   return #spec.filters .. " filters"
 end
 
+--- Reset all modifiers: clear sorts, filters, page back to 1.
+function M.reset(spec)
+  local new = deep_copy(spec)
+  new.sorts = {}
+  new.filters = {}
+  new.page = 1
+  return new
+end
+
 -- ── pagination modifiers ─────────────────────────────────────────────────
 
 function M.set_page(spec, page)

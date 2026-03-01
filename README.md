@@ -99,8 +99,9 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `f` | Quick filter by cell value |
 | `<C-f>` | Freeform WHERE clause filter |
 | `F` | Clear all filters |
-| `]p` | Next page |
-| `[p` | Previous page |
+| `X` | Reset view (clear sort/filter/page) |
+| `]p` / `[p` | Next / previous page |
+| `]P` / `[P` | Last / first page |
 
 ### FK Navigation
 
@@ -115,6 +116,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 |-----|--------|
 | `ga` | Aggregate selected cells (visual mode) |
 | `gS` | Column statistics popup |
+| `gx` | Explain current query plan |
 | `gE` | Export table (CSV, TSV, JSON, SQL INSERT, Markdown) |
 
 ### Inspection

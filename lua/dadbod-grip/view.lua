@@ -1391,6 +1391,52 @@ function M._setup_keymaps(bufnr)
     if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
   end, "Previous page")
 
+  -- ]P: jump to last page
+  map("]P", function()
+    local session_p = M._sessions[bufnr]
+    if not session_p or not session_p.query_spec then return end
+    if not session_p.total_rows then
+      vim.notify("Total rows unknown", vim.log.levels.INFO)
+      return
+    end
+    local total_pages = math.max(1, math.ceil(session_p.total_rows / session_p.query_spec.page_size))
+    if session_p.query_spec.page >= total_pages then
+      vim.notify("Already on last page", vim.log.levels.INFO)
+      return
+    end
+    if not confirm_discard_changes("Page change") then return end
+    local new_spec = qmod.set_page(session_p.query_spec, total_pages)
+    if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
+  end, "Last page")
+
+  -- [P: jump to first page
+  map("[P", function()
+    local session_p = M._sessions[bufnr]
+    if not session_p or not session_p.query_spec then return end
+    if session_p.query_spec.page <= 1 then
+      vim.notify("Already on first page", vim.log.levels.INFO)
+      return
+    end
+    if not confirm_discard_changes("Page change") then return end
+    local new_spec = qmod.set_page(session_p.query_spec, 1)
+    if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
+  end, "First page")
+
+  -- X: reset all query modifiers (sorts, filters, page)
+  map("X", function()
+    local session_x = M._sessions[bufnr]
+    if not session_x or not session_x.query_spec then return end
+    local spec = session_x.query_spec
+    if #spec.sorts == 0 and #spec.filters == 0 and spec.page == 1 then
+      vim.notify("View already at defaults", vim.log.levels.INFO)
+      return
+    end
+    if not confirm_discard_changes("Reset view") then return end
+    local new_spec = qmod.reset(session_x.query_spec)
+    if session_x.on_requery then session_x.on_requery(bufnr, new_spec) end
+    vim.notify("View reset", vim.log.levels.INFO)
+  end, "Reset view (clear sort/filter/page)")
+
   -- ── FK navigation keymaps ─────────────────────────────────────────────
 
   -- gf: navigate to FK referenced row
@@ -1707,6 +1753,23 @@ function M._setup_keymaps(bufnr)
     end)
   end, "Export in multiple formats")
 
+  -- gx: explain current query (shortcut for :GripExplain)
+  map("gx", function()
+    local session_x = M._sessions[bufnr]
+    if not session_x then return end
+    local explain_sql
+    if session_x.query_spec then
+      explain_sql = qmod.build_sql(session_x.query_spec)
+    elseif session_x.query_sql then
+      explain_sql = session_x.query_sql
+    end
+    if not explain_sql or explain_sql == "" then
+      vim.notify("No query to explain", vim.log.levels.INFO)
+      return
+    end
+    vim.cmd("GripExplain " .. explain_sql)
+  end, "Explain current query")
+
   -- ?: help popup
   map("?", function()
     local grip_win = vim.api.nvim_get_current_win()  -- save for restore on close
@@ -1745,16 +1808,18 @@ function M._setup_keymaps(bufnr)
       "  f         Quick filter by cell value",
       "  <C-f>     Freeform WHERE clause filter",
       "  F         Clear all filters",
-      "  ]p        Next page",
-      "  [p        Previous page",
+      "  X         Reset view (clear sort/filter/page)",
+      "  ]p / [p   Next / previous page",
+      "  ]P / [P   Last / first page",
       "",
       "  FK Navigation",
       "  gf        Follow foreign key under cursor",
       "  <C-o>     Go back in FK navigation stack",
       "",
-      "  Analysis",
+      "  Analysis & Export",
       "  ga        Aggregate selected cells (visual mode)",
       "  gS        Column statistics popup",
+      "  gx        Explain current query plan",
       "  gE        Export table (CSV, JSON, SQL, Markdown)",
       "",
       "  Actions",
