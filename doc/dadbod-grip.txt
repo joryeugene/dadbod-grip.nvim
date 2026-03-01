@@ -157,6 +157,12 @@ All commands are global and available after the plugin loads.
   types, primary keys, foreign keys, indexes, row estimate, and table size.
   Uses the current grip table if no argument is provided.
 
+                                                                *:GripDiff*
+:GripDiff {table1} {table2}
+  Compare two tables row-by-row using primary keys. Shows changed cells,
+  added rows, and deleted rows with color-coded diff highlighting.
+  Navigate changes with ]c and [c.
+
                                                               *:GripRename*
 :GripRename {old_name} [new_name]
   Rename a column in the current table. If new_name is provided, executes
@@ -234,6 +240,7 @@ ANALYSIS AND EXPORT ~
   gS              Column statistics popup
                   Shows count, distinct, nulls, min/max, top values
   gx              Explain current query plan
+  gD              Diff current table against another table
   gE              Export table in 5 formats (see |grip-export|)
 
 INSPECTION ~

@@ -147,6 +147,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `ga` | Aggregate selected cells (visual mode) |
 | `gS` | Column statistics popup |
 | `gx` | Explain current query plan |
+| `gD` | Diff against another table |
 | `gE` | Export table (CSV, TSV, JSON, SQL INSERT, Markdown) |
 
 ### Inspection

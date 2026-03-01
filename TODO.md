@@ -78,7 +78,7 @@ Makes vim-dadbod-ui optional. grip + vim-dadbod = complete DB workflow.
 - [x] Saved queries: `:GripSave` / `:GripLoad` persists to .grip/queries/*.sql
 - [x] Connection profiles: `:GripConnect` with .grip/connections.json + g:dbs compat
 - [x] list_tables() adapter method for all 4 databases
-- [ ] Data diff: `:GripDiff` opens two grids side-by-side with diff highlighting
+- [x] Data diff: `:GripDiff` / `gD` compares tables with PK-matched row highlighting
 
 ## Future - Schema Operations (DDL)
 

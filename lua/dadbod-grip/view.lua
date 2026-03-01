@@ -2200,6 +2200,22 @@ function M._setup_keymaps(bufnr)
     vim.cmd("GripExplain " .. explain_sql)
   end, "Explain current query")
 
+  -- gD: diff against another table
+  map("gD", function()
+    local session_d = M._sessions[bufnr]
+    if not session_d then return end
+    local st = session_d.state
+    if not st.table_name then
+      vim.notify("Diff requires a table name", vim.log.levels.INFO)
+      return
+    end
+    vim.ui.input({ prompt = "Diff " .. st.table_name .. " against: " }, function(other)
+      if not other or other == "" then return end
+      local diff_mod = require("dadbod-grip.diff")
+      diff_mod.open(st.table_name, other, st.url)
+    end)
+  end, "Diff against table")
+
   -- go: toggle schema sidebar
   map("go", function()
     local schema = require("dadbod-grip.schema")
@@ -2283,6 +2299,7 @@ function M._setup_keymaps(bufnr)
       "  ga        Aggregate selected cells (visual mode)",
       "  gS        Column statistics popup",
       "  gx        Explain current query plan",
+      "  gD        Diff against another table",
       "  gE        Export table (CSV, JSON, SQL, Markdown)",
       "",
       "  Schema & Workflow",

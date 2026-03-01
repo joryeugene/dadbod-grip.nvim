@@ -589,6 +589,25 @@ function M.setup(opts)
     desc  = "Load a saved query",
   })
 
+  -- Register :GripDiff command
+  vim.api.nvim_create_user_command("GripDiff", function(cmd_opts)
+    local args = vim.split(vim.trim(cmd_opts.args or ""), "%s+")
+    if #args < 2 then
+      vim.notify("Usage: :GripDiff table1 table2", vim.log.levels.WARN)
+      return
+    end
+    local url = db.get_url()
+    if not url then
+      vim.notify("GripDiff: no database connection", vim.log.levels.WARN)
+      return
+    end
+    local diff_mod = require("dadbod-grip.diff")
+    diff_mod.open(args[1], args[2], url)
+  end, {
+    nargs = "+",
+    desc  = "Diff two tables side-by-side",
+  })
+
   -- Register :GripCreate command
   vim.api.nvim_create_user_command("GripCreate", function()
     local url = db.get_url()
