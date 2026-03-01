@@ -44,7 +44,10 @@ Then `:Grip` from any DBUI buffer. That's it.
 - **Aggregate on selection** — `ga` in visual mode shows count/sum/avg/min/max
 - **Export formats** — `gE` picker: CSV, TSV, JSON, SQL INSERT, Markdown
 - **EXPLAIN plan viewer** — `:GripExplain` renders color-coded query plans
-- **Multi-database** — PostgreSQL and SQLite adapters (DuckDB, MySQL planned)
+- **Column pinning** — `1`-`9` freezes leftmost N columns with thick separator, `0` unpins
+- **Conditional formatting** — negatives red, booleans colored, past dates dimmed, URLs underlined
+- **Multi-database** — PostgreSQL, SQLite, MySQL/MariaDB, DuckDB adapters
+- **File-as-table** — `:Grip /path/to/data.parquet` opens Parquet/CSV/JSON/XLSX via DuckDB
 - **Composite primary key support** for multi-column WHERE clauses
 - **Read-only mode** auto-detected when no primary key exists
 - **DBUI integration** via `open_smart()` for seamless two-pane workflow
@@ -128,6 +131,13 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gi` | Table info (columns, types, PKs) |
 | `ge` | Explain cell under cursor |
 
+### Column Pinning
+
+| Key | Action |
+|-----|--------|
+| `1`-`9` | Pin/freeze N leftmost columns |
+| `0` | Unpin all (or first column if none pinned) |
+
 ### Advanced
 
 | Key | Action |
@@ -148,7 +158,11 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 
 - **Neovim 0.10+**
 - **[vim-dadbod](https://github.com/tpope/vim-dadbod)**
-- **PostgreSQL** (`psql` client in PATH) and/or **SQLite** (`sqlite3` in PATH)
+- One or more database CLI tools in PATH:
+  - **PostgreSQL**: `psql`
+  - **SQLite**: `sqlite3`
+  - **MySQL/MariaDB**: `mysql` (8.0.3+ for `--csv`, or MariaDB 10.5+)
+  - **DuckDB**: `duckdb`
 
 ## Install
 
@@ -199,6 +213,7 @@ vim.keymap.set("n", "<leader>lg", "<cmd>Grip<cr>", { desc = "Open Grip grid" })
 | `:Grip` | Smart open: detects DBUI context or uses word under cursor |
 | `:Grip users` | Open a specific table |
 | `:Grip SELECT * FROM users WHERE active` | Run arbitrary SQL |
+| `:Grip /path/to/data.parquet` | Open file as table via DuckDB (Parquet, CSV, JSON, XLSX) |
 | `:GripExplain` | Show EXPLAIN plan for current grid's query |
 | `:GripExplain SELECT ...` | Show EXPLAIN plan for arbitrary SQL |
 
@@ -235,7 +250,7 @@ grip.open_smart()
 
 ## Architecture
 
-Eight modules with strict boundaries:
+Nine modules with strict boundaries:
 
 ```
 init.lua    → Entry point. Parses args, wires callbacks, orchestrates modules.
@@ -245,7 +260,7 @@ data.lua    → Immutable state transforms. All functions: state in, state out.
 query.lua   → Pure query composition. Spec (value) → SQL string. No I/O.
 db.lua      → I/O boundary + adapter dispatch. Delegates to adapters by URL scheme.
 sql.lua     → Pure SQL generation. No DB calls, no state, pure string builders.
-adapters/   → Per-database implementations (postgresql.lua, sqlite.lua).
+adapters/   → Per-database implementations (postgresql, sqlite, mysql, duckdb).
 ```
 
 Design principles:
@@ -269,7 +284,20 @@ psql grip_test < tests/seed.sql
 sqlite3 tests/grip_test.db < tests/seed_sqlite.sql
 ```
 
-Test tables cover: normal CRUD, composite PKs, JSON/JSONB, unicode, FK relationships (users → orders → order_items → products), 150+ rows for pagination, and SQL injection attempts.
+### MySQL
+
+```bash
+mysql -u root -e "CREATE DATABASE IF NOT EXISTS grip_test"
+mysql -u root grip_test < tests/seed_mysql.sql
+```
+
+### DuckDB
+
+```bash
+duckdb tests/grip_test.duckdb < tests/seed_duckdb.sql
+```
+
+Test tables cover: normal CRUD, composite PKs, JSON/JSONB, unicode, FK relationships (users → orders → order_items → products), 150+ rows for pagination, and SQL injection attempts. All four seed files have identical table structure for cross-adapter verification.
 
 Open each table with `:Grip <table_name>` and verify rendering, editing, sort/filter/pagination, and FK navigation.
 
@@ -295,7 +323,10 @@ dadbod-grip is a **data editor**, not a viewer. The rest of the ecosystem displa
 | **EXPLAIN viewer** | Yes | No | No | No | No | No |
 | **Export formats** | 5 formats | No | No | No | CSV | No |
 | **Grid view** | Unicode box | Markdown table | Columnar | Raw text | TUI grid | React table |
-| **Multi-DB** | PG, SQLite | PG only | Yes (Go) | Yes (dadbod) | 3 DBs | Yes (dadbod) |
+| **Column pinning** | Yes (1-9) | No | No | No | No | No |
+| **Cell formatting** | Yes (auto) | No | No | No | No | No |
+| **File-as-table** | Yes (DuckDB) | No | No | No | No | No |
+| **Multi-DB** | PG, SQLite, MySQL, DuckDB | PG only | Yes (Go) | Yes (dadbod) | 3 DBs | Yes (dadbod) |
 | **Backend** | Pure Lua | Lua | Go binary | Vimscript | Go TUI | Go + React |
 | **Dependencies** | vim-dadbod | psql | None | vim-dadbod | lazysql | vim-dadbod |
 

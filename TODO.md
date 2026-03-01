@@ -19,16 +19,18 @@
 - [x] NULL handling with sentinel values
 - [x] Help popup (?) with ASCII art
 
-## v1.1.0 — Multi-Database (in progress)
+## v1.1.0 — Multi-Database — Done
 
 - [x] Adapter system (db.lua facade + adapters/ registry)
 - [x] SQLite adapter (sqlite3 CLI, PRAGMA metadata, changes())
 - [x] RFC 4180 CSV parser (multiline quoted fields)
 - [x] Multiline cell display (↵ indicator)
 - [x] SQLite test fixtures (seed_sqlite.sql — mirrors PG seed)
-- [ ] DuckDB adapter (duckdb CLI, information_schema, parquet/csv queries)
-  - [ ] File-as-table querying: `:Grip /path/to/data.parquet` (CSV, JSON, Parquet, Excel via DuckDB)
-- [ ] MySQL/MariaDB adapter (mysql CLI, information_schema)
+- [x] DuckDB adapter (duckdb CLI, information_schema, parquet/csv queries)
+  - [x] File-as-table querying: `:Grip /path/to/data.parquet` (CSV, JSON, Parquet, Excel via DuckDB)
+- [x] MySQL/MariaDB adapter (mysql CLI, information_schema)
+- [x] MySQL test fixtures (seed_mysql.sql)
+- [x] DuckDB test fixtures (seed_duckdb.sql)
 
 ## v1.2.0 — Sort, Filter, Paginate — Done
 
@@ -56,10 +58,10 @@ The single biggest gap in the Neovim database ecosystem. DataGrip, DBeaver, Post
 
 ## v1.4.0 — Grid Enhancements
 
-- [ ] Column pinning/freezing — number keys (1-9) to freeze N leftmost columns (pspg-style)
+- [x] Column pinning/freezing — number keys (1-9) to freeze N leftmost columns (pspg-style)
 - [ ] Column resize / auto-fit
 - [ ] Column hide/show toggle
-- [ ] Conditional cell formatting — negatives red, booleans colored, dates dimmed if past
+- [x] Conditional cell formatting — negatives red, booleans colored, dates dimmed if past, URLs underlined
 - [ ] Batch edit — visual block select, set all selected cells to same value
 - [ ] Copy/paste between cells
 - [ ] Undo history (multi-level, not just per-row)
