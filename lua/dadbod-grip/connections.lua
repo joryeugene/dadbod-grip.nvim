@@ -25,6 +25,11 @@ local function connections_path()
   return grip_dir() .. "/connections.json"
 end
 
+local function global_connections_path()
+  local home = vim.fn.expand("~")
+  return home .. "/.grip/connections.json"
+end
+
 local function ensure_grip_dir()
   local dir = grip_dir()
   if vim.fn.isdirectory(dir) == 0 then
@@ -32,9 +37,15 @@ local function ensure_grip_dir()
   end
 end
 
---- Read connections from .grip/connections.json.
-local function read_file_connections()
-  local path = connections_path()
+local function ensure_global_grip_dir()
+  local dir = vim.fn.expand("~") .. "/.grip"
+  if vim.fn.isdirectory(dir) == 0 then
+    vim.fn.mkdir(dir, "p")
+  end
+end
+
+--- Read connections from a JSON file.
+local function read_json_connections(path, source)
   if vim.fn.filereadable(path) == 0 then return {} end
   local raw = table.concat(vim.fn.readfile(path), "\n")
   local ok, data = pcall(vim.fn.json_decode, raw)
@@ -42,8 +53,22 @@ local function read_file_connections()
   local result = {}
   for _, entry in ipairs(data) do
     if type(entry) == "table" and entry.name and entry.url then
-      table.insert(result, { name = entry.name, url = entry.url, source = "file" })
+      table.insert(result, { name = entry.name, url = entry.url, source = source or "file" })
     end
+  end
+  return result
+end
+
+--- Read connections from project-local and global files.
+local function read_file_connections()
+  local result = {}
+  -- Project-local first
+  for _, c in ipairs(read_json_connections(connections_path(), "file")) do
+    table.insert(result, c)
+  end
+  -- Global connections (persisted from other projects)
+  for _, c in ipairs(read_json_connections(global_connections_path(), "global")) do
+    table.insert(result, c)
   end
   return result
 end
@@ -59,14 +84,26 @@ local function write_file_connections(conns)
   vim.fn.writefile({ json }, connections_path())
 end
 
---- Read g:dbs (DBUI format: list of {name, url} dicts).
+--- Read g:dbs (DBUI-compatible: list or dict of connections).
+--- Supports: {name, url} dicts, plain URL strings, and {name = url} dicts.
 local function read_gdbs()
   local dbs = vim.g.dbs
   if type(dbs) ~= "table" then return {} end
   local result = {}
-  for _, entry in ipairs(dbs) do
+  for key, entry in pairs(dbs) do
     if type(entry) == "table" and entry.name and entry.url then
+      -- Standard format: { name = "foo", url = "postgresql://..." }
       table.insert(result, { name = entry.name, url = entry.url, source = "g:dbs" })
+    elseif type(entry) == "string" then
+      -- Plain URL string in a list, or {name = "url"} dict
+      if type(key) == "string" then
+        -- Dict format: { customer_name = "postgresql://..." }
+        table.insert(result, { name = key, url = entry, source = "g:dbs" })
+      else
+        -- List format: { "postgresql://host/db" }
+        local name = entry:match("([^/]+)$") or entry
+        table.insert(result, { name = name, url = entry, source = "g:dbs" })
+      end
     end
   end
   return result
@@ -85,12 +122,34 @@ function M.list()
     end
   end
 
-  -- g:dbs (DBUI compat)
-  for _, c in ipairs(read_gdbs()) do
+  -- g:dbs (DBUI compat) — also persist globally for cross-project access
+  local gdbs = read_gdbs()
+  local new_global = false
+  local global_existing = read_json_connections(global_connections_path(), "global")
+  local global_seen = {}
+  for _, gc in ipairs(global_existing) do global_seen[gc.url] = true end
+
+  for _, c in ipairs(gdbs) do
     if not seen[c.url] then
       seen[c.url] = true
       table.insert(all, c)
     end
+    -- Persist to global if not already there
+    if not global_seen[c.url] then
+      table.insert(global_existing, { name = c.name, url = c.url })
+      global_seen[c.url] = true
+      new_global = true
+    end
+  end
+
+  -- Write global file if new entries were added
+  if new_global then
+    ensure_global_grip_dir()
+    local gdata = {}
+    for _, gc in ipairs(global_existing) do
+      table.insert(gdata, { name = gc.name, url = gc.url })
+    end
+    vim.fn.writefile({ vim.fn.json_encode(gdata) }, global_connections_path())
   end
 
   -- $DATABASE_URL
@@ -127,10 +186,50 @@ function M.remove(name)
   write_file_connections(filtered)
 end
 
---- Switch active connection. Sets vim.g.db and notifies.
+--- Switch active connection. Sets vim.g.db and opens the full workspace.
+--- Auto-saves to .grip/connections.json if not already persisted.
 function M.switch(url, name)
   vim.g.db = url
+
+  -- Auto-persist if not already in file connections
+  local file_conns = read_file_connections()
+  local already_saved = false
+  for _, c in ipairs(file_conns) do
+    if c.url == url then
+      already_saved = true
+      break
+    end
+  end
+  if not already_saved and name and name ~= "" then
+    M.add(name, url)
+  end
+
   vim.notify("Grip: connected to " .. (name or url), vim.log.levels.INFO)
+
+  -- Open the full workspace: schema sidebar + query pad
+  vim.schedule(function()
+    local schema = require("dadbod-grip.schema")
+    if not schema.is_open() then
+      schema.toggle(url)
+    else
+      schema.refresh(url)
+    end
+
+    local query_pad = require("dadbod-grip.query_pad")
+    query_pad.open(url)
+
+    -- Focus sidebar so user can immediately browse tables
+    if schema.is_open() and schema.get_winid() then
+      vim.api.nvim_set_current_win(schema.get_winid())
+    end
+
+    -- Pre-warm AI schema cache in background (avoids freeze on first AI call)
+    vim.schedule(function()
+      pcall(function()
+        require("dadbod-grip.ai").build_schema_context(url)
+      end)
+    end)
+  end)
 end
 
 --- Get current connection info.

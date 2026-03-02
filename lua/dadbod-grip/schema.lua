@@ -242,6 +242,19 @@ local function render(state)
     table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
   end
 
+  -- Hint line at bottom (wrap for narrow sidebars)
+  table.insert(lines, "")
+  local sw = math.max(SIDEBAR_MIN_WIDTH, math.min(SIDEBAR_MAX_WIDTH, math.floor(vim.o.columns * SIDEBAR_WIDTH_RATIO)))
+  if sw >= 40 then
+    table.insert(lines, " CR:open  q:query  gw:grid  gC:connect  /:filter  ?:help")
+    table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
+  else
+    table.insert(lines, " CR:open  q:query  gw:grid")
+    table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
+    table.insert(lines, " gC:connect  /:filter  ?:help")
+    table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
+  end
+
   vim.bo[_sidebar_bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(_sidebar_bufnr, 0, -1, false, lines)
   vim.bo[_sidebar_bufnr].modifiable = false
@@ -269,22 +282,42 @@ local function node_at_cursor(state)
   return nil
 end
 
---- Open a table in a grip grid in the adjacent window.
-local function open_table(table_name, url)
-  local grip = require("dadbod-grip")
-  -- Find a non-sidebar window to open in
-  local target_win = nil
+--- Find the best non-sidebar window to reuse for a new grid.
+--- Prefers an existing grip grid window over the query pad.
+local function find_right_win()
+  local view = require("dadbod-grip.view")
+  local fallback = nil
   for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
     local bufnr = vim.api.nvim_win_get_buf(winid)
     if bufnr ~= _sidebar_bufnr then
-      target_win = winid
-      break
+      -- Prefer a grip grid window
+      if view._sessions[bufnr] then
+        return winid
+      end
+      if not fallback then fallback = winid end
     end
   end
+  return fallback
+end
+
+--- Open a table in a grip grid, reusing the adjacent window.
+local function open_table(table_name, url)
+  local grip = require("dadbod-grip")
+  local target_win = find_right_win()
   if target_win then
     vim.api.nvim_set_current_win(target_win)
   end
-  grip.open(table_name, url)
+  grip.open(table_name, url, { reuse_win = target_win })
+end
+
+--- Open a table in a new split (explicit second grid).
+local function open_table_split(table_name, url)
+  local grip = require("dadbod-grip")
+  local target_win = find_right_win()
+  if target_win then
+    vim.api.nvim_set_current_win(target_win)
+  end
+  grip.open(table_name, url, { force_split = true })
 end
 
 --- Set up buffer-local keymaps.
@@ -296,7 +329,7 @@ local function setup_keymaps(url)
 
   local state = get_state(url)
 
-  -- Open table / expand column
+  -- Open table / expand column (reuses existing grid window)
   map("<CR>", function()
     local node = node_at_cursor(state)
     if not node then return end
@@ -304,6 +337,17 @@ local function setup_keymaps(url)
       open_table(node.name, url)
     elseif node.kind == "column" and node.table_name then
       open_table(node.table_name, url)
+    end
+  end)
+
+  -- Open table in new split (explicit second grid)
+  map("<S-CR>", function()
+    local node = node_at_cursor(state)
+    if not node then return end
+    if node.kind == "table" then
+      open_table_split(node.name, url)
+    elseif node.kind == "column" and node.table_name then
+      open_table_split(node.table_name, url)
     end
   end)
 
@@ -385,10 +429,30 @@ local function setup_keymaps(url)
   end)
 
   -- Query pad
-  map("gQ", function()
+  map("q", function()
     local query_pad = require("dadbod-grip.query_pad")
     query_pad.open(url)
   end)
+
+  -- Jump to grid window
+  map("gw", function()
+    local view = require("dadbod-grip.view")
+    for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      local wbuf = vim.api.nvim_win_get_buf(winid)
+      if view._sessions[wbuf] then
+        vim.api.nvim_set_current_win(winid)
+        return
+      end
+    end
+    vim.notify("No grid window open", vim.log.levels.INFO)
+  end)
+
+  -- Switch connection
+  local function _pick_conn()
+    require("dadbod-grip.connections").pick()
+  end
+  map("gC", _pick_conn)
+  map("<C-g>", _pick_conn)
 
   -- DDL: drop table
   map("D", function()
@@ -418,7 +482,6 @@ local function setup_keymaps(url)
   end)
 
   -- Close
-  map("q", function() M.close() end)
   map("<Esc>", function() M.close() end)
 
   -- Help
@@ -426,7 +489,8 @@ local function setup_keymaps(url)
     local help = {
       " Schema Browser",
       " ──────────────",
-      " <CR>     Open table in grid",
+      " <CR>     Open table in grid (reuse window)",
+      " S-CR     Open table in new split",
       " l / zo   Expand table columns",
       " h / zc   Collapse table",
       " L        Expand all",
@@ -434,10 +498,12 @@ local function setup_keymaps(url)
       " /        Filter by name",
       " r        Refresh schema",
       " gT       Table picker",
-      " gQ       Query pad",
+      " gw       Jump to grid",
+      " gC/<C-g> Switch connection",
+      " q        Query pad",
       " D        Drop table (confirm)",
       " +        Create table",
-      " q / Esc  Close",
+      " Esc      Close",
     }
     vim.notify(table.concat(help, "\n"), vim.log.levels.INFO)
   end)
@@ -511,6 +577,25 @@ end
 
 function M.is_open()
   return _sidebar_winid ~= nil and vim.api.nvim_win_is_valid(_sidebar_winid)
+end
+
+function M.get_winid()
+  if _sidebar_winid and vim.api.nvim_win_is_valid(_sidebar_winid) then
+    return _sidebar_winid
+  end
+  return nil
+end
+
+--- Get first non-sidebar window (the right content area).
+function M.get_right_win()
+  if not M.is_open() then return nil end
+  for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local bufnr = vim.api.nvim_win_get_buf(winid)
+    if bufnr ~= _sidebar_bufnr then
+      return winid
+    end
+  end
+  return nil
 end
 
 --- Refresh sidebar if visible (e.g., after connection switch).

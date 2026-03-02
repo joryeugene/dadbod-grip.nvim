@@ -192,8 +192,12 @@ function M._format_ddl_line(table_name, columns, pks, fks)
 
   local fk_map = {}
   for _, fk in ipairs(fks or {}) do
-    if fk.column_name and fk.foreign_table_name then
-      fk_map[fk.column_name] = fk.foreign_table_name .. "." .. (fk.foreign_column_name or "id")
+    -- Adapters return { column, ref_table, ref_column }; tests use { column_name, foreign_table_name, foreign_column_name }
+    local col = fk.column_name or fk.column
+    local ref = fk.foreign_table_name or fk.ref_table
+    local ref_col = fk.foreign_column_name or fk.ref_column
+    if col and ref then
+      fk_map[col] = ref .. "." .. (ref_col or "id")
     end
   end
 
@@ -211,8 +215,19 @@ function M._format_ddl_line(table_name, columns, pks, fks)
   return "CREATE TABLE " .. table_name .. " (" .. table.concat(parts, ", ") .. ");"
 end
 
+--- Schema context cache per URL (avoids re-fetching for every AI call).
+local _schema_cache = {}
+local SCHEMA_CACHE_TTL = 300  -- 5 minutes
+
 --- Build schema context DDL from database metadata.
 function M.build_schema_context(url, question)
+  -- Return cached if fresh
+  local cached = _schema_cache[url]
+  if cached and (os.time() - cached.time) < SCHEMA_CACHE_TTL then
+    return cached.ddl, cached.adapter
+  end
+
+  vim.notify("Fetching schema...", vim.log.levels.INFO)
   local tables, err = db.list_tables(url)
   if not tables then return "", "unknown" end
 
@@ -225,11 +240,23 @@ function M.build_schema_context(url, question)
   elseif u:match("^duckdb") then adapter_name = "DuckDB"
   end
 
-  -- Limit tables
+  -- Extract table names (adapters return different formats)
   local table_names = {}
-  if type(tables) == "table" and tables.rows then
-    for _, row in ipairs(tables.rows) do
-      if row[1] then table.insert(table_names, row[1]) end
+  if type(tables) == "table" then
+    if tables.rows then
+      -- Legacy format: { rows = { {"name"}, ... }, columns = {...} }
+      for _, row in ipairs(tables.rows) do
+        if row[1] then table.insert(table_names, row[1]) end
+      end
+    else
+      -- Standard format: { {name="tbl", type="table"}, ... }
+      for _, t in ipairs(tables) do
+        if type(t) == "table" and t.name then
+          table.insert(table_names, t.name)
+        elseif type(t) == "string" then
+          table.insert(table_names, t)
+        end
+      end
     end
   end
   if #table_names > 30 then
@@ -262,25 +289,76 @@ function M.build_schema_context(url, question)
     end
   end
 
-  return table.concat(ddl_lines, "\n"), adapter_name
+  local ddl = table.concat(ddl_lines, "\n")
+  _schema_cache[url] = { ddl = ddl, adapter = adapter_name, time = os.time() }
+  return ddl, adapter_name
 end
 
 -- ── SQL cleanup ───────────────────────────────────────────────────────────────
 
---- Strip markdown code fences from LLM response.
+--- Strip markdown code fences and conversational prose from LLM response.
+--- Extracts the SQL statement even when wrapped in explanatory text.
 function M._strip_fences(text)
   if not text then return "" end
   local s = text
-  -- Remove ```sql ... ``` or ``` ... ```
+
+  -- Extract from ```sql ... ``` code block if present
+  local fenced = s:match("```%w*%s*\n(.-)```")
+  if fenced then return vim.trim(fenced) end
+
+  -- Remove any remaining code fences
   s = s:gsub("^%s*```%w*%s*\n?", "")
   s = s:gsub("\n?%s*```%s*$", "")
+
+  -- SQL keywords that can start or continue a statement
+  local sql_kw = "^%s*(" .. table.concat({
+    "SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP",
+    "FROM", "WHERE", "AND", "OR", "ORDER", "GROUP", "HAVING", "LIMIT", "OFFSET",
+    "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "CROSS", "ON", "AS", "SET",
+    "INTO", "VALUES", "UNION", "INTERSECT", "EXCEPT", "CASE", "WHEN", "THEN",
+    "ELSE", "END", "NOT", "IN", "EXISTS", "BETWEEN", "LIKE", "IS", "NULL",
+    "ASC", "DESC", "DISTINCT", "ALL", "ANY", "SOME", "COALESCE",
+  }, "[%s,]|") .. "[%s,])"
+
+  -- If response contains prose + SQL, extract the SQL statement
+  local sql_start = s:match("\n(SELECT%s.+)") or s:match("\n(WITH%s.+)")
+    or s:match("\n(INSERT%s.+)") or s:match("\n(UPDATE%s.+)")
+    or s:match("\n(DELETE%s.+)") or s:match("\n(CREATE%s.+)")
+  if sql_start then
+    local sql_lines = {}
+    for line in sql_start:gmatch("[^\n]+") do
+      -- SQL line: starts with a SQL keyword or is indented continuation
+      local upper_line = line:upper()
+      local is_sql = line:match("^%s+%S") -- indented continuation
+      if not is_sql then
+        for _, kw in ipairs({"SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "CREATE",
+          "FROM", "WHERE", "AND", "OR", "ORDER", "GROUP", "HAVING", "LIMIT", "OFFSET",
+          "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "ON", "SET", "INTO", "VALUES",
+          "UNION", "CASE", "NOT", "COALESCE"}) do
+          if upper_line:match("^%s*" .. kw .. "[%s,%(]") or upper_line:match("^%s*" .. kw .. "$") or upper_line:match("^%s*" .. kw .. ";") then
+            is_sql = true
+            break
+          end
+        end
+      end
+      if is_sql then
+        table.insert(sql_lines, line)
+      elseif #sql_lines > 0 then
+        break -- hit prose after SQL, stop
+      end
+    end
+    if #sql_lines > 0 then
+      return vim.trim(table.concat(sql_lines, "\n"))
+    end
+  end
+
   return vim.trim(s)
 end
 
 -- ── generation ────────────────────────────────────────────────────────────────
 
 --- Generate SQL from natural language. Async via curl.
-function M.generate_sql(question, url, callback)
+function M.generate_sql(question, url, callback, existing_sql)
   local provider_name = M.resolve_provider()
   local provider = PROVIDERS[provider_name]
   if not provider then
@@ -295,8 +373,27 @@ function M.generate_sql(question, url, callback)
   end
 
   local ddl, adapter_name = M.build_schema_context(url, question)
-  local system_prompt = "You are a SQL expert. Generate only the SQL query, no explanation, "
-    .. "no markdown code blocks. Use " .. adapter_name .. "-compatible SQL.\n\nDatabase schema:\n" .. ddl
+  local system_prompt = "You are a SQL query generator. "
+    .. "Output ONLY the raw SQL query. No explanations, no comments, no markdown, no prose, no questions. "
+    .. "Do not ask for more information. The complete schema is provided below. "
+    .. "Use " .. adapter_name .. "-compatible SQL.\n\n"
+    .. "Rules:\n"
+    .. "- ONLY use column names that appear in the schema below. Never invent or guess column names.\n"
+    .. "- When asked about a column that doesn't exist, pick the closest match from the schema.\n"
+    .. "- 'oldest' or 'earliest' = ORDER BY column ASC. 'newest' or 'latest' = ORDER BY column DESC.\n"
+    .. "- Filter out NULLs when using ORDER BY, MIN, MAX, or aggregates on nullable columns.\n"
+    .. "- Use IS NOT NULL in WHERE clauses when sorting to find extremes.\n"
+    .. "- Use LIMIT for 'top N' or 'oldest/newest' queries.\n"
+    .. "- Include column aliases for computed columns.\n"
+    .. "\nComplete database schema:\n" .. ddl
+
+  if existing_sql and existing_sql ~= "" then
+    system_prompt = system_prompt
+      .. "\n\nThe user has this existing query in their editor:\n"
+      .. existing_sql
+      .. "\n\nIf the user's request relates to modifying this query, "
+      .. "return the modified version. Otherwise generate a new query."
+  end
 
   local model = _opts.model or provider.default_model
   local req = provider.build_request(system_prompt, question, model, api_key, _opts.base_url)
@@ -344,17 +441,26 @@ end
 
 --- Open the AI ask UI: input -> generate SQL -> insert into query pad.
 function M.ask(url)
+  local query_pad = require("dadbod-grip.query_pad")
+  local existing_sql = query_pad.get_content()
+  local caller_win = vim.api.nvim_get_current_win()  -- capture before async
+
   vim.ui.input({ prompt = "Ask about your data: " }, function(question)
     if not question or question == "" then return end
     vim.notify("Generating SQL...", vim.log.levels.INFO)
+    vim.cmd("redraw")  -- force screen update before potential blocking schema fetch
     M.generate_sql(question, url, function(result_sql, err)
       if err then
         vim.notify("AI: " .. err, vim.log.levels.ERROR)
         return
       end
-      local query_pad = require("dadbod-grip.query_pad")
-      query_pad.open(url, { initial_sql = result_sql })
-    end)
+      -- Restore caller window context so query pad opens in the right place
+      if vim.api.nvim_win_is_valid(caller_win) then
+        vim.api.nvim_set_current_win(caller_win)
+      end
+      query_pad.open(url)
+      query_pad.append_sql(result_sql, existing_sql and { replace = true } or nil)
+    end, existing_sql)
   end)
 end
 

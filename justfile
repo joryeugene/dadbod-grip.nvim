@@ -55,15 +55,15 @@ reseed: seed-sqlite
 
 # Open Neovim with the plugin loaded from this directory
 dev:
-    nvim --cmd "set rtp^=." -c "lua require('dadbod-grip').setup()"
+    nvim --cmd "set rtp^=."
 
 # Open Neovim connected to DuckDB for httpfs testing
 dev-httpfs: seed-httpfs
-    nvim --cmd "set rtp^=." -c "lua require('dadbod-grip').setup()" -c "let g:db='duckdb::memory:'"
+    nvim --cmd "set rtp^=." -c "let g:db='duckdb::memory:'"
 
 # Open Neovim and immediately connect to a SQLite test DB
 dev-sqlite: seed-sqlite
-    nvim --cmd "set rtp^=." -c "lua require('dadbod-grip').setup()" -c "let g:db='sqlite:tests/seed_sqlite.db'"
+    nvim --cmd "set rtp^=." -c "let g:db='sqlite:tests/seed_sqlite.db'"
 
 # Show git log for the current feature branch
 log:

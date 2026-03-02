@@ -24,9 +24,12 @@ end
 
 -- Quote a column or table identifier with double-quotes.
 function M.quote_ident(name)
-  -- Escape any existing double-quotes
-  local escaped = tostring(name):gsub('"', '""')
-  return '"' .. escaped .. '"'
+  -- Split on . and quote each part: schema.table → "schema"."table"
+  local parts = {}
+  for part in tostring(name):gmatch("[^.]+") do
+    table.insert(parts, '"' .. part:gsub('"', '""') .. '"')
+  end
+  return table.concat(parts, ".")
 end
 local quote_ident = M.quote_ident
 

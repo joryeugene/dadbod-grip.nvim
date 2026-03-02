@@ -104,7 +104,7 @@ test("_format_ddl_line: basic columns", function()
   contains(result, "name text", "column type")
 end)
 
-test("_format_ddl_line: FK markers", function()
+test("_format_ddl_line: FK markers (test-style field names)", function()
   local cols = {
     { column_name = "id", data_type = "integer", is_nullable = "NO" },
     { column_name = "org_id", data_type = "integer", is_nullable = "YES" },
@@ -112,6 +112,17 @@ test("_format_ddl_line: FK markers", function()
   local fks = {{ column_name = "org_id", foreign_table_name = "orgs", foreign_column_name = "id" }}
   local result = ai._format_ddl_line("users", cols, {"id"}, fks)
   contains(result, "FK->orgs.id", "FK marker")
+end)
+
+test("_format_ddl_line: FK markers (adapter-style field names)", function()
+  local cols = {
+    { column_name = "id", data_type = "integer", is_nullable = "NO" },
+    { column_name = "user_id", data_type = "integer", is_nullable = "YES" },
+  }
+  -- Adapters return { column, ref_table, ref_column } not { column_name, foreign_table_name, foreign_column_name }
+  local fks = {{ column = "user_id", ref_table = "users", ref_column = "id" }}
+  local result = ai._format_ddl_line("orders", cols, {"id"}, fks)
+  contains(result, "FK->users.id", "FK marker with adapter field names")
 end)
 
 test("_format_ddl_line: NOT NULL markers", function()
@@ -144,6 +155,19 @@ end)
 
 test("_strip_fences: handles nil", function()
   eq(ai._strip_fences(nil), "", "nil returns empty")
+end)
+
+test("_strip_fences: extracts SQL from chatty response", function()
+  local chatty = "I need to see the schema for the users table.\n\nHowever, based on common conventions:\n\nSELECT * FROM users WHERE age IS NOT NULL ORDER BY age ASC LIMIT 1\n\nPlease share the actual schema."
+  local result = ai._strip_fences(chatty)
+  contains(result, "SELECT * FROM users", "SQL extracted from prose")
+  assert(not result:find("schema"), "prose stripped")
+end)
+
+test("_strip_fences: extracts SQL from code block in prose", function()
+  local mixed = "Here is the query:\n\n```sql\nSELECT * FROM users LIMIT 5\n```\n\nThis will return 5 rows."
+  local result = ai._strip_fences(mixed)
+  eq(result, "SELECT * FROM users LIMIT 5", "SQL extracted from fenced block in prose")
 end)
 
 -- ── setup ────────────────────────────────────────────────────────────────────

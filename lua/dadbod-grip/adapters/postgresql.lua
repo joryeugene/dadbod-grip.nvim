@@ -6,7 +6,7 @@ local db_util = require("dadbod-grip.db")
 
 local M = {}
 
-local DEFAULT_TIMEOUT = 10000
+local DEFAULT_TIMEOUT = 30000
 
 local function psql(url, sql_str, timeout_ms)
   local result = vim.system(
@@ -185,11 +185,13 @@ end
 
 function M.list_tables(url)
   local sql_str = [[
-    SELECT table_name,
+    SELECT
+      CASE WHEN table_schema = 'public' THEN table_name
+           ELSE table_schema || '.' || table_name END AS table_name,
       CASE table_type WHEN 'BASE TABLE' THEN 'table' ELSE 'view' END AS table_type
     FROM information_schema.tables
-    WHERE table_schema = 'public'
-    ORDER BY table_type DESC, table_name
+    WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY table_schema, table_type DESC, table_name
   ]]
   local stdout, stderr, code = psql(url, sql_str)
   if code ~= 0 then

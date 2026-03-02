@@ -37,8 +37,6 @@ local BOT_L   = "╚"
 local BOT_R   = "╝"
 local BOT_MID = "╧"
 local TOP_MID = "╤"
-local FREEZE_SEP = "┃"
-local FREEZE_MID = "╋"
 
 -- ── highlight group setup ──────────────────────────────────────────────────
 local function ensure_highlights()
@@ -52,7 +50,6 @@ local function ensure_highlights()
     GripBorder   = "bold",
     GripStatusOk = "bold",
     GripStatusChg = "bold",
-    GripFreeze    = "bold",
     GripNegative  = "bold",
     GripBoolTrue  = "bold",
     GripBoolFalse = "bold",
@@ -69,7 +66,6 @@ local function ensure_highlights()
       if name == "GripReadonly" then vim.cmd("hi GripReadonly gui=italic ctermfg=243 guifg=#6c7086") end
       if name == "GripBorder"   then vim.cmd("hi GripBorder gui=bold ctermfg=147 guifg=#cba6f7") end
       if name == "GripStatusChg" then vim.cmd("hi GripStatusChg gui=bold ctermfg=229 guifg=#f9e2af") end
-      if name == "GripFreeze"    then vim.cmd("hi GripFreeze gui=bold ctermfg=147 guifg=#f5c2e7") end
       if name == "GripNegative"  then vim.cmd("hi GripNegative gui=bold ctermfg=203 guifg=#f38ba8") end
       if name == "GripBoolTrue"  then vim.cmd("hi GripBoolTrue gui=bold ctermfg=113 guifg=#a6e3a1") end
       if name == "GripBoolFalse" then vim.cmd("hi GripBoolFalse gui=bold ctermfg=203 guifg=#f38ba8") end
@@ -176,14 +172,14 @@ local function classify_cell(value, data_type)
 end
 
 -- ── border line builders ──────────────────────────────────────────────────
-local function border_line(columns, widths, left, mid, sep, right, freeze_after)
+local function border_line(columns, widths, left, mid, sep, right, min_inner)
   local parts = { left }
-  for i, col in ipairs(columns) do
-    table.insert(parts, string.rep(sep, widths[col] + 2))
-    if i < #columns then
-      if freeze_after and i == freeze_after then
-        table.insert(parts, FREEZE_MID)
-      else
+  if #columns == 0 and min_inner and min_inner > 0 then
+    table.insert(parts, string.rep(sep, min_inner))
+  else
+    for i, col in ipairs(columns) do
+      table.insert(parts, string.rep(sep, widths[col] + 2))
+      if i < #columns then
         table.insert(parts, mid)
       end
     end
@@ -201,9 +197,6 @@ local function title_line(session, columns, widths, total_width)
   if session.query_spec and qmod.has_filters(session.query_spec) then
     table.insert(badges, "filtered")
   end
-  if session.pinned_count and session.pinned_count > 0 then
-    table.insert(badges, session.pinned_count .. " pinned")
-  end
   local hidden_count = 0
   if session.hidden_columns then
     for _ in pairs(session.hidden_columns) do hidden_count = hidden_count + 1 end
@@ -211,22 +204,62 @@ local function title_line(session, columns, widths, total_width)
   if hidden_count > 0 then table.insert(badges, hidden_count .. " hidden") end
   local right_info = #badges > 0 and (" [" .. table.concat(badges, " | ") .. "] ") or " "
 
-  -- Build title with breadcrumb for FK navigation
-  local title_text = session.state.table_name or "(query result)"
+  -- Build title with connection name and breadcrumb for FK navigation
+  local conn_label
+  local conn_mod = require("dadbod-grip.connections")
+  local conn_info = conn_mod.current()
+  if conn_info and conn_info.name then
+    conn_label = conn_info.name
+  elseif session.url then
+    conn_label = session.url:match("([^/]+)$") or session.url
+  end
+  local base_name = session._mutation_title
+    or session.state.table_name
+    or "(query result)"
   if session.nav_stack and #session.nav_stack > 0 then
     local crumbs = {}
     for _, frame in ipairs(session.nav_stack) do
       table.insert(crumbs, frame.table_name or "?")
     end
-    table.insert(crumbs, title_text)
-    title_text = table.concat(crumbs, " > ")
+    table.insert(crumbs, base_name)
+    base_name = table.concat(crumbs, " > ")
+  end
+
+  -- Progressive fit: try full title, then drop connection, then truncate
+  local inner = total_width - 4  -- ╔═(2) + ═╗(2) = 4 border display cols
+  local right_trimmed = right_info:gsub(" $", "")
+  local right_dw = vim.fn.strdisplaywidth(right_trimmed)
+  local available = inner - right_dw
+
+  -- If badges alone overflow, drop them
+  if available < 6 then
+    right_trimmed = ""
+    right_dw = 0
+    available = inner
+  end
+
+  -- Try: table @ connection
+  local title_text = base_name
+  if conn_label and conn_label ~= "" then
+    title_text = base_name .. " @ " .. conn_label
   end
   local title = " " .. title_text .. " "
-  -- Pad title line to fill width
-  local inner = total_width - 3  -- ╔═(2) + ═╗(2) - 1 (gsub strips trailing space from right_info)
-  local title_len = #title + #right_info
-  local filler = math.max(0, inner - title_len)
-  return "╔═" .. title .. string.rep("═", filler) .. right_info:gsub(" $", "") .. "═╗"
+  local title_dw = vim.fn.strdisplaywidth(title)
+
+  -- If too wide, drop connection name
+  if title_dw > available and conn_label then
+    title = " " .. base_name .. " "
+    title_dw = vim.fn.strdisplaywidth(title)
+  end
+
+  -- If still too wide, truncate
+  if title_dw > available and available > 4 then
+    title = vim.fn.strcharpart(title, 0, available - 1) .. "…"
+    title_dw = vim.fn.strdisplaywidth(title)
+  end
+
+  local filler = math.max(0, inner - title_dw - right_dw)
+  return "╔═" .. title .. string.rep("═", filler) .. right_trimmed .. "═╗"
 end
 
 -- ── main render ──────────────────────────────────────────────────────────
@@ -241,8 +274,6 @@ local function build_render(session, opts)
   end
   if #columns == 0 then columns = st.columns end  -- never hide all
   local ordered = data.get_ordered_rows(st)
-  local pin = session.pinned_count or 0
-  if pin >= #columns then pin = 0 end  -- can't pin all columns
 
   -- Build data type map for conditional formatting
   local cond_type_map = {}
@@ -288,6 +319,8 @@ local function build_render(session, opts)
   local total_inner = 0
   for _, col in ipairs(columns) do total_inner = total_inner + widths[col] + 3 end
   if #columns > 0 then total_inner = total_inner - 1 end  -- no trailing sep
+  -- For tables with 0 columns, use a minimum width for the "(empty result)" message
+  if #columns == 0 then total_inner = math.max(total_inner, 20) end
   local total_width = total_inner + 2  -- + borders
 
   local lines = {}
@@ -303,28 +336,34 @@ local function build_render(session, opts)
   push_mark(#lines, 0, #title, "GripBorder")
 
   -- ── Header row ──
-  local hdr_parts = { "║ " }
+  local hdr_parts = { "║" }
   local qspec = session.query_spec
-  for i, col in ipairs(columns) do
-    local is_ro = st.readonly
-    local prefix = is_ro and "~" or ""
-    local sort_ind = qspec and qmod.get_sort_indicator(qspec, col) or nil
-    local suffix = sort_ind and " " .. sort_ind or ""
-    local label = prefix .. col .. suffix
-    local w = widths[col]
-    local lw = vim.fn.strdisplaywidth(label)
-    if lw > w then
-      label = vim.fn.strcharpart(label, 0, w - 1) .. "…"
-      lw = w
+  if #columns == 0 then
+    table.insert(hdr_parts, string.rep(" ", total_inner))
+  else
+    table.insert(hdr_parts, " ")
+    for i, col in ipairs(columns) do
+      local is_ro = st.readonly
+      local prefix = is_ro and "~" or ""
+      local sort_ind = qspec and qmod.get_sort_indicator(qspec, col) or nil
+      local suffix = sort_ind and " " .. sort_ind or ""
+      local label = prefix .. col .. suffix
+      local w = widths[col]
+      local lw = vim.fn.strdisplaywidth(label)
+      if lw > w then
+        label = vim.fn.strcharpart(label, 0, w - 1) .. "…"
+        lw = w
+      end
+      local padded = label .. string.rep(" ", w - lw)
+      table.insert(hdr_parts, padded)
+      if i < #columns then
+        local col_sep = " " .. SEP_COL .. " "
+        table.insert(hdr_parts, col_sep)
+      end
     end
-    local padded = label .. string.rep(" ", w - lw)
-    table.insert(hdr_parts, padded)
-    if i < #columns then
-      local col_sep = (pin > 0 and i == pin) and (" " .. FREEZE_SEP .. " ") or (" " .. SEP_COL .. " ")
-      table.insert(hdr_parts, col_sep)
-    end
+    table.insert(hdr_parts, " ")
   end
-  table.insert(hdr_parts, " ║")
+  table.insert(hdr_parts, "║")
   local hdr_line = table.concat(hdr_parts)
   table.insert(lines, hdr_line)
   push_mark(#lines, 0, #hdr_line, "GripHeader")
@@ -348,7 +387,7 @@ local function build_render(session, opts)
       local padded = dtype .. string.rep(" ", w - dw)
       table.insert(type_parts, padded)
       if i < #columns then
-        local col_sep = (pin > 0 and i == pin) and (" " .. FREEZE_SEP .. " ") or (" " .. SEP_COL .. " ")
+        local col_sep = " " .. SEP_COL .. " "
         table.insert(type_parts, col_sep)
       end
     end
@@ -360,8 +399,7 @@ local function build_render(session, opts)
   end
 
   -- ── Separator after header ──
-  local freeze_at = pin > 0 and pin or nil
-  local sep_line = border_line(columns, widths, MID_L, SEP_MID, SEP_HDR, MID_R, freeze_at)
+  local sep_line = border_line(columns, widths, MID_L, SEP_MID, SEP_HDR, MID_R, total_inner)
   table.insert(lines, sep_line)
   push_mark(#lines, 0, #sep_line, "GripBorder")
 
@@ -372,14 +410,26 @@ local function build_render(session, opts)
   local COL_SEP_BYTES = #COL_SEP  -- 5 bytes (1+3+1)
   local row_byte_positions = {}  -- [row_order_idx] = {col_name = {start, finish}}
 
+  -- Pre-compute header/column byte positions (same layout for header, type, and data rows)
+  local hdr_byte_positions = {}
+  do
+    local bp = ROW_PREFIX_BYTES  -- after "║ " (4 bytes)
+    for i, col in ipairs(columns) do
+      local cell_w = widths[col]
+      hdr_byte_positions[col] = { start = bp, finish = bp + cell_w - 1 }
+      bp = bp + cell_w
+      if i < #columns then bp = bp + COL_SEP_BYTES end
+    end
+  end
+
   -- ── Data rows ──
   if #ordered == 0 then
-    local empty = "║" .. string.rep(" ", total_inner) .. "║"
-    local msg_s = " (empty result) "
-    local start_col = math.floor((total_inner - #msg_s) / 2) + 1
-    local empty_line = "║" ..
-      string.rep(" ", start_col - 1) .. msg_s ..
-      string.rep(" ", total_inner - start_col - #msg_s + 1) .. "║"
+    local msg_s = total_inner >= 16 and " (empty result) " or total_inner >= 9 and " (empty) " or ""
+    if #msg_s > total_inner then msg_s = "" end
+    local pad_total = total_inner - #msg_s
+    local pad_left = math.floor(pad_total / 2)
+    local pad_right = pad_total - pad_left
+    local empty_line = "║" .. string.rep(" ", pad_left) .. msg_s .. string.rep(" ", pad_right) .. "║"
     table.insert(lines, empty_line)
   else
     for di, row_idx in ipairs(ordered) do
@@ -408,7 +458,7 @@ local function build_render(session, opts)
         byte_pos = byte_pos + #cell_str
 
         if i < #columns then
-          local sep = (pin > 0 and i == pin) and (" " .. FREEZE_SEP .. " ") or COL_SEP
+          local sep = COL_SEP
           table.insert(row_parts, sep)
           byte_pos = byte_pos + #sep  -- same byte width (5) for both separators
         end
@@ -447,7 +497,7 @@ local function build_render(session, opts)
   end
 
   -- ── Bottom border ──
-  local bot_line = border_line(columns, widths, BOT_L, BOT_MID, SEP_HDR, BOT_R, freeze_at)
+  local bot_line = border_line(columns, widths, BOT_L, BOT_MID, SEP_HDR, BOT_R, total_inner)
   table.insert(lines, bot_line)
   push_mark(#lines, 0, #bot_line, "GripBorder")
 
@@ -465,7 +515,6 @@ local function build_render(session, opts)
   if session.elapsed_ms then table.insert(status_parts, session.elapsed_ms .. "ms") end
   if staged_count > 0 then table.insert(status_parts, staged_count .. " staged") end
   if st.readonly then table.insert(status_parts, "read-only") end
-  if pin > 0 then table.insert(status_parts, pin .. " pinned") end
   local hidden_n = 0
   if session.hidden_columns then
     for _ in pairs(session.hidden_columns) do hidden_n = hidden_n + 1 end
@@ -482,13 +531,19 @@ local function build_render(session, opts)
   table.insert(lines, status_str)
 
   -- ── Hint line ──
-  local hints = st.readonly
-    and " r:refresh  Tab:columns  q:quit  ?:help"
-    or  " e:edit  o:insert  d:delete  a:apply  u:undo  r:refresh  Tab:columns  q:quit  ?:help"
+  local hints
+  if session.pending_mutation then
+    local mt = session.pending_mutation.type or "SQL"
+    hints = " a:execute " .. mt .. "  U:cancel  gl:preview SQL  q:query"
+  elseif st.readonly then
+    hints = " r:refresh  Tab:columns  gO:edit table  q:query  A:ai  gC:connect  ?:help"
+  else
+    hints = " i:edit  d:delete  a:apply  r:refresh  q:query  A:ai  gC:connect  ?:help"
+  end
   table.insert(lines, hints)
 
   local data_start = has_type_row and 5 or 4
-  return { lines = lines, marks = marks, widths = widths, ordered = ordered, byte_positions = row_byte_positions, data_start = data_start, visible_columns = columns }
+  return { lines = lines, marks = marks, widths = widths, ordered = ordered, byte_positions = row_byte_positions, hdr_byte_positions = hdr_byte_positions, data_start = data_start, visible_columns = columns }
 end
 
 -- ── namespace for extmarks ───────────────────────────────────────────────
@@ -556,6 +611,7 @@ function M.apply_edit(bufnr, new_state)
   if #session._undo_stack > UNDO_STACK_MAX then
     table.remove(session._undo_stack, 1)
   end
+  session._redo_stack = nil  -- new edit clears redo
   M.render(bufnr, new_state)
 end
 
@@ -698,8 +754,12 @@ function M.open(state, url, query_sql, opts)
   vim.api.nvim_set_option_value("swapfile", false, { buf = bufnr })
   vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
 
-  local tbl = state.table_name or "query"
+  local tbl = state.table_name or "result"
   local buf_name = "grip://" .. tbl
+  -- Ensure unique name (avoid collision with grip://query pad or duplicate table opens)
+  if vim.fn.bufnr(buf_name) ~= -1 then
+    buf_name = buf_name .. "#" .. bufnr
+  end
   pcall(vim.api.nvim_buf_set_name, bufnr, buf_name)
 
   -- Register session before rendering
@@ -716,16 +776,74 @@ function M.open(state, url, query_sql, opts)
   local winid
   if opts and opts.reuse_win and vim.api.nvim_win_is_valid(opts.reuse_win) then
     winid = opts.reuse_win
-    -- Save what was displayed so q can restore it
     local prev_buf = vim.api.nvim_win_get_buf(winid)
-    M._sessions[bufnr].prev_buf = prev_buf
     vim.api.nvim_win_set_buf(winid, bufnr)
     vim.api.nvim_set_current_win(winid)  -- focus grip window (Issue #3)
+    -- Clean up old grip session to prevent stale entries causing duplicate windows
+    if prev_buf ~= bufnr and M._sessions[prev_buf] then
+      local old_s = M._sessions[prev_buf]
+      if old_s then M._close_live_sql_float(old_s) end
+      M._sessions[prev_buf] = nil
+      pcall(vim.api.nvim_buf_delete, prev_buf, { force = true })
+    end
   else
-    vim.cmd("botright split")
-    winid = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_buf(winid, bufnr)
-    vim.api.nvim_win_set_height(winid, math.min(30, #state.rows + 8))
+    -- Defensive: scan for an existing grip grid window to reuse.
+    -- Prevents window stacking when caller omits reuse_win.
+    local found_grid_win
+    if not (opts and opts.force_split) then
+      for _, wid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        local wbuf = vim.api.nvim_win_get_buf(wid)
+        if wbuf ~= bufnr and M._sessions[wbuf] then
+          found_grid_win = wid
+          break
+        end
+      end
+    end
+
+    if found_grid_win then
+      -- Reuse the existing grid window (same logic as reuse_win above)
+      winid = found_grid_win
+      local prev_buf = vim.api.nvim_win_get_buf(winid)
+      vim.api.nvim_win_set_buf(winid, bufnr)
+      vim.api.nvim_set_current_win(winid)
+      if prev_buf ~= bufnr and M._sessions[prev_buf] then
+        local old_s = M._sessions[prev_buf]
+        if old_s then M._close_live_sql_float(old_s) end
+        M._sessions[prev_buf] = nil
+        pcall(vim.api.nvim_buf_delete, prev_buf, { force = true })
+      end
+    else
+      -- No existing grid: create a new split
+      local cur_buf = vim.api.nvim_get_current_buf()
+      local cur_name = vim.api.nvim_buf_get_name(cur_buf)
+      if cur_name:match("grip://query") then
+        vim.cmd("belowright split")
+      else
+        -- When sidebar is open, split within the right area (not full-width below)
+        local schema_mod = require("dadbod-grip.schema")
+        local right_win = schema_mod.is_open() and schema_mod.get_right_win()
+        if right_win then
+          vim.api.nvim_set_current_win(right_win)
+          vim.cmd("belowright split")
+        else
+          vim.cmd("botright split")
+        end
+      end
+      winid = vim.api.nvim_get_current_win()
+      vim.api.nvim_win_set_buf(winid, bufnr)
+      local available = vim.o.lines - 6
+      vim.api.nvim_win_set_height(winid, math.min(available, math.max(15, #state.rows + 6)))
+    end
+  end
+
+  -- Shrink query pad to fit its content so the grid gets more space
+  for _, qw in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local qb = vim.api.nvim_win_get_buf(qw)
+    if vim.api.nvim_buf_get_name(qb):match("grip://query") then
+      local line_count = vim.api.nvim_buf_line_count(qb)
+      vim.api.nvim_win_set_height(qw, math.max(4, math.min(12, line_count + 2)))
+      break
+    end
   end
 
   -- Render
@@ -808,28 +926,22 @@ end
 -- ── keymap wiring ─────────────────────────────────────────────────────────
 function M._setup_keymaps(bufnr)
   local function map(key, fn, desc)
-    vim.keymap.set("n", key, fn, { buffer = bufnr, desc = desc, nowait = true })
+    vim.keymap.set("n", key, fn, { buffer = bufnr, desc = desc, silent = true })
   end
 
-  -- q: close (restore previous buffer if opened via reuse_win)
+  -- q: open query pad (pre-filled with current query)
   map("q", function()
-    local session = M._sessions[bufnr]
-    if session and data.has_changes(session.state) then
-      local staged = data.count_staged(session.state)
-      local choice = vim.fn.confirm(
-        string.format("%d unapplied change(s). Close anyway?", staged),
-        "&Close\n&Cancel", 2
-      )
-      if choice ~= 1 then return end
+    local query_pad = require("dadbod-grip.query_pad")
+    local session_q = M._sessions[bufnr]
+    local s_url = session_q and session_q.url
+    local initial_sql
+    if session_q and session_q.query_spec then
+      initial_sql = qmod.build_sql(session_q.query_spec)
+    elseif session_q and session_q.query_sql then
+      initial_sql = session_q.query_sql
     end
-    local prev = session and session.prev_buf
-    if prev and vim.api.nvim_buf_is_valid(prev) then
-      vim.api.nvim_win_set_buf(0, prev)
-      vim.api.nvim_buf_delete(bufnr, { force = true })
-    else
-      vim.cmd("bd")
-    end
-  end, "Close grip buffer")
+    query_pad.open(s_url, initial_sql and { initial_sql = initial_sql } or nil)
+  end, "Open query pad")
 
   -- r: refresh
   map("r", function()
@@ -839,8 +951,8 @@ function M._setup_keymaps(bufnr)
     if session.on_refresh then session.on_refresh(bufnr) end
   end, "Refresh query")
 
-  -- e: edit cell
-  map("e", function()
+  -- e/i: edit cell
+  local function edit_cell()
     local session = M._sessions[bufnr]
     if not session then return end
     if session.state.readonly then
@@ -853,7 +965,9 @@ function M._setup_keymaps(bufnr)
       return
     end
     if session.on_edit then session.on_edit(bufnr, cell) end
-  end, "Edit cell")
+  end
+  map("e", edit_cell, "Edit cell")
+  map("i", edit_cell, "Edit cell")
 
   -- d: toggle delete row
   map("d", function()
@@ -888,6 +1002,40 @@ function M._setup_keymaps(bufnr)
   map("a", function()
     local session = M._sessions[bufnr]
     if not session then return end
+
+    -- Mutation preview mode: execute the pending mutation
+    if session.pending_mutation then
+      local pm = session.pending_mutation
+      local choice = vim.fn.confirm(
+        string.format("Execute %s? (%d row%s affected)\n\n%s",
+          pm.type, pm.row_count, pm.row_count == 1 and "" or "s",
+          pm.sql:sub(1, 200)),
+        "&Execute\n&Cancel", 2)
+      if choice ~= 1 then return end
+      local t0 = vim.uv.hrtime()
+      local _, err = db.execute(pm.sql, session.url)
+      local ms = math.floor((vim.uv.hrtime() - t0) / 1e6)
+      if err then
+        vim.notify("Failed: " .. err, vim.log.levels.ERROR)
+        return
+      end
+      vim.notify(string.format("%s executed (%dms, %d row%s)",
+        pm.type, ms, pm.row_count, pm.row_count == 1 and "" or "s"), vim.log.levels.INFO)
+      local history = require("dadbod-grip.history")
+      history.record({ sql = pm.sql, url = session.url, type = pm.type:lower(), elapsed_ms = ms })
+      -- Clear mutation state and reopen the full table
+      local tbl = pm.table_name
+      local s_url = session.url
+      session.pending_mutation = nil
+      session._mutation_title = nil
+      -- Reopen the full table (not the WHERE-filtered preview)
+      local current_win = vim.api.nvim_get_current_win()
+      local grip = require("dadbod-grip")
+      grip.open(tbl, s_url, { reuse_win = current_win })
+      return
+    end
+
+    -- Normal mode: apply staged changes
     if session.state.readonly then
       vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
       return
@@ -905,28 +1053,78 @@ function M._setup_keymaps(bufnr)
     if session.on_apply then session.on_apply(bufnr) end
   end, "Apply staged changes")
 
-  -- u: undo (pops from undo stack)
+  -- u: two-tier undo
+  -- Tier 0: mutation preview cancel
+  -- Tier 1: local staging undo (uncommitted changes)
+  -- Tier 2: transaction undo (reverse committed SQL)
   map("u", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    if not session._undo_stack or #session._undo_stack == 0 then
-      vim.notify("Nothing to undo", vim.log.levels.INFO)
+
+    -- Tier 0: mutation preview — cancel (close the preview)
+    if session.pending_mutation then
+      session.pending_mutation = nil
+      session._mutation_title = nil
+      vim.notify("Mutation cancelled", vim.log.levels.INFO)
+      -- Close the preview grid window
+      local win = vim.fn.bufwinid(bufnr)
+      if win ~= -1 then
+        pcall(vim.api.nvim_win_close, win, true)
+      end
       return
     end
-    local prev_state = table.remove(session._undo_stack)
-    M.render(bufnr, prev_state)
-    local remaining = #session._undo_stack
-    if remaining > 0 then
-      vim.notify("Undo (" .. remaining .. " more)", vim.log.levels.INFO)
-    else
-      vim.notify("Undo (back to original)", vim.log.levels.INFO)
+
+    -- Tier 1: local staging undo
+    if session._undo_stack and #session._undo_stack > 0 then
+      if not session._redo_stack then session._redo_stack = {} end
+      table.insert(session._redo_stack, session.state)
+      local prev_state = table.remove(session._undo_stack)
+      M.render(bufnr, prev_state)
+      local remaining = #session._undo_stack
+      if remaining > 0 then
+        vim.notify("Undo (" .. remaining .. " more)", vim.log.levels.INFO)
+      else
+        vim.notify("Undo (back to original)", vim.log.levels.INFO)
+      end
+      return
     end
+
+    -- Tier 2: transaction undo
+    if session._txn_undo_stack and #session._txn_undo_stack > 0 then
+      local reverse = session._txn_undo_stack[#session._txn_undo_stack]
+      local count = #reverse
+      local choice = vim.fn.confirm(
+        "Undo last committed transaction? (" .. count .. " statement(s))",
+        "&Yes\n&No", 2)
+      if choice ~= 1 then return end
+      local txn = "BEGIN;\n" .. table.concat(reverse, ";\n") .. ";\nCOMMIT;"
+      local _, err = db.execute(txn, session.url)
+      if err then
+        vim.notify("Undo failed: " .. err, vim.log.levels.ERROR)
+        return
+      end
+      table.remove(session._txn_undo_stack)
+      vim.notify("Undid transaction (" .. count .. " statement(s))", vim.log.levels.INFO)
+      if session.on_refresh then session.on_refresh(bufnr) end
+      return
+    end
+
+    vim.notify("Nothing to undo", vim.log.levels.INFO)
   end, "Undo last edit")
 
-  -- U: undo all (resets to original state)
+  -- U: undo all (resets to original state) or cancel mutation
   map("U", function()
     local session = M._sessions[bufnr]
     if not session then return end
+    -- Mutation preview: cancel
+    if session.pending_mutation then
+      session.pending_mutation = nil
+      session._mutation_title = nil
+      vim.notify("Mutation cancelled", vim.log.levels.INFO)
+      local win = vim.fn.bufwinid(bufnr)
+      if win ~= -1 then pcall(vim.api.nvim_win_close, win, true) end
+      return
+    end
     if not session._undo_stack or #session._undo_stack == 0 then
       vim.notify("No staged changes", vim.log.levels.INFO)
       return
@@ -937,6 +1135,22 @@ function M._setup_keymaps(bufnr)
     M.render(bufnr, original)
     vim.notify("Undid all " .. count .. " change(s)", vim.log.levels.INFO)
   end, "Undo all changes")
+
+  -- <C-r>: redo
+  map("<C-r>", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    if not session._redo_stack or #session._redo_stack == 0 then
+      vim.notify("Nothing to redo", vim.log.levels.INFO)
+      return
+    end
+    if not session._undo_stack then session._undo_stack = {} end
+    table.insert(session._undo_stack, session.state)
+    local redo_state = table.remove(session._redo_stack)
+    M.render(bufnr, redo_state)
+    local remaining = #session._redo_stack
+    vim.notify("Redo" .. (remaining > 0 and " (" .. remaining .. " more)" or ""), vim.log.levels.INFO)
+  end, "Redo")
 
   -- y: yank cell value
   map("y", function()
@@ -1010,7 +1224,7 @@ function M._setup_keymaps(bufnr)
 
   -- ── visual mode batch editing ──────────────────────────────────────────
   local function vmap(key, fn, desc)
-    vim.keymap.set("x", key, fn, { buffer = bufnr, desc = desc, nowait = true })
+    vim.keymap.set("x", key, fn, { buffer = bufnr, desc = desc, silent = true })
   end
 
   -- Helper: collect row indices from visual selection
@@ -1072,10 +1286,13 @@ function M._setup_keymaps(bufnr)
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
     local st = session.state
     for _, ri in ipairs(row_indices) do
-      st = data.toggle_delete(st, ri)
+      if st.inserted[ri] then
+        st = data.undo_row(st, ri)
+      else
+        st = data.toggle_delete(st, ri)
+      end
     end
     M.apply_edit(bufnr, st)
-    vim.notify("Toggled delete on " .. #row_indices .. " row(s)", vim.log.levels.INFO)
   end, "Batch toggle delete")
 
   -- Visual n: set all selected cells to NULL
@@ -1195,6 +1412,24 @@ function M._setup_keymaps(bufnr)
     properties.open(st.table_name, st.url, grip_win)
   end, "Table properties")
 
+  -- gN: rename column under cursor
+  map("gN", function()
+    local session = M._sessions[bufnr]
+    if not session or not session.state.table_name then
+      vim.notify("Rename requires a table name", vim.log.levels.INFO)
+      return
+    end
+    local cell = M.get_cell(bufnr)
+    if not cell then
+      vim.notify("Move cursor to a column", vim.log.levels.INFO)
+      return
+    end
+    local ddl_mod = require("dadbod-grip.ddl")
+    ddl_mod.rename_column(session.state.table_name, cell.col_name, session.url, function()
+      if session.on_refresh then session.on_refresh(bufnr) end
+    end)
+  end, "Rename column")
+
   -- ge: explain cell
   map("ge", function()
     local session = M._sessions[bufnr]
@@ -1242,22 +1477,56 @@ function M._setup_keymaps(bufnr)
 
   -- <CR>: expand cell popup
   map("<CR>", function()
+    local session_cr = M._sessions[bufnr]
+    if not session_cr or not session_cr._render then return end
     local cell = M.get_cell(bufnr)
-    if not cell then
-      vim.notify("Move cursor to a data row to expand", vim.log.levels.INFO)
-      return
+    if cell then
+      -- Data row: expand cell value
+      local val = cell.value or "(NULL)"
+      local expand_lines = {}
+      for line in (val .. "\n"):gmatch("([^\n]*)\n") do
+        table.insert(expand_lines, line)
+      end
+      local grip_win = vim.api.nvim_get_current_win()
+      open_info_float(grip_win, expand_lines, {
+        title = " " .. cell.col_name .. " ",
+        relative = "cursor",
+        row = 1, col = 0,
+      })
+    else
+      -- Header/type row: detect column under cursor, show full name/type
+      local r = session_cr._render
+      local ref_bp = r.hdr_byte_positions
+      if not ref_bp then return end
+      local cols = r.visible_columns or session_cr.state.columns
+      local col_nr = vim.api.nvim_win_get_cursor(0)[2]
+      local found_col
+      for _, col in ipairs(cols) do
+        local bp = ref_bp[col]
+        if bp and col_nr >= bp.start and col_nr <= bp.finish then
+          found_col = col
+          break
+        end
+      end
+      if found_col then
+        local info = { found_col }
+        if session_cr._column_info then
+          for _, ci in ipairs(session_cr._column_info) do
+            if ci.column_name == found_col then
+              table.insert(info, "Type: " .. (ci.data_type or "unknown"))
+              if ci.is_nullable then table.insert(info, "Nullable: " .. ci.is_nullable) end
+              break
+            end
+          end
+        end
+        local grip_win = vim.api.nvim_get_current_win()
+        open_info_float(grip_win, info, {
+          title = " " .. found_col .. " ",
+          relative = "cursor",
+          row = 1, col = 0,
+        })
+      end
     end
-    local val = cell.value or "(NULL)"
-    local lines = {}
-    for line in (val .. "\n"):gmatch("([^\n]*)\n") do
-      table.insert(lines, line)
-    end
-    local grip_win = vim.api.nvim_get_current_win()
-    open_info_float(grip_win, lines, {
-      title = " " .. cell.col_name .. " ",
-      relative = "cursor",
-      row = 1, col = 0,
-    })
   end, "Expand cell value")
 
   -- K: row view (vertical transpose)
@@ -1277,7 +1546,7 @@ function M._setup_keymaps(bufnr)
     local lines = {}
     for _, col in ipairs(st.columns) do
       local val = data.effective_value(st, cell.row_idx, col)
-      local display_val = val or "NULL"
+      local display_val = val and val:gsub("\n", "↵"):gsub("\r", "") or "NULL"
       local pad = string.rep(" ", max_name_w - vim.fn.strdisplaywidth(col))
       table.insert(lines, " " .. col .. pad .. "   " .. display_val)
     end
@@ -1316,26 +1585,52 @@ function M._setup_keymaps(bufnr)
     end
   end, "Row view")
 
-  -- Shared helper: navigate to column by visible index offset
+  -- Shared helper: navigate to column by visible index offset.
+  -- Works on data rows, header row, and type annotation row.
   local function nav_col(bufnr_l, offset)
-    local cell = M.get_cell(bufnr_l)
-    if not cell then return end
     local session_n = M._sessions[bufnr_l]
+    if not session_n or not session_n._render then
+      vim.notify("nav_col: no session or render", vim.log.levels.WARN)
+      return
+    end
     local r = session_n._render
     local cols = r.visible_columns or session_n.state.columns
+    if #cols == 0 then
+      vim.notify("nav_col: 0 columns", vim.log.levels.WARN)
+      return
+    end
     local cursor = vim.api.nvim_win_get_cursor(0)
-    local ds = r.data_start or 4
-    local row_order_idx = cursor[1] - ds + 1
-    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
-    if not bp_row then return end
+
+    -- Use byte positions from first data row, or header positions as fallback (empty tables)
+    local ref_bp = (r.byte_positions and r.byte_positions[1]) or r.hdr_byte_positions
+    if not ref_bp then
+      vim.notify("nav_col: no byte positions", vim.log.levels.WARN)
+      return
+    end
+
+    -- Determine current column index from cursor byte offset
+    local col_nr = cursor[2]
+    local current_idx = 1
+    for i, col in ipairs(cols) do
+      local bp = ref_bp[col]
+      if bp and col_nr >= bp.start and col_nr <= bp.finish then
+        current_idx = i
+        break
+      elseif bp and col_nr < bp.start then
+        current_idx = math.max(1, i - 1)
+        break
+      end
+      current_idx = i  -- past all known columns, snap to last
+    end
+
     local target_idx
     if offset > 0 then
-      target_idx = (cell.col_idx % #cols) + 1
+      target_idx = (current_idx % #cols) + 1
     else
-      target_idx = cell.col_idx == 1 and #cols or cell.col_idx - 1
+      target_idx = current_idx == 1 and #cols or current_idx - 1
     end
     local target_col = cols[target_idx]
-    local bp = bp_row[target_col]
+    local bp = ref_bp[target_col]
     if not bp then return end
     vim.api.nvim_win_set_cursor(0, { cursor[1], bp.start })
   end
@@ -1386,18 +1681,10 @@ function M._setup_keymaps(bufnr)
     vim.api.nvim_win_set_cursor(0, { cursor[1], bp.start })
   end, "First column")
 
-  -- 0: unpin all OR first column (dual behavior)
+  -- 0: first column (same as ^)
   map("0", function()
     local session = M._sessions[bufnr]
-    if not session then return end
-    if session.pinned_count and session.pinned_count > 0 then
-      session.pinned_count = 0
-      vim.notify("Unpinned all columns", vim.log.levels.INFO)
-      M.render(bufnr, session.state)
-      return
-    end
-    -- Fallback: jump to first column
-    if not session._render then return end
+    if not session or not session._render then return end
     local r = session._render
     local cols = r.visible_columns or session.state.columns
     local cursor = vim.api.nvim_win_get_cursor(0)
@@ -1408,23 +1695,7 @@ function M._setup_keymaps(bufnr)
     local bp = bp_row[cols[1]]
     if not bp then return end
     vim.api.nvim_win_set_cursor(0, { cursor[1], bp.start })
-  end, "Unpin all / first column")
-
-  -- 1-9: pin N leftmost columns
-  for n = 1, 9 do
-    map(tostring(n), function()
-      local session = M._sessions[bufnr]
-      if not session then return end
-      local cols = session.state.columns
-      if n >= #cols then
-        vim.notify("Only " .. #cols .. " columns", vim.log.levels.INFO)
-        return
-      end
-      session.pinned_count = n
-      vim.notify("Pinned " .. n .. " column(s)", vim.log.levels.INFO)
-      M.render(bufnr, session.state)
-    end, "Pin " .. n .. " column(s)")
-  end
+  end, "First column")
 
   -- -: hide column under cursor
   map("-", function()
@@ -1659,6 +1930,24 @@ function M._setup_keymaps(bufnr)
   map("gl", function()
     local session = M._sessions[bufnr]
     if not session then return end
+
+    -- Mutation preview mode: show the mutation SQL in a float
+    if session.pending_mutation then
+      if session._live_sql_win and vim.api.nvim_win_is_valid(session._live_sql_win) then
+        M._close_live_sql_float(session)
+        vim.notify("SQL preview: OFF", vim.log.levels.INFO)
+      else
+        local pm_lines = {}
+        for line in (session.pending_mutation.sql .. "\n"):gmatch("([^\n]*)\n") do
+          table.insert(pm_lines, line)
+        end
+        local grip_win = vim.api.nvim_get_current_win()
+        open_info_float(grip_win, pm_lines, { title = " " .. session.pending_mutation.type .. " SQL ", filetype = "sql" })
+        vim.notify("SQL preview: ON", vim.log.levels.INFO)
+      end
+      return
+    end
+
     if not session.state.table_name then
       vim.notify("Live SQL requires a table name", vim.log.levels.INFO)
       return
@@ -2335,19 +2624,80 @@ function M._setup_keymaps(bufnr)
     end)
   end, "Pick table")
 
-  -- gQ: open query pad with current query pre-filled
-  map("gQ", function()
-    local query_pad = require("dadbod-grip.query_pad")
-    local session_q = M._sessions[bufnr]
-    local s_url = session_q and session_q.url
-    local initial_sql
-    if session_q and session_q.query_spec then
-      initial_sql = qmod.build_sql(session_q.query_spec)
-    elseif session_q and session_q.query_sql then
-      initial_sql = session_q.query_sql
+  -- gC / <C-g>: switch database connection
+  local function _pick_connection()
+    require("dadbod-grip.connections").pick()
+  end
+  map("gC", _pick_connection, "Switch connection")
+  map("<C-g>", _pick_connection, "Switch connection")
+
+  -- gO: swap read-only query result to editable table
+  map("gO", function()
+    local session = M._sessions[bufnr]
+    if not session then return end
+    if not session.state.readonly then
+      vim.notify("Already editable: i=edit  o=insert  d=delete", vim.log.levels.INFO)
+      return
     end
-    query_pad.open(s_url, initial_sql and { initial_sql = initial_sql } or nil)
-  end, "Open query pad")
+    local grip = require("dadbod-grip")
+    local s_url = session.url
+    local current_win = vim.api.nvim_get_current_win()
+
+    -- Try to auto-detect table name (check all sources)
+    local detected = session.state.table_name
+      or (session.query_spec and session.query_spec.table_name)
+    local ambiguous = false
+
+    -- Helper: extract table name from SQL (handles quoted and unquoted identifiers)
+    local function extract_table_from_sql(sql_text)
+      local flat = sql_text:gsub("\n", " ")
+      -- Try quoted: FROM "table" or FROM `table`
+      local quoted = flat:match('[Ff][Rr][Oo][Mm]%s+"([^"]+)"')
+        or flat:match("[Ff][Rr][Oo][Mm]%s+`([^`]+)`")
+      if quoted then return quoted end
+      -- Unquoted: FROM table_name
+      return flat:match("[Ff][Rr][Oo][Mm]%s+([%w_%.]+)")
+    end
+
+    local function has_joins(sql_text)
+      return sql_text:upper():match("JOIN%s") ~= nil
+    end
+
+    -- Fallback: parse base_sql from query spec (original unwrapped SQL)
+    if not detected and session.query_spec and session.query_spec.base_sql then
+      detected = extract_table_from_sql(session.query_spec.base_sql)
+      ambiguous = has_joins(session.query_spec.base_sql)
+    end
+
+    -- Last resort: parse the wrapped query_sql (extract inner from _grip wrapper)
+    if not detected then
+      local sql_str = (session.query_sql or ""):gsub("\n", " ")
+      local inner_sql = sql_str:match("%(%s*(.-)%s*%)%s+AS%s+_grip")
+      local parse_target = inner_sql or sql_str
+      detected = extract_table_from_sql(parse_target)
+      ambiguous = ambiguous or has_joins(parse_target)
+    end
+
+    if detected and not ambiguous then
+      vim.notify("Opening " .. detected .. " as editable table", vim.log.levels.INFO)
+      grip.open(detected, s_url, { reuse_win = current_win })
+    else
+      -- Detection failed — show diagnostics so we can fix the root cause
+      vim.notify(string.format(
+        "gO: could not detect table\n table_name=%s | has_spec=%s | spec.table=%s\n spec.base_sql=%s\n query_sql=%s",
+        tostring(session.state.table_name),
+        tostring(session.query_spec ~= nil),
+        tostring(session.query_spec and session.query_spec.table_name),
+        tostring(session.query_spec and session.query_spec.base_sql and session.query_spec.base_sql:sub(1, 60)),
+        tostring((session.query_sql or ""):sub(1, 60))
+      ), vim.log.levels.WARN)
+      -- Still offer picker as fallback
+      local picker = require("dadbod-grip.picker")
+      picker.pick_table(s_url, function(name)
+        grip.open(name, s_url, { reuse_win = current_win })
+      end)
+    end
+  end, "Open as editable table")
 
   -- gh: query history browser
   map("gh", function()
@@ -2360,8 +2710,8 @@ function M._setup_keymaps(bufnr)
     end)
   end, "Query history")
 
-  -- gA: AI SQL generation
-  map("gA", function()
+  -- A: AI SQL generation
+  map("A", function()
     local session_ai = M._sessions[bufnr]
     local s_url = session_ai and session_ai.state.url
     if not s_url then
@@ -2398,9 +2748,7 @@ function M._setup_keymaps(bufnr)
       "  Tab/S-Tab Next / previous column",
       "  gg        First data row",
       "  G         Last data row",
-      "  ^         First column",
-      "  1-9       Pin N leftmost columns (freeze)",
-      "  0         Unpin all / first column",
+      "  0/^       First column",
       "  -         Hide column under cursor",
       "  g-        Restore all hidden columns",
       "  gH        Column visibility picker",
@@ -2439,13 +2787,15 @@ function M._setup_keymaps(bufnr)
       "  Schema & Workflow",
       "  go        Toggle schema browser",
       "  gT        Pick table (fuzzy finder)",
-      "  gQ        Open query pad",
+      "  gO     Open as editable table (read-only → table)",
+      "  gC/<C-g>  Switch database connection",
+      "  q         Open query pad",
       "  gh        Query history browser",
-      "  gA        AI SQL generation",
+      "  A         AI SQL generation",
       "",
       "  Actions",
       "  r         Refresh (re-run query)",
-      "  q         Close grip buffer",
+      "  :q        Close grip buffer",
       "  ?         Toggle this help",
     }
     if ro then
@@ -2469,13 +2819,14 @@ function M._setup_keymaps(bufnr)
       vim.list_extend(help, {
         "",
         "  Editing",
-        "  e         Edit cell under cursor",
+        "  i/e       Edit cell under cursor",
         "  n         Set cell to NULL",
         "  p         Paste clipboard into cell",
         "  P         Paste multi-line into rows",
         "  o         Insert new row after cursor",
         "  d         Toggle delete on current row",
         "  u         Undo last edit (multi-level)",
+        "  <C-r>     Redo",
         "  U         Undo all (reset to original)",
         "  a         Apply all staged changes to DB",
         "",
@@ -2490,6 +2841,7 @@ function M._setup_keymaps(bufnr)
         "  gc        Copy staged SQL to clipboard",
         "  gi        Table info (columns, types, PKs)",
         "  gI        Table properties (full detail)",
+        "  gN        Rename column under cursor",
         "  ge        Explain cell under cursor",
         "",
         "  Advanced",

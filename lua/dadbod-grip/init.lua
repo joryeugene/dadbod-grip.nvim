@@ -78,10 +78,16 @@ local function resolve_query(arg, page_size)
     return query.new_raw(file_sql, page_size), nil, path
   end
 
-  -- If it looks like a SELECT/WITH statement, run as raw query
+  -- Detect statement type
   local upper = arg:upper():match("^%s*(%u+)")
   if upper == "SELECT" or upper == "WITH" or upper == "TABLE" then
     return query.new_raw(arg, page_size), nil
+  end
+  -- Destructive statements: execute directly, don't wrap in SELECT
+  if upper == "UPDATE" or upper == "DELETE" or upper == "INSERT"
+    or upper == "ALTER" or upper == "DROP" or upper == "CREATE"
+    or upper == "BEGIN" or upper == "COMMIT" or upper == "ROLLBACK" then
+    return nil, nil, nil, arg  -- 4th return = mutation SQL
   end
   -- Otherwise treat as table name
   return query.new_table(arg, page_size), arg
@@ -133,7 +139,53 @@ local function do_apply(bufnr, url)
     return
   end
 
-  -- Success — notify, record history, and refresh
+  -- Success — compute reverse SQL for transaction undo before clearing staging
+  local reverse_stmts = {}
+  local col_idx = {}
+  for i, col in ipairs(st.columns) do col_idx[col] = i end
+
+  -- Reverse of DELETE = INSERT with full original row data
+  for _, del in ipairs(deletes) do
+    local row_values = {}
+    for _, col in ipairs(st.columns) do
+      row_values[col] = st.rows[del.row_idx][col_idx[col]]
+    end
+    table.insert(reverse_stmts, sql.build_insert(st.table_name, row_values, st.columns))
+  end
+
+  -- Reverse of UPDATE = UPDATE with original pre-change values
+  for _, upd in ipairs(updates) do
+    local orig_values = {}
+    for col, _ in pairs(upd.changes) do
+      orig_values[col] = st.rows[upd.row_idx][col_idx[col]]
+    end
+    table.insert(reverse_stmts, sql.build_update(st.table_name, upd.pk_values, orig_values))
+  end
+
+  -- Reverse of INSERT = DELETE by PK (inserts have no row_idx in original data,
+  -- so we build the PK from the inserted values themselves)
+  for _, ins in ipairs(inserts) do
+    local ins_pk_values = {}
+    for _, pk in ipairs(st.pks) do
+      ins_pk_values[pk] = ins.values[pk]
+    end
+    -- Only generate reverse DELETE if we have PK values
+    if next(ins_pk_values) then
+      table.insert(reverse_stmts, sql.build_delete(st.table_name, ins_pk_values))
+    end
+  end
+
+  -- Store in transaction undo stack
+  if #reverse_stmts > 0 then
+    session._txn_undo_stack = session._txn_undo_stack or {}
+    table.insert(session._txn_undo_stack, reverse_stmts)
+    if #session._txn_undo_stack > 10 then table.remove(session._txn_undo_stack, 1) end
+  end
+
+  -- Clear local staging undo stack (stale pre-apply states)
+  session._undo_stack = {}
+
+  -- Notify, record history, and refresh
   local parts = {}
   if #updates > 0 then table.insert(parts, #updates .. " update(s)") end
   if #deletes > 0 then table.insert(parts, #deletes .. " delete(s)") end
@@ -152,6 +204,16 @@ local function do_refresh(bufnr, url, query_sql, table_name)
   if err then
     vim.notify("Grip: query failed: " .. err, vim.log.levels.ERROR)
     return
+  end
+
+  -- Empty result: fetch columns from schema (adapter returns none for 0 rows)
+  if (#result.columns == 0) and table_name then
+    local col_info = db.get_column_info(table_name, url)
+    if col_info then
+      for _, ci in ipairs(col_info) do
+        table.insert(result.columns, ci.column_name)
+      end
+    end
   end
 
   -- Re-fetch primary keys
@@ -194,6 +256,135 @@ local function do_edit(bufnr, cell, url)
   end)
 end
 
+-- ── mutation preview ──────────────────────────────────────────────────────
+-- Shows affected rows in a grid before executing UPDATE/DELETE.
+function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
+  local sql_mod = require("dadbod-grip.sql")
+
+  -- Extract table name from the SQL (handles quoted identifiers)
+  local flat = mutation_sql:gsub("\n", " ")
+  local table_name
+  if stmt_type == "UPDATE" then
+    local after_update = flat:match("[Uu][Pp][Dd][Aa][Tt][Ee]%s+(.*)")
+    if after_update then
+      table_name = after_update:match('^"([^"]+)"') or after_update:match("^`([^`]+)`") or after_update:match("^([%w_%.]+)")
+    end
+  elseif stmt_type == "DELETE" then
+    table_name = flat:match('[Ff][Rr][Oo][Mm]%s+"([^"]+)"')
+      or flat:match("[Ff][Rr][Oo][Mm]%s+`([^`]+)`")
+      or flat:match("[Ff][Rr][Oo][Mm]%s+([%w_%.]+)")
+  end
+
+  if not table_name then
+    vim.notify("Could not parse table from " .. stmt_type, vim.log.levels.ERROR)
+    return
+  end
+
+  -- Extract WHERE clause
+  local where = flat:match("[Ww][Hh][Ee][Rr][Ee]%s+(.+)$")
+  if where then
+    where = where:gsub("%s*;%s*$", "")
+    -- Strip trailing ORDER BY, LIMIT etc.
+    where = where:gsub("%s+[Oo][Rr][Dd][Ee][Rr]%s+[Bb][Yy].*$", "")
+    where = where:gsub("%s+[Ll][Ii][Mm][Ii][Tt]%s+.*$", "")
+  end
+
+  -- Build preview SELECT
+  local preview_sql = "SELECT * FROM " .. sql_mod.quote_ident(table_name)
+  if where and where ~= "" then
+    preview_sql = preview_sql .. " WHERE " .. where
+  end
+
+  -- Run preview query
+  local result, err = db.query(preview_sql, url)
+  if not result then
+    vim.notify("Preview failed: " .. (err or "query error"), vim.log.levels.ERROR)
+    return
+  end
+
+  -- Fetch columns from schema if needed (empty result)
+  if #result.columns == 0 then
+    local col_info = db.get_column_info(table_name, url)
+    if col_info then
+      for _, ci in ipairs(col_info) do table.insert(result.columns, ci.column_name) end
+    end
+  end
+
+  -- Fetch PKs
+  local pks = db.get_primary_keys(table_name, url) or {}
+  result.primary_keys = pks
+  result.table_name = table_name
+  result.url = url
+  result.sql = preview_sql
+
+  local state = data.new(result)
+  local row_count = #result.rows
+
+  -- For UPDATE: parse SET clause and pre-stage changes so cells show as blue
+  if stmt_type == "UPDATE" and row_count > 0 then
+    local set_clause = flat:match("[Ss][Ee][Tt]%s+(.-)%s+[Ww][Hh][Ee][Rr][Ee]")
+      or flat:match("[Ss][Ee][Tt]%s+(.-)%s*;?%s*$")
+    if set_clause then
+      -- Parse "col = 'val', col2 = 'val2'" assignments
+      for assignment in set_clause:gmatch("([^,]+)") do
+        local col_raw, val_raw = assignment:match("^%s*(.-)%s*=%s*(.-)%s*$")
+        if col_raw and val_raw then
+          -- Strip quotes from column name
+          local col = col_raw:match('^"([^"]+)"$') or col_raw:match("^`([^`]+)`$") or col_raw:match("^%s*(%S+)%s*$")
+          -- Strip quotes from value
+          local val = val_raw:match("^'(.-)'$") or val_raw:match('^"(.-)"$') or val_raw
+          if col and val then
+            -- Apply as staged change to every row
+            for row_idx = 1, #state.rows do
+              state = data.add_change(state, row_idx, col, val)
+            end
+          end
+        end
+      end
+    end
+  end
+
+  -- For DELETE: mark all rows as deleted so they show red
+  if stmt_type == "DELETE" and row_count > 0 then
+    for row_idx = 1, #state.rows do
+      state = data.toggle_delete(state, row_idx)
+    end
+  end
+
+  -- Open grid with pending_mutation metadata
+  local reuse_win = caller_opts and caller_opts.reuse_win
+  local view_opts = {
+    max_col_width = OPTS.max_col_width,
+    pending_mutation = {
+      sql = mutation_sql,
+      type = stmt_type,
+      table_name = table_name,
+      row_count = row_count,
+    },
+  }
+  if reuse_win then view_opts.reuse_win = reuse_win end
+
+  local bufnr = view.open(state, url, preview_sql, view_opts)
+
+  -- Store mutation info on session and re-render to pick up title/hints
+  local session = view._sessions[bufnr]
+  if session then
+    session.pending_mutation = view_opts.pending_mutation
+    session.query_spec = query.new_raw(preview_sql, OPTS.limit)
+    session._mutation_title = string.format("%s %s (%d row%s)",
+      stmt_type, table_name, row_count, row_count == 1 and "" or "s")
+
+    -- Wire refresh callback so grid updates after mutation executes
+    view.set_callbacks(bufnr, {
+      on_refresh = function(bid)
+        do_refresh(bid, url, preview_sql, table_name)
+      end,
+    })
+
+    view.render(bufnr, session.state)  -- re-render with mutation title + hints
+  end
+end
+
 -- ── open ──────────────────────────────────────────────────────────────────
 function M.open(arg, url, opts)
   -- Resolve connection URL
@@ -204,9 +395,46 @@ function M.open(arg, url, opts)
   end
 
   -- Resolve query spec (must happen before connection check for file-as-table)
-  local spec, table_name_arg, file_path = resolve_query(arg, OPTS.limit)
+  local spec, table_name_arg, file_path, mutation_sql = resolve_query(arg, OPTS.limit)
+
+  -- Handle destructive statements (UPDATE/DELETE/INSERT/DDL)
+  if mutation_sql then
+    local exec_conn = url or conn or vim.b.db or vim.g.db
+    if not exec_conn or exec_conn == "" then
+      vim.notify("Grip: no database connection", vim.log.levels.WARN)
+      return
+    end
+    local stmt_type = mutation_sql:upper():match("^%s*(%u+)") or "SQL"
+
+    -- For UPDATE/DELETE: show preview of affected rows first
+    if stmt_type == "UPDATE" or stmt_type == "DELETE" then
+      M._mutation_preview(mutation_sql, exec_conn, stmt_type, opts)
+      return
+    end
+
+    -- For INSERT/DDL: confirm then execute
+    local label = stmt_type == "INSERT" and "Execute INSERT?" or ("Execute " .. stmt_type .. "?")
+    local choice = vim.fn.confirm(label .. "\n\n" .. mutation_sql:sub(1, 200), "&Execute\n&Cancel", 2)
+    if choice ~= 1 then return end
+
+    local t0 = vim.uv.hrtime()
+    local _, exec_err = db.execute(mutation_sql, exec_conn)
+    local ms = math.floor((vim.uv.hrtime() - t0) / 1e6)
+    if exec_err then
+      vim.notify("Grip: " .. exec_err, vim.log.levels.ERROR)
+    else
+      vim.notify(string.format("%s executed (%dms)", stmt_type, ms), vim.log.levels.INFO)
+      local history = require("dadbod-grip.history")
+      history.record({ sql = mutation_sql, url = exec_conn, type = stmt_type:lower(), elapsed_ms = ms })
+      for bufnr_r, session_r in pairs(view._sessions) do
+        if session_r.on_refresh then session_r.on_refresh(bufnr_r); break end
+      end
+    end
+    return
+  end
+
   if not spec then
-    vim.notify("Grip: " .. table_name_arg, vim.log.levels.WARN)
+    vim.notify("Grip: " .. (table_name_arg or "unknown error"), vim.log.levels.WARN)
     return
   end
 
@@ -229,6 +457,16 @@ function M.open(arg, url, opts)
   if not result then
     vim.notify("Grip: " .. (qerr or "query failed"), vim.log.levels.ERROR)
     return
+  end
+
+  -- Empty result: adapter may not return columns. Fetch from table schema.
+  if (#result.columns == 0) and table_name_arg then
+    local col_info = db.get_column_info(table_name_arg, conn)
+    if col_info then
+      for _, ci in ipairs(col_info) do
+        table.insert(result.columns, ci.column_name)
+      end
+    end
   end
 
   -- Fetch primary keys if we have a table name
@@ -318,14 +556,18 @@ function M.open(arg, url, opts)
     on_delete = function(bid, row_idx)
       local session_d = view._sessions[bid]
       if not session_d then return end
-      local was_deleted = session_d.state.deleted[row_idx]
-      local new_state = data.toggle_delete(session_d.state, row_idx)
-      if was_deleted then
-        vim.notify("Row " .. row_idx .. " unmarked", vim.log.levels.INFO)
+      if session_d.state.inserted[row_idx] then
+        -- Unsaved inserted row: remove it entirely
+        local new_state = data.undo_row(session_d.state, row_idx)
+        view.apply_edit(bid, new_state)
+        vim.notify("Removed unsaved row", vim.log.levels.INFO)
       else
-        vim.notify("Row " .. row_idx .. " marked for deletion", vim.log.levels.INFO)
+        -- Existing DB row: toggle delete mark
+        local was_deleted = session_d.state.deleted[row_idx]
+        local new_state = data.toggle_delete(session_d.state, row_idx)
+        vim.notify(was_deleted and "Unmarked" or "Marked for deletion", vim.log.levels.INFO)
+        view.apply_edit(bid, new_state)
       end
-      view.apply_edit(bid, new_state)
     end,
     on_insert = function(bid, after_idx)
       local session_i = view._sessions[bid]
@@ -430,8 +672,17 @@ function M.open_smart()
     return
   end
 
-  -- Case 3: Normal buffer — word under cursor
-  M.open(vim.fn.expand("<cword>"), nil)
+  -- Case 3: No DBUI/dbout context — show table picker
+  local conn = vim.b.db
+  if type(conn) == "table" then conn = conn.db_url end
+  if not conn or conn == "" then conn = vim.g.db end
+  if not conn or conn == "" then
+    vim.notify("Grip: no database connection. Use :GripConnect or set vim.g.db.", vim.log.levels.WARN)
+    return
+  end
+  require("dadbod-grip.picker").pick_table(conn, function(table_name)
+    M.open(table_name, conn)
+  end)
 end
 
 -- ── setup ─────────────────────────────────────────────────────────────────

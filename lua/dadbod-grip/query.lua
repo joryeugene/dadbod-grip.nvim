@@ -31,9 +31,11 @@ end
 
 --- Create a spec for a raw SELECT/WITH query.
 function M.new_raw(sql_str, page_size)
+  -- Strip trailing semicolons — raw SQL gets wrapped in a subquery
+  local cleaned = sql_str and sql_str:gsub(";%s*$", "") or sql_str
   return {
     table_name = nil,
-    base_sql   = sql_str,
+    base_sql   = cleaned,
     sorts      = {},
     filters    = {},
     page       = 1,

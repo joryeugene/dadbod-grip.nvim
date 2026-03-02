@@ -52,11 +52,13 @@ function M.save_prompt(bufnr)
     vim.notify("Grip: nothing to save", vim.log.levels.WARN)
     return
   end
-  vim.ui.input({ prompt = "Save query as: " }, function(name)
-    if name and name ~= "" then
-      M.save(name, content)
-      vim.bo[bufnr].modified = false
-    end
+  vim.schedule(function()
+    vim.ui.input({ prompt = "Save query as: " }, function(name)
+      if name and name ~= "" then
+        M.save(name, content)
+        vim.bo[bufnr].modified = false
+      end
+    end)
   end)
 end
 

@@ -29,7 +29,9 @@ d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
  ᕦ  ║  1 ║ dad  ║bod ║  ★  ║  ᕤ
     ║  2 ║ grip ║nvim║  →  ║
     ╚════╩══════╩════╩═════╝
+
      (WOW DAD!!!)~  ᕦ( ᐛ )ᕤ
+
        dadbod-grip v2.4.0
 
      DataGrip-style grids for Neovim
@@ -46,7 +48,7 @@ d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
 { "joryeugene/dadbod-grip.nvim", dependencies = { "tpope/vim-dadbod" } }
 ```
 
-Then `:GripConnect` to set your database, `:GripSchema` to browse, and `:Grip` to open a table. Works standalone or alongside vim-dadbod-ui.
+Then `:GripConnect` to pick your database. That's it. Schema sidebar + query pad open automatically.
 
 ## What it looks like
 
@@ -62,7 +64,7 @@ Then `:GripConnect` to set your database, `:GripSchema` to browse, and `:Grip` t
 ║ ×    │ dave          │ dave@example.com     │ 55            ║
 ╚══════╧═══════════════╧══════════════════════╧═══════════════╝
  Page 1/3 (75 rows)  │  3 staged  │  sorted: age ASC
- e:edit  o:insert  d:delete  a:apply  u:undo  r:refresh  ?:help
+ i:edit  o:insert  d:delete  a:apply  u:undo  r:refresh  q:query  A:ai  ?:help
 ```
 
 `bob_updated` = modified (blue), `+` = inserted (green), `×` = deleted (red), `·NULL·` = null (dim)
@@ -92,7 +94,7 @@ Left: schema sidebar with PK/FK markers. Right: filtered grid. `-12.00` = negati
 ║ 2  │ 42       │ Gadget     │ 1   │ 24.50                   ║
 ╚════╧══════════╧════════════╧═════╧═════════════════════════╝
  2 rows  │  read-only: no PK
- gf:follow FK  <C-o>:go back  q:close
+ gf:follow FK  <C-o>:go back  q:query  ?:help
 ```
 
 Title bar shows the full navigation path. `gf` on any FK cell drills into the referenced table.
@@ -130,7 +132,7 @@ Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
 - **Pure SQL generation** with live preview before applying changes.
 - **Transaction safety** wraps all DML in BEGIN/COMMIT with ROLLBACK on error.
 - **Batch editing** in visual mode to set, delete, or NULL multiple rows at once.
-- **Immutable state management** with multi-level undo (50-deep stack).
+- **Two-tier undo**: local staging undo (50-deep) plus transaction undo that reverses committed changes (10-deep, with confirmation).
 
 ### Query and Navigation
 - **Sort, filter, and pagination** using `s`/`S` to sort, `f`/`<C-f>`/`F` to filter, `gp`/`gP` for saved filter presets, and `]p`/`[p` to page.
@@ -140,14 +142,14 @@ Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
 - **Column statistics** via `gS` showing count, distinct, nulls, min/max, and top values.
 - **Aggregate on selection** via `ga` in visual mode showing count/sum/avg/min/max.
 - **Query Doctor** via `:GripExplain` translating EXPLAIN plans into plain-English health checks with cost bars and index suggestions.
-- **AI SQL generation** via `gA` or `:GripAsk` turning natural language into SQL queries using Anthropic, OpenAI, Gemini, or local Ollama.
+- **AI SQL generation** via `A` or `:GripAsk` turning natural language into SQL queries using Anthropic, OpenAI, Gemini, or local Ollama.
 
 ### Schema and Workflow
 - **Schema browser** via `:GripSchema` or `go` showing a sidebar tree with columns, types, and PK/FK markers.
 - **Table picker** via `:GripTables` or `gT` providing a fuzzy finder with column preview.
-- **SQL query pad** via `:GripQuery` or `gQ` opening a scratch buffer that pipes results into editable grids.
+- **SQL query pad** via `:GripQuery` or `q` opening a scratch buffer that pipes results into editable grids.
 - **Saved queries** via `:GripSave` and `:GripLoad` persisting to project-local `.grip/queries/` files.
-- **Connection profiles** via `:GripConnect` storing connections in `.grip/connections.json` with `g:dbs` backward compatibility.
+- **Connection profiles** via `:GripConnect` storing connections in `.grip/connections.json` with `g:dbs` backward compatibility. Connecting opens the full workspace (schema sidebar + query pad) automatically.
 - **Data diff** via `:GripDiff` or `gD` comparing two tables by primary key with color-coded change highlighting. Auto-switches to compact layout on narrow terminals (<120 cols), toggle with `gv`.
 
 ### Schema Operations (DDL)
@@ -158,7 +160,6 @@ Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
 - **Drop table** via `:GripDrop` or `D` in schema browser with typed confirmation and CASCADE awareness.
 
 ### Display
-- **Column pinning** using `1`-`9` to freeze leftmost N columns with a thick separator, and `0` to unpin.
 - **Conditional formatting** that colors negatives red, booleans green/red, past dates dim, and URLs underlined.
 - **Column hide/show** using `-` to hide, `g-` to restore all, and `gH` for a visibility picker.
 - **Smart column auto-fit** that distributes extra terminal width to truncated columns.
@@ -207,7 +208,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 
 | Key | Action |
 |-----|--------|
-| `e` | Edit cell under cursor |
+| `i`/`e` | Edit cell under cursor |
 | `n` | Set cell to NULL |
 | `p` | Paste clipboard into cell |
 | `P` | Paste multi-line clipboard into consecutive rows |
@@ -271,22 +272,15 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gI` | Table properties (columns, indexes, stats) |
 | `ge` | Explain cell under cursor |
 
-### Column Pinning
-
-| Key | Action |
-|-----|--------|
-| `1`-`9` | Pin/freeze N leftmost columns |
-| `0` | Unpin all (or first column if none pinned) |
-
 ### Schema & Workflow
 
 | Key | Action |
 |-----|--------|
 | `go` | Toggle schema browser sidebar |
 | `gT` | Pick table (fuzzy finder) |
-| `gQ` | Open query pad (pre-filled with current query) |
+| `q` | Open query pad (pre-filled with current query) |
 | `gh` | Query history browser |
-| `gA` | AI SQL generation (natural language) |
+| `A` | AI SQL generation (natural language) |
 
 ### Advanced
 
@@ -295,7 +289,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gl` | Toggle live SQL floating preview |
 | `T` | Toggle column type annotations |
 | `r` | Refresh (re-run query) |
-| `q` | Close grip buffer |
+| `:q` | Close grip buffer |
 | `?` | Show help |
 
 ### Query Pad
@@ -305,6 +299,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `<C-CR>` | Execute buffer into grip grid (normal/insert) |
 | `<C-CR>` | Execute visual selection into grip grid (visual) |
 | `<C-s>` | Save query with `:GripSave` |
+| `gA` | AI SQL generation (natural language) |
 
 ### Commands
 
@@ -317,7 +312,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `:GripSave [name]` | Save query pad content to `.grip/queries/` |
 | `:GripLoad [name]` | Load a saved query (picker if no name) |
 | `:GripHistory` | Browse query history (telescope/fzf-lua/native) |
-| `:GripConnect [url]` | Switch database connection (picker if no arg) |
+| `:GripConnect [url]` | Connect and open workspace (schema + query pad) |
 | `:GripExplain [sql]` | Query Doctor: plain-English EXPLAIN with tips |
 | `:GripProfile [table]` | Profile columns with sparkline distributions |
 | `:GripAsk [question]` | AI SQL generation from natural language |
@@ -347,11 +342,9 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
   dependencies = { "tpope/vim-dadbod" },
   cmd = { "Grip", "GripSchema", "GripTables", "GripQuery", "GripConnect" },
   keys = {
+    { "<leader>gc", "<cmd>GripConnect<cr>", desc = "Grip: Connect (opens workspace)" },
     { "<leader>lg", function() require("dadbod-grip").open_smart() end, desc = "Grip: Open grid" },
-    { "<leader>gs", "<cmd>GripSchema<cr>", desc = "Grip: Schema browser" },
     { "<leader>gt", "<cmd>GripTables<cr>", desc = "Grip: Table picker" },
-    { "<leader>gq", "<cmd>GripQuery<cr>", desc = "Grip: Query pad" },
-    { "<leader>gc", "<cmd>GripConnect<cr>", desc = "Grip: Connect" },
   },
   opts = {},
 }
@@ -414,13 +407,15 @@ vim.keymap.set("n", "<leader>lg", "<cmd>Grip<cr>", { desc = "Open Grip grid" })
 ### Standalone Workflow (no DBUI needed)
 
 ```
-:GripConnect                   → pick or add a database connection
-:GripSchema  (or go in grid)   → browse tables with columns + types
-:GripTables  (or gT in grid)   → fuzzy-pick a table → opens grid
-:GripQuery   (or gQ in grid)   → open SQL scratch pad → C-CR runs → grid
-:GripSave name                 → save query to .grip/queries/
-:GripLoad                      → pick and load a saved query
+:GripConnect    → pick a database → schema sidebar + query pad open automatically
 ```
+
+That's the whole setup. One command. From there:
+- `<CR>` on a table in the schema sidebar opens the grid
+- `<C-CR>` in the query pad runs SQL into a grid
+- `A` in the query pad generates SQL from natural language
+
+Everything else (`:GripSchema`, `:GripQuery`, `:GripTables`) still works individually if you prefer.
 
 ### Quick Examples
 
@@ -539,35 +534,3 @@ Open each table with `:Grip <table_name>` and verify rendering, editing, sort/fi
 - [neosql.nvim](https://github.com/h4kbas/neosql.nvim) is a Lua-based cell editor for PostgreSQL only.
 - [nvim-dbee](https://github.com/kndndrj/nvim-dbee) uses a Go binary backend with columnar display.
 - [lazysql](https://github.com/jorgerojas26/lazysql) is a standalone Go TUI database client.
-
-### Comparison
-
-| Feature | dadbod-grip | neosql.nvim | nvim-dbee | vim-dadbod-ui | lazysql |
-|---|---|---|---|---|---|
-| **Cell editing** | Yes | Yes | No | No | Yes (TUI) |
-| **Change staging** | Yes (visual) | Yes | No | No | No |
-| **SQL preview** | Yes (live) | No | No | No | No |
-| **Sort/filter** | Yes | No | No | No | Yes (TUI) |
-| **FK navigation** | Yes | No | No | No | No |
-| **Schema browser** | Yes (columns+types) | No | No | Yes (names only) | Yes |
-| **Query pad** | Yes (→ grid) | No | No | Yes (→ text) | Yes |
-| **Saved queries** | Yes | No | No | Yes | No |
-| **Connections** | Yes | No | No | Yes | Yes |
-| **Column stats** | Yes | No | No | No | No |
-| **EXPLAIN** | Yes (colored) | No | No | No | No |
-| **Export** | 6 formats | No | No | No | CSV |
-| **Column pinning** | Yes (1-9) | No | No | No | No |
-| **Batch edit** | Yes (visual) | No | No | No | No |
-| **Multi-level undo** | Yes (50-deep) | No | No | No | No |
-| **Cell formatting** | Yes (auto) | No | No | No | No |
-| **Table properties** | Yes | No | No | No | No |
-| **DDL operations** | Yes (5 ops) | No | No | No | No |
-| **Data diff** | Yes (PK-matched) | No | No | No | No |
-| **File-as-table** | Yes (DuckDB) | No | No | No | No |
-| **Transactions** | Yes (atomic) | No | No | No | No |
-| **Multi-DB** | PG, SQLite, MySQL, DuckDB | PG only | Yes (Go) | Yes (dadbod) | 3 DBs |
-| **Backend** | Pure Lua | Lua | Go binary | Vimscript | Go TUI |
-
-## License
-
-[MIT](LICENSE)
