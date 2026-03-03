@@ -42,6 +42,12 @@ local function confirm_ddl(title, ddl_sql, callback)
     if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
   end
 
+  vim.api.nvim_create_autocmd("WinLeave", {
+    buffer = popup_buf,
+    once = true,
+    callback = function() vim.schedule(close) end,
+  })
+
   vim.keymap.set("n", "y", function()
     close()
     callback()
@@ -92,6 +98,12 @@ local function destructive_confirm(title, ddl_sql, confirm_word, callback)
   local function close()
     if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
   end
+
+  vim.api.nvim_create_autocmd("WinLeave", {
+    buffer = popup_buf,
+    once = true,
+    callback = function() vim.schedule(close) end,
+  })
 
   -- y: close float, then ask for typed confirmation
   vim.keymap.set("n", "y", function()

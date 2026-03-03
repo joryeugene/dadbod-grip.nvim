@@ -44,77 +44,13 @@ Then `:GripConnect` to pick your database. That's it. Schema sidebar + query pad
 
 ## What it looks like
 
-### Editable data grid with staged changes
+![Schema sidebar, 4 staged mutations, saved queries picker with SQL preview, and Live SQL float](grap.png)
 
-```
-╔═ users [3 staged] ══════════════════════════════════════════╗
-║ id   │ name          │ email                │ age ▲         ║
-╠══════╪═══════════════╪══════════════════════╪═══════════════╣
-║ 1    │ alice         │ alice@example.com    │ 30            ║
-║ 2    │ bob_updated   │ bob@example.com      │ ·NULL·        ║
-║ +    │ carol         │ carol@example.com    │ 28            ║
-║ ×    │ dave          │ dave@example.com     │ 55            ║
-╚══════╧═══════════════╧══════════════════════╧═══════════════╝
- Page 1/3 (75 rows)  │  3 staged  │  sorted: age ASC
- i:edit  o:insert  d:delete  a:apply  u:undo  r:refresh  q:query  A:ai  ?:help
-```
+**Left:** Schema browser with PK/FK markers and column types. **Grid:** 4 staged mutations: modified row highlighted blue, deleted row struck through red. **Float:** Saved queries picker with instant SQL preview. **Right:** Live SQL float showing the exact DELETE and UPDATE statements generated as you edit. The SQL is written for you. Nothing hits the database until you press `a`.
 
-`bob_updated` = modified (blue), `+` = inserted (green), `×` = deleted (red), `·NULL·` = null (dim)
+![Schema browser, query pad, multi-column sort, staged mutations picker](screenshot.png)
 
-### Schema browser sidebar with grid
-
-```
- mydb                ╔═ orders @ mydb ══════════════════════╗
-                     ║ id │ customer  │ total    │ status   ║
- Tables (5)          ╠════╪═══════════╪══════════╪══════════╣
- ▶ customers         ║ 1  │ Alice     │  99.50   │ active   ║
- ▼ orders            ║ 3  │ Carol     │ 250.00   │ active   ║
-   🔑 id       int   ║ 5  │ Eve       │  45.00   │ active   ║
-   🔗 cust_id  int   ╚════╧═══════════╧══════════╧══════════╝
- ▶ products           Page 1/2  │  filtered
-```
-
-Left: schema sidebar with PK/FK markers. Right: filtered grid (only `active` rows shown).
-
-### Foreign key navigation breadcrumb trail
-
-```
-╔═ users > orders > items ═══════════════════════════════════╗
-║ id │ order_id │ product    │ qty │ price                   ║
-╠════╪══════════╪════════════╪═════╪═════════════════════════╣
-║ 1  │ 42       │ Widget     │ 3   │  9.99                   ║
-║ 2  │ 42       │ Gadget     │ 1   │ 24.50                   ║
-╚════╧══════════╧════════════╧═════╧═════════════════════════╝
- 2 rows  │  read-only: no PK
- gf:follow FK  <C-o>:go back  q:query  ?:help
-```
-
-Title bar shows the full navigation path. `gf` on any FK cell drills into the referenced table.
-
-### Table properties float
-
-```
-╭────────────── Table Properties ──────────────╮
-│                                              │
-│  Table: users     Rows: ~12.5K  Size: 2.3MB  │
-│                                              │
-│  Columns                                     │
-│  # Name       Type         Null Default      │
-│  ─────────────────────────────────────────── │
-│  1 id         integer      NO           PK   │
-│  2 name       varchar(50)  NO                │
-│  3 email      varchar(255) YES               │
-│  4 org_id     integer      YES          FK   │
-│                                              │
-│  Primary Key: (id)                           │
-│  Foreign Keys: org_id -> orgs(id)            │
-│  Indexes: users_pkey ... PRIMARY (id)        │
-│                                              │
-│  q:close  R:rename  +:add  x:drop            │
-╰──────────────────────────────────────────────╯
-```
-
-Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
+**Left:** Schema browser with expanded `order_items` table. **Grid:** Multi-column sort (status, ordered_at) with 3 staged mutations. **Float:** Saved queries picker with live SQL preview. Browse saved queries and see the full SQL before loading it.
 
 ## Features
 
@@ -128,7 +64,7 @@ Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
 - **Mutation preview**: `UPDATE`, `DELETE`, and `INSERT` from the query pad show affected rows before executing. SET values appear blue (modified), DELETE rows appear red, INSERT rows appear green. Press `a` to execute, `u` to cancel.
 
 ### Query and Navigation
-- **Sort, filter, and pagination** using `s`/`S` to sort, `f`/`<C-f>`/`F` to filter, `gp`/`gP` for saved filter presets, and `]p`/`[p` to page.
+- **Sort, filter, and pagination** using `s`/`S` to sort, `f`/`<C-f>`/`F` to filter, `gp`/`gP` for saved filter presets, and `H`/`L` to page (or `]p`/`[p`).
 - **Foreign key navigation** via `gf` to follow a FK to its referenced row, and `<C-o>` to go back.
 - **Query history** via `gh` or `:GripHistory` browsing all executed queries with timestamp and SQL preview, stored in `.grip/history.jsonl`.
 - **Data profiling** via `gR` or `:GripProfile` showing sparkline distributions, completeness, cardinality, and top values per column.
@@ -138,8 +74,8 @@ Full table metadata: columns, types, PKs, FKs, indexes, row estimates, and size.
 - **AI SQL generation** via `A` or `:GripAsk` turning natural language into SQL queries using Anthropic, OpenAI, Gemini, or local Ollama. AI reads existing query pad SQL to modify it rather than generating from scratch. Schema context cached per connection.
 
 ### Schema and Workflow
-- **Schema browser** via `:GripSchema` or `gb` showing a sidebar tree with columns, types, and PK/FK markers. `gb` focuses the browser (opens it if closed). From inside the browser, `gb` closes it.
-- **Table picker** via `:GripTables` or `go` / `gT` providing a fuzzy finder with column preview.
+- **Schema browser** via `:GripSchema` or `gb` showing a sidebar tree with columns, types, and PK/FK markers. `gb` opens/focuses the browser from any buffer; pressing `gb` from inside closes it.
+- **Table picker** via `:GripTables` or `gT` / `gt` providing a fuzzy finder with column preview. Available from all three buffers: grid, query pad, and sidebar. In the sidebar, `go` opens the table under cursor with `ORDER BY created_at / PK DESC` so the latest rows appear first.
 - **SQL query pad** via `:GripQuery` or `q` opening a scratch buffer that pipes results into editable grids.
 - **Saved queries** via `:GripSave` and `:GripLoad` persisting to project-local `.grip/queries/` files.
 - **Connection profiles** via `:GripConnect` or `gC` storing connections in `.grip/connections.json` with `g:dbs` backward compatibility. Connections auto-persist globally (`~/.grip/connections.json`) so they're available from any project. Connecting opens the full workspace (schema sidebar + query pad) automatically.
@@ -234,7 +170,8 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gp` | Load saved filter preset |
 | `gP` | Save current filter as preset |
 | `X` | Reset view (clear sort/filter/page) |
-| `]p` / `[p` | Next / previous page |
+| `H` / `L` | Previous / next page |
+| `]p` / `[p` | Previous / next page (alternate) |
 | `]P` / `[P` | Last / first page |
 
 ### FK Navigation
@@ -254,7 +191,6 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gx` | Query Doctor (plain-English EXPLAIN) |
 | `gD` | Diff against another table |
 | `gv` | Toggle compact/wide diff layout |
-| `gh` | Query history browser |
 | `gE` | Export table (CSV, TSV, JSON, SQL INSERT, Markdown, Grip Table) |
 
 ### Inspection
@@ -304,6 +240,33 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gw` | Jump to grid window |
 | `gb` | Schema browser (focus if open; close from inside) |
 | `gC` / `<C-g>` | Switch database connection |
+
+### Schema Sidebar
+
+| Key | Action |
+|-----|--------|
+| `<CR>` | Open table in grid |
+| `<S-CR>` | Open table in new split |
+| `l` / `zo` | Expand columns |
+| `h` / `zc` | Collapse |
+| `L` | Expand all |
+| `H` | Collapse all |
+| `/` | Filter by name |
+| `F` | Clear filter |
+| `n` / `N` | Next / previous table match |
+| `y` | Yank table or column name |
+| `r` | Refresh schema |
+| `go` | Open table under cursor, ORDER BY latest (created_at / PK DESC) |
+| `gT` / `gt` | Table picker (fuzzy finder) |
+| `gb` / `<Esc>` | Close sidebar |
+| `gw` | Jump to grid |
+| `gC` / `gc` / `<C-g>` | Switch connection |
+| `gh` | Query history |
+| `gq` | Saved queries |
+| `q` | Open query pad |
+| `D` | Drop table (with confirmation) |
+| `+` | Create table |
+| `?` | Show help |
 
 ### Commands
 
@@ -376,7 +339,7 @@ use {
 require("dadbod-grip").setup({
   limit         = 100,   -- default row limit for SELECT queries
   max_col_width = 40,    -- max display width per column
-  timeout       = 30000, -- query timeout in ms (30s default, good for SSH tunnels)
+  timeout       = 30000, -- query timeout in ms (default: 10000; raise for slow tunnels)
 })
 ```
 

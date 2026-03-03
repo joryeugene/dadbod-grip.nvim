@@ -999,9 +999,19 @@ local function open_info_float(grip_win, lines, float_opts)
     zindex = 50,
   })
 
+  local function close()
+    if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+  end
+
+  vim.api.nvim_create_autocmd("WinLeave", {
+    buffer = popup_buf,
+    once = true,
+    callback = function() vim.schedule(close) end,
+  })
+
   for _, key in ipairs({ "q", "<Esc>" }) do
     vim.keymap.set("n", key, function()
-      if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+      close()
       if vim.api.nvim_win_is_valid(grip_win) then
         vim.api.nvim_set_current_win(grip_win)
       end
@@ -3133,9 +3143,19 @@ function M.show_help(opts)
       title_pos = "center",
       zindex = 50,
     })
+    local function close()
+      if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+    end
+
+    vim.api.nvim_create_autocmd("WinLeave", {
+      buffer = popup_buf,
+      once = true,
+      callback = function() vim.schedule(close) end,
+    })
+
     for _, key in ipairs({ "q", "?", "<Esc>" }) do
       vim.keymap.set("n", key, function()
-        if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+        close()
         if vim.api.nvim_win_is_valid(grip_win) then
           vim.api.nvim_set_current_win(grip_win)
         end

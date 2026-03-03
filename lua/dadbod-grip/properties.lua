@@ -190,7 +190,7 @@ local function build_lines(props)
   end
 
   -- Footer
-  add("  q close   R rename col   T rename tbl   + add col   D drop col   gI refresh")
+  add("  q close   T rename tbl   R rename col   + add col   D drop col   gI refresh")
 
   return lines, hl_marks, col_line_map
 end
@@ -241,9 +241,19 @@ function M.open(table_name, url, grip_win)
 
   -- Close keymaps
   local caller_win = grip_win or vim.fn.win_getid()
+  local function close()
+    if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+  end
+
+  vim.api.nvim_create_autocmd("WinLeave", {
+    buffer = popup_buf,
+    once = true,
+    callback = function() vim.schedule(close) end,
+  })
+
   for _, key in ipairs({ "q", "<Esc>" }) do
     vim.keymap.set("n", key, function()
-      if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+      close()
       if vim.api.nvim_win_is_valid(caller_win) then
         vim.api.nvim_set_current_win(caller_win)
       end

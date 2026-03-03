@@ -1183,10 +1183,18 @@ function M.setup(opts)
     end
 
     -- Close keymaps
+    local function close()
+      if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
+    end
+
+    vim.api.nvim_create_autocmd("WinLeave", {
+      buffer = explain_buf,
+      once = true,
+      callback = function() vim.schedule(close) end,
+    })
+
     for _, key in ipairs({ "q", "<Esc>" }) do
-      vim.keymap.set("n", key, function()
-        if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
-      end, { buffer = explain_buf })
+      vim.keymap.set("n", key, close, { buffer = explain_buf })
     end
   end, {
     nargs = "?",

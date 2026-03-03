@@ -269,6 +269,13 @@ function M.open(opts)
     end
   end
 
+  -- Close when focus leaves the picker (navigating away with <C-w>, :e, etc.)
+  -- Registered after close() is defined so the closure captures a non-nil upvalue.
+  vim.api.nvim_create_autocmd("WinLeave", {
+    buffer = popup_buf,
+    callback = function() vim.schedule(close) end,
+  })
+
   map({ "q", "<Esc>" }, close)
 
   -- Navigation
