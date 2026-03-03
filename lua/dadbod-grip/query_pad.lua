@@ -23,7 +23,7 @@ local function ensure_buf(url)
 
   -- Pre-fill with hint comment
   vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, {
-    "-- C-CR:run  C-s:save  gA:ai  gT:tables  gh:hist  gq:saved  gw:grid  go:schema  gC:connect",
+    "-- C-CR:run  C-s:save  gA:ai  go:tables  gh:hist  gq:saved  gw:grid  gb:schema  gC:connect",
     "",
   })
   -- Mark buffer as not modified after creation
@@ -120,10 +120,10 @@ local function setup_keymaps(bufnr, url)
     ai.ask(cur_url())
   end, { buffer = bufnr, silent = true, desc = "Grip: AI SQL generation" })
 
-  -- go: toggle schema sidebar (same binding as grid)
-  vim.keymap.set("n", "go", function()
+  -- gb: schema browser sidebar
+  vim.keymap.set("n", "gb", function()
     require("dadbod-grip.schema").toggle(cur_url())
-  end, { buffer = bufnr, silent = true, desc = "Grip: toggle schema sidebar" })
+  end, { buffer = bufnr, silent = true, desc = "Grip: schema browser" })
 
   -- gw: jump to grid window (if one exists)
   vim.keymap.set("n", "gw", function()
@@ -138,14 +138,17 @@ local function setup_keymaps(bufnr, url)
     vim.notify("No grid window open", vim.log.levels.INFO)
   end, { buffer = bufnr, silent = true, desc = "Grip: jump to grid" })
 
-  -- gT: table picker
-  vim.keymap.set("n", "gT", function()
+  -- go / gT / gt: table picker
+  local function _pick_table()
     local picker = require("dadbod-grip.picker")
     local u = cur_url()
     picker.pick_table(u, function(name)
       require("dadbod-grip").open(name, u)
     end)
-  end, { buffer = bufnr, silent = true, desc = "Grip: pick table" })
+  end
+  vim.keymap.set("n", "go", _pick_table, { buffer = bufnr, silent = true, desc = "Grip: pick table" })
+  vim.keymap.set("n", "gT", _pick_table, { buffer = bufnr, silent = true, desc = "Grip: pick table" })
+  vim.keymap.set("n", "gt", _pick_table, { buffer = bufnr, silent = true, desc = "Grip: pick table" })
 
   -- gh: query history
   vim.keymap.set("n", "gh", function()

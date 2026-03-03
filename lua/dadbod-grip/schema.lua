@@ -247,12 +247,12 @@ local function render(state)
   table.insert(lines, "")
   local sw = math.max(SIDEBAR_MIN_WIDTH, math.min(SIDEBAR_MAX_WIDTH, math.floor(vim.o.columns * SIDEBAR_WIDTH_RATIO)))
   if sw >= 40 then
-    table.insert(lines, " CR:open  q:query  gq:saved  gw:grid  gC:connect  /:filter  F:clear  ?:help")
+    table.insert(lines, " CR:open  go:tables  q:query  gq:saved  gw:grid  gc:conn  /:filter  F:clear  ?:help")
     table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
   else
-    table.insert(lines, " CR:open  q:query  gq:saved  gw:grid")
+    table.insert(lines, " CR:open  go:tables  q:query  gq:saved  gw:grid")
     table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
-    table.insert(lines, " gC:connect  /:filter  F:clear  ?:help")
+    table.insert(lines, " gc:conn  /:filter  F:clear  ?:help")
     table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
   end
 
@@ -491,12 +491,16 @@ local function setup_keymaps(url)
     end
   end)
 
-  -- Table picker (gT and gt alias)
+  -- go / gT / gt: table picker
   local function _pick_table()
     require("dadbod-grip.picker").pick_table(url, function(name) open_table(name, url) end)
   end
+  map("go", _pick_table)
   map("gT", _pick_table)
   map("gt", _pick_table)
+
+  -- gb: close sidebar (from inside; gb elsewhere opens/focuses it)
+  map("gb", function() M.close() end)
 
   -- Query pad
   map("q", function()
@@ -591,7 +595,8 @@ local function setup_keymaps(url)
       "  Actions",
       "  r         Refresh schema",
       "  y         Yank table/column name",
-      "  gT / gt   Table picker",
+      "  go        Table picker  (gT / gt: aliases)",
+      "  gb        Close browser (gb outside: open/focus)",
       "  gw        Jump to grid",
       "  gC / gc   Switch connection",
       "  gh        Query history",

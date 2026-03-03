@@ -150,6 +150,7 @@ function M.open(opts)
           focusable  = false,
           zindex     = 54,
         })
+        vim.wo[preview_win].wrap = true
       end
     end
     return new_win

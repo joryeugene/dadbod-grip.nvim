@@ -2840,22 +2840,25 @@ function M._setup_keymaps(bufnr)
     diff_mod.open(st.table_name, other, st.url)
   end, "Diff against table")
 
-  -- go: toggle schema sidebar
-  map("go", function()
+  -- gb: schema browser sidebar (toggle/focus)
+  map("gb", function()
     local schema = require("dadbod-grip.schema")
     local s_url = M._sessions[bufnr] and M._sessions[bufnr].url
     schema.toggle(s_url)
-  end, "Toggle schema browser")
+  end, "Schema browser")
 
-  -- gT: table picker
-  map("gT", function()
+  -- go / gT / gt: table picker
+  local function _pick_table()
     local picker = require("dadbod-grip.picker")
     local s_url = M._sessions[bufnr] and M._sessions[bufnr].url
     picker.pick_table(s_url, function(name)
       local grip = require("dadbod-grip")
       grip.open(name, s_url)
     end)
-  end, "Pick table")
+  end
+  map("go", _pick_table, "Pick table")
+  map("gT", _pick_table, "Pick table")
+  map("gt", _pick_table, "Pick table")
 
   -- gC / <C-g>: switch database connection
   local function _pick_connection()
