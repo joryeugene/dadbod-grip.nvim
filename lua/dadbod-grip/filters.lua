@@ -1,6 +1,6 @@
 -- filters.lua -- saved filter presets per table.
 -- Stored in .grip/filters.json keyed by table name.
--- Picker uses telescope -> fzf-lua -> vim.ui.select.
+-- Picker uses grip_picker (zero external deps).
 
 local M = {}
 
@@ -102,83 +102,6 @@ function M.delete(table_name, name)
   vim.notify("Grip: deleted filter preset \"" .. name .. "\"", vim.log.levels.INFO)
 end
 
--- ── pickers ─────────────────────────────────────────────────────────────
-
-local function telescope_pick(presets, callback)
-  local pickers = require("telescope.pickers")
-  local finders = require("telescope.finders")
-  local conf = require("telescope.config").values
-  local actions = require("telescope.actions")
-  local action_state = require("telescope.actions.state")
-  local previewers = require("telescope.previewers")
-
-  pickers.new({}, {
-    prompt_title = "Grip Filter Presets",
-    finder = finders.new_table({
-      results = presets,
-      entry_maker = function(entry)
-        return {
-          value = entry,
-          display = entry.name,
-          ordinal = entry.name,
-        }
-      end,
-    }),
-    sorter = conf.generic_sorter({}),
-    previewer = previewers.new_buffer_previewer({
-      title = "WHERE clause",
-      define_preview = function(self, entry)
-        local lines = vim.split(entry.value.clause, "\n")
-        vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
-        vim.bo[self.state.bufnr].filetype = "sql"
-      end,
-    }),
-    attach_mappings = function(prompt_bufnr)
-      actions.select_default:replace(function()
-        local entry = action_state.get_selected_entry()
-        actions.close(prompt_bufnr)
-        if entry then callback(entry.value) end
-      end)
-      return true
-    end,
-  }):find()
-end
-
-local function fzf_pick(presets, callback)
-  local fzf = require("fzf-lua")
-  local names = {}
-  local by_name = {}
-  for _, p in ipairs(presets) do
-    table.insert(names, p.name)
-    by_name[p.name] = p
-  end
-
-  fzf.fzf_exec(names, {
-    prompt = "Grip Filters> ",
-    previewer = false,
-    actions = {
-      ["default"] = function(selected)
-        if selected and selected[1] then
-          local p = by_name[selected[1]]
-          if p then callback(p) end
-        end
-      end,
-    },
-  })
-end
-
-local function native_pick(presets, callback)
-  local labels = {}
-  for _, p in ipairs(presets) do
-    table.insert(labels, p.name .. "  (" .. p.clause:sub(1, 40) .. ")")
-  end
-
-  vim.ui.select(labels, { prompt = "Load Filter Preset:" }, function(_, idx)
-    if not idx then return end
-    callback(presets[idx])
-  end)
-end
-
 --- Open a picker to select a filter preset. Calls callback({name, clause}).
 function M.pick(table_name, callback)
   local presets = M.list(table_name)
@@ -187,17 +110,24 @@ function M.pick(table_name, callback)
     return
   end
 
-  local has_telescope = pcall(require, "telescope")
-  if has_telescope then
-    return telescope_pick(presets, callback)
-  end
-
-  local has_fzf = pcall(require, "fzf-lua")
-  if has_fzf then
-    return fzf_pick(presets, callback)
-  end
-
-  return native_pick(presets, callback)
+  require("dadbod-grip.grip_picker").open({
+    title = "Filter Presets",
+    items = presets,
+    display = function(p)
+      return p.name .. "  (" .. p.clause:sub(1, 40) .. ")"
+    end,
+    on_select = function(p)
+      callback(p)
+    end,
+    on_delete = function(p, refresh_fn)
+      vim.ui.input({ prompt = "Delete preset '" .. p.name .. "'? (y/N): " }, function(ans)
+        if ans == "y" or ans == "yes" then
+          M.delete(table_name, p.name)
+          refresh_fn(M.list(table_name))
+        end
+      end)
+    end,
+  })
 end
 
 return M
