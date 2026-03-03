@@ -62,7 +62,9 @@ function M.save_prompt(bufnr)
   vim.schedule(function()
     vim.ui.input({ prompt = "Save query as: " }, function(name)
       if name and name ~= "" then
-        M.save(name, content, vim.g.db)
+        -- Prefer buffer-local db (set by DBUI), then global
+        local url = vim.b[bufnr].db or vim.g.db or ""
+        M.save(name, content, url)
         vim.bo[bufnr].modified = false
       end
     end)
@@ -187,6 +189,7 @@ local function fzf_pick(queries, callback)
     prompt = "Grip Queries> ",
     previewer = false,
     header = "  <Enter> Load  |  <C-d> Delete",
+    keymap = { fzf = { ["ctrl-d"] = "accept" } },
     actions = {
       ["default"] = function(selected)
         if selected and selected[1] then
