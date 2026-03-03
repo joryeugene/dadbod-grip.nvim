@@ -302,8 +302,8 @@ function M.open(table_name, url, grip_win)
       vim.api.nvim_set_current_win(caller_win)
     end
     local ddl = require("dadbod-grip.ddl")
-    ddl.rename_table(table_name, url, function()
-      refresh_grip_buffers(table_name)
+    ddl.rename_table(table_name, url, function(new_name)
+      require("dadbod-grip.view").update_table_sessions(table_name, new_name)
     end)
   end, { buffer = popup_buf })
 

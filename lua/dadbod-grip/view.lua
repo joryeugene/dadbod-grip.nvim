@@ -61,9 +61,10 @@ local function ensure_highlights()
     if vim.fn.hlID(name) == 0 then
       if name == "GripHeader"   then vim.cmd("hi GripHeader gui=bold cterm=bold") end
       if name == "GripNull"     then vim.cmd("hi GripNull gui=italic ctermfg=243 guifg=#6c7086") end
-      if name == "GripModified" then vim.cmd("hi GripModified gui=bold ctermfg=81 guifg=#89dceb ctermbg=236 guibg=#2d2416") end
-      if name == "GripDeleted"  then vim.cmd("hi GripDeleted gui=strikethrough ctermfg=203 guifg=#f38ba8 ctermbg=236 guibg=#2d1418") end
-      if name == "GripInserted" then vim.cmd("hi GripInserted gui=bold ctermfg=113 guifg=#a6e3a1 ctermbg=236 guibg=#162d18") end
+      -- Staged groups use hi! (always override) so guibg applies even on re-source
+      if name == "GripModified" then vim.cmd("hi! GripModified gui=bold ctermfg=111 guifg=#89b4fa ctermbg=236 guibg=#1a1e2e") end
+      if name == "GripDeleted"  then vim.cmd("hi! GripDeleted gui=strikethrough ctermfg=203 guifg=#f38ba8 ctermbg=236 guibg=#2d1418") end
+      if name == "GripInserted" then vim.cmd("hi! GripInserted gui=bold ctermfg=113 guifg=#a6e3a1 ctermbg=236 guibg=#162d18") end
       if name == "GripReadonly" then vim.cmd("hi GripReadonly gui=italic ctermfg=243 guifg=#6c7086") end
       if name == "GripBorder"   then vim.cmd("hi GripBorder gui=bold ctermfg=147 guifg=#cba6f7") end
       if name == "GripStatusChg" then vim.cmd("hi GripStatusChg gui=bold ctermfg=229 guifg=#f9e2af") end
@@ -531,7 +532,12 @@ local function build_render(session, opts)
     table.insert(status_parts, #st.rows .. " rows")
   end
 
-  if session.elapsed_ms then table.insert(status_parts, session.elapsed_ms .. "ms") end
+  local timing_str
+  if session.elapsed_ms then
+    local action = session.last_action or "query"
+    timing_str = session.elapsed_ms .. "ms " .. action
+    table.insert(status_parts, timing_str)
+  end
   if staged_count > 0 then table.insert(status_parts, staged_count .. " staged") end
   if st.readonly then table.insert(status_parts, "read-only") end
   local hidden_n = 0
@@ -548,12 +554,27 @@ local function build_render(session, opts)
 
   local status_str = " " .. table.concat(status_parts, "  │  ")
   table.insert(lines, status_str)
+  -- Highlight timing badge — query=yellow, applied=green
+  if timing_str then
+    local ts, te = status_str:find(timing_str, 1, true)
+    if ts then
+      local action = session.last_action or "query"
+      local timing_hl = (action == "query") and "GripStatusOk" or "GripBoolTrue"
+      push_mark(#lines, ts - 1, te, timing_hl)
+    end
+  end
+  -- Highlight "N staged" segment in GripStatusChg color
+  if staged_count > 0 then
+    local staged_text = staged_count .. " staged"
+    local s, e = status_str:find(staged_text, 1, true)
+    if s then push_mark(#lines, s - 1, e, "GripStatusChg") end
+  end
 
   -- ── Hint line ──
   local hints
   if session.pending_mutation then
     local mt = session.pending_mutation.type or "SQL"
-    hints = " a:execute " .. mt .. "  U:cancel  gl:preview SQL  q:query"
+    hints = " a:execute " .. mt .. "  U:cancel  gs:preview SQL  q:query"
   elseif st.readonly then
     hints = " r:refresh  Tab/w:col  gy:markdown  gq:saved  q:query  A:ai  gC:connect  ?:help"
   else
@@ -567,6 +588,28 @@ end
 
 -- ── namespace for extmarks ───────────────────────────────────────────────
 local ns = vim.api.nvim_create_namespace("dadbod_grip")
+
+-- M.update_table_sessions(old_name, new_name) — patch all open grip sessions
+-- that reference old_name after a table rename, then refresh them.
+function M.update_table_sessions(old_name, new_name)
+  local sql_mod = require("dadbod-grip.sql")
+  local old_quoted = sql_mod.quote_ident(old_name)
+  local new_quoted = sql_mod.quote_ident(new_name)
+  for bufnr, session in pairs(M._sessions) do
+    if session.state and session.state.table_name == old_name then
+      -- Update the query SQL string in-place (replace first occurrence)
+      if session.query_sql then
+        session.query_sql = session.query_sql:gsub(old_quoted, new_quoted, 1)
+      end
+      -- Update state table_name
+      session.state = vim.tbl_extend("force", session.state, { table_name = new_name })
+      -- Refresh the buffer
+      if session.on_refresh and vim.api.nvim_buf_is_valid(bufnr) then
+        vim.schedule(function() session.on_refresh(bufnr) end)
+      end
+    end
+  end
+end
 
 -- M.render(bufnr, state) — wipes and rewrites buffer, reapplies extmarks
 function M.render(bufnr, state)
@@ -1401,10 +1444,26 @@ function M._setup_keymaps(bufnr)
     vim.notify("Set " .. #row_indices .. " cells to NULL in " .. col_name, vim.log.levels.INFO)
   end, "Batch set NULL")
 
-  -- gs: preview staged SQL in float
+  -- gs: preview staged SQL (or pending mutation SQL) in float
   map("gs", function()
     local session = M._sessions[bufnr]
     if not session then return end
+
+    -- Mutation pending: show the pending SQL
+    if session.pending_mutation then
+      if session._live_sql_win and vim.api.nvim_win_is_valid(session._live_sql_win) then
+        M._close_live_sql_float(session)
+      else
+        local pm_lines = {}
+        for line in (session.pending_mutation.sql .. "\n"):gmatch("([^\n]*)\n") do
+          table.insert(pm_lines, line)
+        end
+        local grip_win = vim.api.nvim_get_current_win()
+        open_info_float(grip_win, pm_lines, { title = " " .. session.pending_mutation.type .. " SQL ", filetype = "sql" })
+      end
+      return
+    end
+
     local st = session.state
     if not data.has_changes(st) then
       vim.notify("No staged changes", vim.log.levels.INFO)
@@ -2060,23 +2119,6 @@ function M._setup_keymaps(bufnr)
   map("gl", function()
     local session = M._sessions[bufnr]
     if not session then return end
-
-    -- Mutation preview mode: show the mutation SQL in a float
-    if session.pending_mutation then
-      if session._live_sql_win and vim.api.nvim_win_is_valid(session._live_sql_win) then
-        M._close_live_sql_float(session)
-        vim.notify("SQL preview: OFF", vim.log.levels.INFO)
-      else
-        local pm_lines = {}
-        for line in (session.pending_mutation.sql .. "\n"):gmatch("([^\n]*)\n") do
-          table.insert(pm_lines, line)
-        end
-        local grip_win = vim.api.nvim_get_current_win()
-        open_info_float(grip_win, pm_lines, { title = " " .. session.pending_mutation.type .. " SQL ", filetype = "sql" })
-        vim.notify("SQL preview: ON", vim.log.levels.INFO)
-      end
-      return
-    end
 
     if not session.state.table_name then
       vim.notify("Live SQL requires a table name", vim.log.levels.INFO)
@@ -2922,9 +2964,9 @@ function M.show_help(opts)
   local ro = opts.readonly
   local help = {
       "",
-      "    d   ███████╗███████╗██╗███████╗",
-      "    a  ██╔═════╝██╔══██║██║██╔══██║",
-      "    d  ██║  ███╗██████╔╝██║███████║",
+      "    D   ███████╗███████╗██╗███████╗",
+      "    A  ██╔═════╝██╔══██║██║██╔══██║",
+      "    D  ██║  ███╗██████╔╝██║███████║",
       "    b  ██║   ██║██╔══██╗██║██╔════╝",
       "    o  ╚██████╔╝██║  ██║██║██║",
       "    d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝",

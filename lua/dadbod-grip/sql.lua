@@ -35,11 +35,13 @@ local quote_ident = M.quote_ident
 
 -- M.build_update(table_name, pk_values, changes) → string
 -- pk_values: { col = "val", ... }
--- changes:   { col = new_val, ... }
+-- changes:   { col = new_val, ... }  (data.NULL_SENTINEL means SQL NULL)
 function M.build_update(table_name, pk_values, changes)
+  local NULL_SENTINEL = require("dadbod-grip.data").NULL_SENTINEL
   local set_parts = {}
   for col, val in pairs(changes) do
-    table.insert(set_parts, quote_ident(col) .. " = " .. M.quote_value(val))
+    local sql_val = (val == NULL_SENTINEL) and "NULL" or M.quote_value(val)
+    table.insert(set_parts, quote_ident(col) .. " = " .. sql_val)
   end
   -- Sort for deterministic output
   table.sort(set_parts)
@@ -59,18 +61,21 @@ function M.build_update(table_name, pk_values, changes)
 end
 
 -- M.build_insert(table_name, values, columns) → string
--- values:  { col = val, ... }
+-- values:  { col = val, ... }  (data.NULL_SENTINEL means SQL NULL)
 -- columns: ordered list of column names (defines INSERT column order)
 function M.build_insert(table_name, values, columns)
+  local NULL_SENTINEL = require("dadbod-grip.data").NULL_SENTINEL
   local col_parts = {}
   local val_parts = {}
 
   for _, col in ipairs(columns) do
     local val = values[col]
     -- Skip columns with nil that aren't explicitly set (let DB use DEFAULT)
+    -- NULL_SENTINEL is non-nil and emits SQL NULL explicitly
     if val ~= nil then
       table.insert(col_parts, quote_ident(col))
-      table.insert(val_parts, M.quote_value(val))
+      local sql_val = (val == NULL_SENTINEL) and "NULL" or M.quote_value(val)
+      table.insert(val_parts, sql_val)
     end
   end
 

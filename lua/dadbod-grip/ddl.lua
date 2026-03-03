@@ -159,7 +159,7 @@ function M.rename_table(old_name, url, on_done)
         return
       end
       vim.notify("Renamed table '" .. old_name .. "' → '" .. new_name .. "'", vim.log.levels.INFO)
-      if on_done then on_done() end
+      if on_done then on_done(new_name) end
     end)
   end)
 end

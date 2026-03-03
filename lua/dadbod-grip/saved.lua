@@ -32,7 +32,8 @@ local function sanitize(name)
 end
 
 --- Save query content to a named .sql file.
-function M.save(name, content)
+--- Optional url stored as first-line comment: -- grip:url=URL
+function M.save(name, content, url)
   ensure_dir()
   local fname = sanitize(name)
   if fname == "" then
@@ -40,7 +41,13 @@ function M.save(name, content)
     return
   end
   local path = queries_dir() .. "/" .. fname .. ".sql"
-  vim.fn.writefile(vim.split(content, "\n"), path)
+  local body = content
+  if url and url ~= "" then
+    -- Strip any existing grip:url header before prepending new one
+    body = body:gsub("^%-%- grip:url=[^\n]*\n?", "")
+    body = "-- grip:url=" .. url .. "\n" .. body
+  end
+  vim.fn.writefile(vim.split(body, "\n"), path)
   vim.notify("Grip: saved query → " .. fname .. ".sql  (gq to browse)", vim.log.levels.INFO)
 end
 
@@ -55,11 +62,22 @@ function M.save_prompt(bufnr)
   vim.schedule(function()
     vim.ui.input({ prompt = "Save query as: " }, function(name)
       if name and name ~= "" then
-        M.save(name, content)
+        M.save(name, content, vim.g.db)
         vim.bo[bufnr].modified = false
       end
     end)
   end)
+end
+
+--- Extract URL from saved query content (reads the grip:url header comment).
+--- Returns (clean_content, url_or_nil).
+local function extract_url(content)
+  local url = content:match("^%-%- grip:url=([^\n]+)\n?")
+  if url then
+    local clean = content:gsub("^%-%- grip:url=[^\n]*\n?", "")
+    return clean, url
+  end
+  return content, nil
 end
 
 --- Load a named query. Returns content string or nil.
@@ -133,7 +151,11 @@ local function telescope_pick(queries, callback)
         local entry = action_state.get_selected_entry()
         actions.close(prompt_bufnr)
         if entry then
-          local content = table.concat(vim.fn.readfile(entry.value.path), "\n")
+          local raw = table.concat(vim.fn.readfile(entry.value.path), "\n")
+          local content, url = extract_url(raw)
+          if url and url ~= "" and url ~= vim.g.db then
+            require("dadbod-grip.connections").switch(url, entry.value.name .. " (saved)")
+          end
           callback(content, entry.value.name)
         end
       end)
@@ -165,13 +187,16 @@ local function fzf_pick(queries, callback)
     prompt = "Grip Queries> ",
     previewer = false,
     header = "  <Enter> Load  |  <C-d> Delete",
-    keymap = { fzf = { ["ctrl-d"] = "accept" } },
     actions = {
       ["default"] = function(selected)
         if selected and selected[1] then
           local q = by_name[selected[1]]
           if q then
-            local content = table.concat(vim.fn.readfile(q.path), "\n")
+            local raw = table.concat(vim.fn.readfile(q.path), "\n")
+            local content, url = extract_url(raw)
+            if url and url ~= "" and url ~= vim.g.db then
+              require("dadbod-grip.connections").switch(url, q.name .. " (saved)")
+            end
             callback(content, q.name)
           end
         end
@@ -209,7 +234,11 @@ local function native_pick(queries, callback)
     if entry.delete then
       M.delete(entry.query.name)
     else
-      local content = table.concat(vim.fn.readfile(entry.query.path), "\n")
+      local raw = table.concat(vim.fn.readfile(entry.query.path), "\n")
+      local content, url = extract_url(raw)
+      if url and url ~= "" and url ~= vim.g.db then
+        require("dadbod-grip.connections").switch(url, entry.query.name .. " (saved)")
+      end
       callback(content, entry.query.name)
     end
   end)

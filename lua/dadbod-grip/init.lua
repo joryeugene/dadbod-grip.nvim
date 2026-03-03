@@ -198,12 +198,20 @@ local function do_apply(bufnr, url)
   history.record({ sql = txn_sql, url = url, table_name = st.table_name, type = "dml" })
 
   session.elapsed_ms = apply_ms
+  -- Build action label from what was applied
+  local action_parts = {}
+  if #updates > 0 then table.insert(action_parts, "updated") end
+  if #inserts > 0 then table.insert(action_parts, "inserted") end
+  if #deletes > 0 then table.insert(action_parts, "deleted") end
+  session.last_action = table.concat(action_parts, "+")
   session.on_refresh(bufnr)
 end
 
 -- ── refresh ───────────────────────────────────────────────────────────────
 local function do_refresh(bufnr, url, query_sql, table_name)
+  local t0 = vim.uv.hrtime()
   local result, err = db.query(query_sql, url)
+  local elapsed_ms = math.floor((vim.uv.hrtime() - t0) / 1e6)
   if err then
     vim.notify("Grip: query failed: " .. err, vim.log.levels.ERROR)
     return
@@ -232,6 +240,11 @@ local function do_refresh(bufnr, url, query_sql, table_name)
   result.sql = query_sql
 
   local new_state = data.new(result)
+  local session = view._sessions[bufnr]
+  if session then
+    session.elapsed_ms = elapsed_ms
+    session.last_action = "query"
+  end
   view.render(bufnr, new_state)
 end
 

@@ -166,14 +166,10 @@ function M.get_updates(state)
         pk_values[pk] = idx and state.rows[row_idx][idx] or nil
       end
 
-      -- Convert NULL_SENTINEL → nil so sql.lua receives proper nil for NULL
+      -- Keep NULL_SENTINEL as-is; sql.lua checks for it and emits NULL
       local clean_changes = {}
       for col, val in pairs(field_changes) do
-        if val == NULL_SENTINEL then
-          clean_changes[col] = nil  -- removes key (correct: nil = SQL NULL)
-        else
-          clean_changes[col] = val
-        end
+        clean_changes[col] = val
       end
       table.insert(updates, {
         row_idx = row_idx,
@@ -191,11 +187,7 @@ function M.get_inserts(state)
   for _, ins in pairs(state.inserted) do
     local clean_values = {}
     for col, val in pairs(ins.values) do
-      if val == NULL_SENTINEL then
-        clean_values[col] = nil
-      else
-        clean_values[col] = val
-      end
+      clean_values[col] = val  -- keep NULL_SENTINEL; sql.lua emits NULL for it
     end
     table.insert(inserts, {
       values = clean_values,
