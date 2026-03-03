@@ -190,7 +190,7 @@ local function build_lines(props)
   end
 
   -- Footer
-  add("  q close   R rename col   T rename tbl   + add col   D drop col   gI refresh")
+  add("  q close   T rename tbl   R rename col   + add col   D drop col   gI refresh")
 
   return lines, hl_marks, col_line_map
 end

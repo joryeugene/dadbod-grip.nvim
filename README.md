@@ -75,7 +75,7 @@ Then `:GripConnect` to pick your database. That's it. Schema sidebar + query pad
 
 ### Schema and Workflow
 - **Schema browser** via `:GripSchema` or `gb` showing a sidebar tree with columns, types, and PK/FK markers. `gb` opens/focuses the browser from any buffer; pressing `gb` from inside closes it.
-- **Table picker** via `:GripTables` or `go` / `gT` / `gt` providing a fuzzy finder with column preview. From inside the sidebar, `go` opens the table under cursor directly.
+- **Table picker** via `:GripTables` or `gT` / `gt` providing a fuzzy finder with column preview. Available from all three buffers: grid, query pad, and sidebar. In the sidebar, `go` opens the table under cursor with `ORDER BY created_at / PK DESC` so the latest rows appear first.
 - **SQL query pad** via `:GripQuery` or `q` opening a scratch buffer that pipes results into editable grids.
 - **Saved queries** via `:GripSave` and `:GripLoad` persisting to project-local `.grip/queries/` files.
 - **Connection profiles** via `:GripConnect` or `gC` storing connections in `.grip/connections.json` with `g:dbs` backward compatibility. Connections auto-persist globally (`~/.grip/connections.json`) so they're available from any project. Connecting opens the full workspace (schema sidebar + query pad) automatically.
@@ -191,7 +191,6 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gx` | Query Doctor (plain-English EXPLAIN) |
 | `gD` | Diff against another table |
 | `gv` | Toggle compact/wide diff layout |
-| `gh` | Query history browser |
 | `gE` | Export table (CSV, TSV, JSON, SQL INSERT, Markdown, Grip Table) |
 
 ### Inspection
@@ -241,6 +240,33 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gw` | Jump to grid window |
 | `gb` | Schema browser (focus if open; close from inside) |
 | `gC` / `<C-g>` | Switch database connection |
+
+### Schema Sidebar
+
+| Key | Action |
+|-----|--------|
+| `<CR>` | Open table in grid |
+| `<S-CR>` | Open table in new split |
+| `l` / `zo` | Expand columns |
+| `h` / `zc` | Collapse |
+| `L` | Expand all |
+| `H` | Collapse all |
+| `/` | Filter by name |
+| `F` | Clear filter |
+| `n` / `N` | Next / previous table match |
+| `y` | Yank table or column name |
+| `r` | Refresh schema |
+| `go` | Open table under cursor, ORDER BY latest (created_at / PK DESC) |
+| `gT` / `gt` | Table picker (fuzzy finder) |
+| `gb` / `<Esc>` | Close sidebar |
+| `gw` | Jump to grid |
+| `gC` / `gc` / `<C-g>` | Switch connection |
+| `gh` | Query history |
+| `gq` | Saved queries |
+| `q` | Open query pad |
+| `D` | Drop table (with confirmation) |
+| `+` | Create table |
+| `?` | Show help |
 
 ### Commands
 
@@ -313,7 +339,7 @@ use {
 require("dadbod-grip").setup({
   limit         = 100,   -- default row limit for SELECT queries
   max_col_width = 40,    -- max display width per column
-  timeout       = 30000, -- query timeout in ms (30s default, good for SSH tunnels)
+  timeout       = 30000, -- query timeout in ms (default: 10000; raise for slow tunnels)
 })
 ```
 

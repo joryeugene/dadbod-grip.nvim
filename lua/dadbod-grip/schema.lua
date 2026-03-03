@@ -491,13 +491,52 @@ local function setup_keymaps(url)
     end
   end)
 
-  -- go / gT / gt: table picker
+  -- gT / gt: table picker
   local function _pick_table()
     require("dadbod-grip.picker").pick_table(url, function(name) open_table(name, url) end)
   end
-  map("go", _pick_table)
   map("gT", _pick_table)
   map("gt", _pick_table)
+
+  -- go: open table under cursor with smart ORDER BY (latest rows first)
+  map("go", function()
+    local node = node_at_cursor(state)
+    if not node then return end
+    local tbl = (node.kind == "table" and node.name)
+             or (node.kind == "column" and node.table_name)
+    if not tbl then return end
+
+    ensure_columns(state, tbl)
+    local cols   = state.col_cache[tbl] or {}
+    local pk_set = state.pk_cache[tbl]  or {}
+
+    -- Build lowercase name → original-case map for O(1) lookup
+    local col_map = {}
+    for _, col in ipairs(cols) do col_map[col.column_name:lower()] = col.column_name end
+
+    -- Prefer timestamp columns so the grid opens showing the latest rows first
+    local order_col
+    for _, ts in ipairs({ "created_at", "inserted_at", "date_created", "created_on",
+                          "updated_at", "modified_at", "date_updated", "updated_on",
+                          "timestamp", "ts" }) do
+      if col_map[ts] then order_col = col_map[ts]; break end
+    end
+
+    -- Fall back to any PK column
+    if not order_col then
+      for _, col in ipairs(cols) do
+        if pk_set[col.column_name] then order_col = col.column_name; break end
+      end
+    end
+
+    local grip = require("dadbod-grip")
+    local target_win = find_right_win()
+    if target_win then vim.api.nvim_set_current_win(target_win) end
+    local arg = order_col
+      and ("SELECT * FROM " .. tbl .. " ORDER BY " .. order_col .. " DESC")
+      or tbl
+    grip.open(arg, url, { reuse_win = target_win })
+  end)
 
   -- gb: close sidebar (from inside; gb elsewhere opens/focuses it)
   map("gb", function() M.close() end)
@@ -595,7 +634,8 @@ local function setup_keymaps(url)
       "  Actions",
       "  r         Refresh schema",
       "  y         Yank table/column name",
-      "  go        Table picker  (gT / gt: aliases)",
+      "  go        Open table, ORDER BY latest (created_at / PK)",
+      "  gT / gt   Table picker (fuzzy finder)",
       "  gb        Close browser (gb outside: open/focus)",
       "  gw        Jump to grid",
       "  gC / gc   Switch connection",

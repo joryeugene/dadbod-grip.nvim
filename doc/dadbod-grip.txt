@@ -291,8 +291,6 @@ ANALYSIS AND EXPORT ~
   gx              Explain current query plan
   gR              Table profile (sparkline distributions)
   gD              Diff current table against another table
-  gh              Query history browser
-  gA              AI SQL generation (natural language)
   gE              Export table in 6 formats (see |grip-export|)
 
 INSPECTION ~
@@ -322,18 +320,22 @@ YANKING ~
 
 SCHEMA AND WORKFLOW ~
                                                           *grip-workflow*
-  go / gT / gt    Open table picker (fuzzy finder)
+  go / gT / gt    Table picker (fuzzy finder)
   gb              Schema browser (focus if open; close from inside)
   gC / <C-g>      Switch database connection
+  gO              Open read-only query result as editable table
+  gN              Rename column under cursor
+  gw              Jump to grid window
   q               Open query pad (pre-filled with current query)
   gh              Query history browser
+  A               AI SQL generation (natural language)
 
 ADVANCED ~
                                                           *grip-advanced*
   gl              Toggle live SQL floating preview
   T               Toggle column type annotations on headers
   r               Refresh (re-run query)
-  q               Close grip buffer
+  :q              Close grip buffer
   ?               Show help
 
 ==============================================================================
@@ -419,8 +421,8 @@ Schema browser keymaps:
   F               Clear filter
   r               Refresh schema (re-fetch table list)
   y               Yank table or column name to clipboard
-  go              Open table under cursor in grid (like <CR>)
-  gT / gt         Open table picker (fuzzy finder)
+  go              Open table under cursor, ORDER BY latest (created_at / PK DESC)
+  gT / gt         Table picker (fuzzy finder)
   q               Open query pad
   gq              Load saved query (picker with SQL preview)
   gw              Jump to grid window
