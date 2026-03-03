@@ -48,10 +48,6 @@ Then `:GripConnect` to pick your database. That's it. Schema sidebar + query pad
 
 **Left:** Schema browser with PK/FK markers and column types. **Grid:** 4 staged mutations: modified row highlighted blue, deleted row struck through red. **Float:** Saved queries picker with instant SQL preview. **Right:** Live SQL float showing the exact DELETE and UPDATE statements generated as you edit. The SQL is written for you. Nothing hits the database until you press `a`.
 
-![Schema browser, query pad, multi-column sort, staged mutations picker](screenshot.png)
-
-**Left:** Schema browser with expanded `order_items` table. **Grid:** Multi-column sort (status, ordered_at) with 3 staged mutations. **Float:** Saved queries picker with live SQL preview. Browse saved queries and see the full SQL before loading it.
-
 ## Features
 
 ### Data Editing
