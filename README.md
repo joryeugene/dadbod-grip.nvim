@@ -373,16 +373,37 @@ Keys `2`–`9` also work in the schema sidebar to open any table directly in the
 
 ### lazy.nvim (recommended)
 
+The plugin ships a `lazy.lua` spec so all commands work as lazy-load triggers automatically — no manual `cmd` list required:
+
 ```lua
 {
   "joryeugene/dadbod-grip.nvim",
   dependencies = { "tpope/vim-dadbod" },
-  cmd = { "Grip", "GripSchema", "GripQuery", "GripConnect" },
+}
+```
+
+**With keymaps** (recommended):
+
+```lua
+{
+  "joryeugene/dadbod-grip.nvim",
+  dependencies = { "tpope/vim-dadbod" },
   keys = {
-    { "<leader>db", "<cmd>GripConnect<cr>", desc = "Database" },
+    { "<leader>db", "<cmd>GripConnect<cr>",  desc = "DB connect" },
+    { "<leader>dg", "<cmd>Grip<cr>",         desc = "DB grid" },
+    { "<leader>dt", "<cmd>GripTables<cr>",   desc = "DB tables" },
+    { "<leader>dq", "<cmd>GripQuery<cr>",    desc = "DB query pad" },
+    { "<leader>ds", "<cmd>GripSchema<cr>",   desc = "DB schema" },
+    { "<leader>dh", "<cmd>GripHistory<cr>",  desc = "DB history" },
   },
   opts = {},
 }
+```
+
+**Demo** (Softrear Analyst Portal — no database needed):
+
+```lua
+{ "<leader>dd", "<cmd>GripStart<cr>", desc = "DB demo" },
 ```
 
 **Recommended extras:**
@@ -427,12 +448,6 @@ require("dadbod-grip").setup({
 ```
 
 Provider auto-detection priority: `ANTHROPIC_API_KEY` > `OPENAI_API_KEY` > `GEMINI_API_KEY` > ollama (local). Explicit `provider` setting always wins.
-
-No default keymaps are set outside the grip buffer. Add one if you want:
-
-```lua
-vim.keymap.set("n", "<leader>lg", "<cmd>Grip<cr>", { desc = "Open Grip grid" })
-```
 
 ## Usage
 

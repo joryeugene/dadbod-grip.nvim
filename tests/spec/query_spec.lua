@@ -349,6 +349,90 @@ test("build_count_sql: no LIMIT or OFFSET", function()
   not_contains(sql, "OFFSET")
 end)
 
+-- ── build_filter_clause ─────────────────────────────────────────────────────
+
+test("build_filter_clause: = quotes string value", function()
+  local clause = query.build_filter_clause("name", "=", "alice")
+  eq(clause, '"name" = \'alice\'')
+end)
+
+test("build_filter_clause: = passes numeric value raw", function()
+  local clause = query.build_filter_clause("age", "=", "42")
+  eq(clause, '"age" = 42')
+end)
+
+test("build_filter_clause: LIKE auto-wraps value with % when no % present", function()
+  local clause = query.build_filter_clause("sku", "LIKE", "ROLL")
+  eq(clause, '"sku" LIKE \'%ROLL%\'')
+end)
+
+test("build_filter_clause: LIKE respects explicit % prefix", function()
+  local clause = query.build_filter_clause("sku", "LIKE", "%ROLL")
+  eq(clause, '"sku" LIKE \'%ROLL\'')
+end)
+
+test("build_filter_clause: LIKE respects explicit % suffix", function()
+  local clause = query.build_filter_clause("sku", "LIKE", "ROLL%")
+  eq(clause, '"sku" LIKE \'ROLL%\'')
+end)
+
+test("build_filter_clause: LIKE respects internal % wildcard", function()
+  local clause = query.build_filter_clause("sku", "LIKE", "R%L")
+  eq(clause, '"sku" LIKE \'R%L\'')
+end)
+
+test("build_filter_clause: IN parses comma list", function()
+  local clause = query.build_filter_clause("status", "IN", "a,b,c")
+  eq(clause, '"status" IN (\'a\',\'b\',\'c\')')
+end)
+
+test("build_filter_clause: IN trims whitespace around items", function()
+  local clause = query.build_filter_clause("id", "IN", "1, 2, 3")
+  eq(clause, '"id" IN (1,2,3)')
+end)
+
+test("build_filter_clause: BETWEEN numeric range", function()
+  local clause = query.build_filter_clause("price", "BETWEEN", "10,100")
+  eq(clause, '"price" BETWEEN 10 AND 100')
+end)
+
+test("build_filter_clause: BETWEEN string/date range", function()
+  local clause = query.build_filter_clause("created_at", "BETWEEN", "2024-01-01,2024-12-31")
+  eq(clause, '"created_at" BETWEEN \'2024-01-01\' AND \'2024-12-31\'')
+end)
+
+test("build_filter_clause: BETWEEN trims whitespace", function()
+  local clause = query.build_filter_clause("score", "BETWEEN", "0 , 100")
+  eq(clause, '"score" BETWEEN 0 AND 100')
+end)
+
+test("build_filter_clause: BETWEEN errors on wrong part count", function()
+  local ok, err = pcall(query.build_filter_clause, "x", "BETWEEN", "only_one")
+  assert(not ok, "should error")
+  assert(err:find("two values"), "error should mention two values: " .. tostring(err))
+end)
+
+test("build_filter_clause: NULL generates IS NULL", function()
+  local clause = query.build_filter_clause("col", "NULL", nil)
+  eq(clause, '"col" IS NULL')
+end)
+
+test("build_filter_clause: NOT NULL generates IS NOT NULL", function()
+  local clause = query.build_filter_clause("col", "NOT NULL", nil)
+  eq(clause, '"col" IS NOT NULL')
+end)
+
+test("filter_summary: long clauses not truncated", function()
+  local spec = query.new_table("users", 100)
+  local long_clause = '"some_very_long_column_name" LIKE \'%a_very_long_search_value%\''
+  local spec2 = query.add_filter(spec, long_clause)
+  local spec3 = query.add_filter(spec2, "another = 1")
+  local summary = query.filter_summary(spec3)
+  -- Must contain the full clause without any "..." truncation
+  assert(summary:find(long_clause, 1, true), "long clause must appear in full: " .. summary)
+  assert(not summary:find("...", 1, true), "must not truncate with '...': " .. summary)
+end)
+
 -- ── summary ─────────────────────────────────────────────────────────────────
 print(string.format("\nquery_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

@@ -594,12 +594,6 @@ local function build_render(session, opts)
   end
   if hidden_n > 0 then table.insert(status_parts, hidden_n .. " hidden") end
 
-  -- Filter summary
-  if session.query_spec then
-    local fs = qmod.filter_summary(session.query_spec)
-    if fs ~= "" then table.insert(status_parts, fs) end
-  end
-
   local status_str = " " .. table.concat(status_parts, "  │  ")
   table.insert(lines, status_str)
   -- Highlight timing badge — query=yellow, applied=green
@@ -616,6 +610,16 @@ local function build_render(session, opts)
     local staged_text = staged_count .. " staged"
     local s, e = status_str:find(staged_text, 1, true)
     if s then push_mark(#lines, s - 1, e, "GripStatusChg") end
+  end
+
+  -- ── Filter lines (one per active clause — always fully visible, never truncated) ──
+  if session.query_spec and #session.query_spec.filters > 0 then
+    for _, f in ipairs(session.query_spec.filters) do
+      local fline = " \xE2\x96\xBE " .. f.clause  -- ▾ clause
+      table.insert(lines, fline)
+      -- Dim the ▾ bullet (space + ▾(3 bytes) + space = bytes 0–4)
+      push_mark(#lines, 0, 5, "GripColType")
+    end
   end
 
   -- ── Hint line ──
@@ -2447,10 +2451,13 @@ function M._setup_keymaps(bufnr)
       max_name_w = math.max(max_name_w, vim.fn.strdisplaywidth(col))
     end
     local lines = {}
+    -- col_line_ranges[col] = { start=1-indexed first line, count=n lines, is_null=bool }
+    local col_line_ranges = {}
     for _, col in ipairs(st.columns) do
       local val = data.effective_value(st, cell.row_idx, col)
       local pad = string.rep(" ", max_name_w - vim.fn.strdisplaywidth(col))
       local prefix = " " .. col .. pad .. "   "
+      local start_line = #lines + 1
       -- JSON-aware display: try to pretty-print JSON/jsonb values
       local json_ok, json_decoded = val and pcall(vim.fn.json_decode, val) or false, nil
       if json_ok then json_decoded = vim.fn.json_decode(val) end
@@ -2468,6 +2475,7 @@ function M._setup_keymaps(bufnr)
         local display_val = val and val:gsub("\n", "↵"):gsub("\r", "") or "NULL"
         table.insert(lines, prefix .. display_val)
       end
+      col_line_ranges[col] = { start = start_line, count = #lines - start_line + 1, is_null = (val == nil) }
     end
     local grip_win = vim.api.nvim_get_current_win()
     local _, popup_buf = open_info_float(grip_win, lines, {
@@ -2476,33 +2484,52 @@ function M._setup_keymaps(bufnr)
     -- Shadow ]p/[p: Vim's built-in "put indented" would E21 on modifiable=false popup buffers
     vim.keymap.set("n", "]p", "<Nop>", { buffer = popup_buf, silent = true })
     vim.keymap.set("n", "[p", "<Nop>", { buffer = popup_buf, silent = true })
-    -- Highlight modified cells
+    -- Apply highlights using actual line ranges (not column index, which breaks on multi-line JSON)
     local status = data.row_status(st, cell.row_idx)
+    local row_ns = vim.api.nvim_create_namespace("grip_row_view")
+    local function hl_range(range, hl_group)
+      for li = range.start, range.start + range.count - 1 do
+        vim.api.nvim_buf_set_extmark(popup_buf, row_ns, li - 1, 0, {
+          end_col = #lines[li],
+          hl_group = hl_group,
+        })
+      end
+    end
     if status == "modified" and st.changes[cell.row_idx] then
-      local row_ns = vim.api.nvim_create_namespace("grip_row_view")
-      for i, col in ipairs(st.columns) do
-        if st.changes[cell.row_idx][col] ~= nil then
-          vim.api.nvim_buf_set_extmark(popup_buf, row_ns, i - 1, 0, {
-            end_col = #lines[i],
-            hl_group = "GripModified",
-          })
+      for _, col in ipairs(st.columns) do
+        local range = col_line_ranges[col]
+        if range then
+          if range.is_null and st.changes[cell.row_idx][col] ~= nil then
+            -- Modified + null → orange (matches mutation preview staging color)
+            hl_range(range, "GripNullStaged")
+          elseif range.is_null then
+            hl_range(range, "GripNull")
+          elseif st.changes[cell.row_idx][col] ~= nil then
+            hl_range(range, "GripModified")
+          end
         end
       end
     elseif status == "inserted" then
-      local row_ns = vim.api.nvim_create_namespace("grip_row_view")
-      for i in ipairs(st.columns) do
-        vim.api.nvim_buf_set_extmark(popup_buf, row_ns, i - 1, 0, {
-          end_col = #lines[i],
+      for li = 1, #lines do
+        vim.api.nvim_buf_set_extmark(popup_buf, row_ns, li - 1, 0, {
+          end_col = #lines[li],
           hl_group = "GripInserted",
         })
       end
     elseif status == "deleted" then
-      local row_ns = vim.api.nvim_create_namespace("grip_row_view")
-      for i in ipairs(st.columns) do
-        vim.api.nvim_buf_set_extmark(popup_buf, row_ns, i - 1, 0, {
-          end_col = #lines[i],
+      for li = 1, #lines do
+        vim.api.nvim_buf_set_extmark(popup_buf, row_ns, li - 1, 0, {
+          end_col = #lines[li],
           hl_group = "GripDeleted",
         })
+      end
+    else
+      -- Normal row: highlight NULL values
+      for _, col in ipairs(st.columns) do
+        local range = col_line_ranges[col]
+        if range and range.is_null then
+          hl_range(range, "GripNull")
+        end
       end
     end
   end, "Row view")
@@ -3232,7 +3259,7 @@ function M._setup_keymaps(bufnr)
     vim.notify(col_name .. " IS NULL", vim.log.levels.INFO)
   end, "Filter: column IS NULL")
 
-  -- gF: interactive filter builder (=, !=, >, <, LIKE, IN, NULL, NOT NULL)
+  -- gF: interactive filter builder (=, !=, >, <, LIKE, IN, BETWEEN, NULL, NOT NULL)
   map("gF", function()
     local session_gF = M._sessions[bufnr]
     if not session_gF or not session_gF.query_spec then return end
@@ -3262,7 +3289,7 @@ function M._setup_keymaps(bufnr)
 
     local CANCEL = "\0"
     local ok, op = pcall(vim.fn.input, {
-      prompt = "Filter " .. col_name .. " [=, !=, >, <, LIKE, IN, NULL, NOT NULL]: ",
+      prompt = "Filter " .. col_name .. " [=, !=, >, <, LIKE, IN, BETWEEN, NULL, NOT NULL]: ",
       cancelreturn = CANCEL,
     })
     if not ok or op == CANCEL or op == "" then return end
@@ -3270,7 +3297,10 @@ function M._setup_keymaps(bufnr)
 
     local value
     if op ~= "NULL" and op ~= "NOT NULL" then
-      local value_prompt = op == "LIKE" and "Value (use % wildcards, e.g. %text%): " or "Value: "
+      local value_prompt = op == "LIKE" and "Value (wildcards auto-added, or type %custom%): "
+        or op == "IN" and "Values (comma-separated, e.g. 1,2,3 or alice,bob): "
+        or op == "BETWEEN" and "Range (low,high \xe2\x80\x94 e.g. 10,100 or 2024-01-01,2024-12-31): "
+        or "Value: "
       local ok2, val = pcall(vim.fn.input, { prompt = value_prompt, cancelreturn = CANCEL })
       if not ok2 or val == CANCEL then return end
       value = val
@@ -3284,11 +3314,16 @@ function M._setup_keymaps(bufnr)
 
     local new_spec = qmod.add_filter(session_gF.query_spec, clause)
     if session_gF.on_requery then session_gF.on_requery(bufnr, new_spec) end
-    local display = op == "NULL" or op == "NOT NULL"
-      and (col_name .. " IS " .. (op == "NULL" and "" or "NOT ") .. "NULL")
-      or (col_name .. " " .. op .. " " .. tostring(value or ""))
+    local display
+    if op == "NULL" or op == "NOT NULL" then
+      display = col_name .. " IS " .. (op == "NULL" and "" or "NOT ") .. "NULL"
+    elseif op == "BETWEEN" then
+      display = col_name .. " BETWEEN " .. tostring(value or "")
+    else
+      display = col_name .. " " .. op .. " " .. tostring(value or "")
+    end
     vim.notify("Filtered: " .. display:sub(1, 60) .. "  (F to clear)", vim.log.levels.INFO)
-  end, "Filter builder (=, !=, >, <, LIKE, IN, NULL)")
+  end, "Filter builder (=, !=, >, <, LIKE, IN, BETWEEN, NULL, NOT NULL)")
 
   -- gX: export result set to file (csv/json/sql)
   map("gX", function() M.do_export(bufnr) end, "Export to file (csv/json/sql)")

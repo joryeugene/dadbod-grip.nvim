@@ -119,8 +119,10 @@ end
 
 --- Build a SQL filter clause string from a column, operator, and user-supplied value.
 --- Handles quoting: numeric strings are unquoted, all others get single-quote wrapping.
---- Operators: "=", "!=", ">", "<", "LIKE", "IN", "NULL", "NOT NULL"
+--- Operators: "=", "!=", ">", "<", "LIKE", "IN", "BETWEEN", "NULL", "NOT NULL"
 --- For "IN": value is comma-separated, each item quoted/unquoted individually.
+--- For "BETWEEN": value is "low,high" — two comma-separated values.
+--- For "LIKE": auto-wraps value with %…% if no % present (substring intent assumed).
 --- For "NULL" / "NOT NULL": value is ignored.
 function M.build_filter_clause(col, op, value)
   local col_q = sql_mod.quote_ident(col)
@@ -152,8 +154,27 @@ function M.build_filter_clause(col, op, value)
     return col_q .. " IN (" .. table.concat(parts, ",") .. ")"
   end
 
+  -- BETWEEN: parse "low,high" — two comma-separated values
+  if op == "BETWEEN" then
+    local parts = {}
+    for item in tostring(value):gmatch("[^,]+") do
+      local trimmed = item:match("^%s*(.-)%s*$")
+      table.insert(parts, quote_user_val(trimmed))
+    end
+    if #parts ~= 2 then
+      error("BETWEEN requires exactly two values (low,high)")
+    end
+    return col_q .. " BETWEEN " .. parts[1] .. " AND " .. parts[2]
+  end
+
+  -- LIKE: auto-wrap with % wildcards if user didn't include any
+  local val_str = tostring(value or "")
+  if op == "LIKE" and not val_str:find("%%") then
+    val_str = "%" .. val_str .. "%"
+  end
+
   -- =, !=, >, <, LIKE — single value
-  return col_q .. " " .. op .. " " .. quote_user_val(tostring(value or ""))
+  return col_q .. " " .. op .. " " .. quote_user_val(val_str)
 end
 
 --- Quick-filter: "column = value" or "column IS NULL".
@@ -180,17 +201,15 @@ function M.has_filters(spec)
   return #spec.filters > 0
 end
 
---- Human-readable filter summary for status line.
+--- Human-readable filter summary (full clauses, no truncation).
 function M.filter_summary(spec)
   if #spec.filters == 0 then return "" end
   if #spec.filters == 1 then
     return "filter: " .. spec.filters[1].clause
   end
-  -- Show all clauses, each truncated at 22 chars, joined with middot
   local parts = {}
   for _, f in ipairs(spec.filters) do
-    local c = f.clause
-    table.insert(parts, #c > 22 and c:sub(1, 19) .. "..." or c)
+    table.insert(parts, f.clause)
   end
   return "filters: " .. table.concat(parts, "  \xC2\xB7  ")
 end
