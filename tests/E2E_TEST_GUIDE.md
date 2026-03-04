@@ -541,6 +541,65 @@ Requires an API key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, or
 
 ---
 
+## 23. v2.5-v2.8 Features
+
+### Mutation Preview (v2.5)
+- [ ] `e` on a cell, change value, `C-CR` -- row turns teal (staged), no DB write yet
+- [ ] `gD` -- diff float opens showing `- old_value` / `+ new_value`
+- [ ] `u` inside diff float -- cancels, row goes back to original
+- [ ] `a` inside diff float -- applies to DB, row stays teal until refresh
+- [ ] `d` on a row, `C-CR` -- red strikethrough staged, `gD` shows DELETE diff
+- [ ] `o` new row, fill fields, `C-CR` -- green row staged, `gD` shows INSERT diff
+
+### Multi-Schema Support (v2.5)
+- [ ] Connection URL with schema prefix (e.g. `postgres://...?schema=myschema`) loads tables from that schema
+- [ ] Schema sidebar shows tables scoped to the connection's schema
+
+### Sidebar Navigation (v2.6)
+- [ ] `gb` from anywhere -- opens schema sidebar and focuses it
+- [ ] `go` on a table node in sidebar -- opens grid with smart ORDER BY (latest rows first)
+- [ ] `<CR>` on a table node -- plain open (no ORDER BY)
+- [ ] `gh` -- history picker with SQL preview pane
+- [ ] `gc` -- connections picker
+- [ ] `gt` -- table picker for current connection
+- [ ] Tab nav `1`-`5` in schema sidebar: Records / Columns / Constraints / FK / Indexes
+
+### Wide Table Scrolling (v2.6)
+- [ ] Wide table (30+ columns) does not wrap -- `wrap=false` is set
+- [ ] `w`/`b` navigate columns, `$`/`0` jump to last/first
+- [ ] `Tab`/`S-Tab` move column by column
+
+### File Modes (v2.7)
+- [ ] `--watch /path/to/file.sql` in connection URL -- query reruns when file changes
+- [ ] `--write /path/to/output.csv` -- query results written to file on each run
+- [ ] Password masking: password not visible in connection picker display
+
+### Null Filter and DDL Float (v2.7)
+- [ ] `gn` on a column -- toggles null filter (hides/shows NULL rows for that column)
+- [ ] `gV` -- DDL float opens showing CREATE TABLE statement for current table
+- [ ] `gV` shows index definitions and CHECK constraints
+- [ ] `gi` / `gI` -- left/right align current column
+
+### GripStart + Softrear Portal (v2.7-v2.8)
+- [ ] `:GripStart` -- welcome screen opens, Softrear Inc. connection auto-seeded
+- [ ] Connection picker shows "Softrear Inc. Analyst Portal" entry
+- [ ] Selecting it opens 17-table schema
+- [ ] FK drill `gf` works across all 17 tables
+- [ ] `gD` picker shows demo connections (`:GripStart` re-runnable)
+
+### Cursor After Edit (v2.8)
+- [ ] `e` on a cell, change value, `<CR>` -- cursor advances to same column, next row
+- [ ] When next row has a different-width preceding column (e.g. NULL vs text), cursor still lands in correct column, not in the separator
+- [ ] Last row: cursor stays on last row after editing (does not wrap)
+
+### Chonk Welcome Screen (v2.8)
+- [ ] `;` in normal mode -- Chonk float opens, centered in editor
+- [ ] Float art is visually centered with equal left/right margins
+- [ ] `q` / `<Esc>` / `<CR>` -- closes float
+- [ ] `;` closes if already open (WinLeave autocmd)
+
+---
+
 ## Quick Smoke Test (5 minutes)
 
 Minimum viable QA pass for a quick check:

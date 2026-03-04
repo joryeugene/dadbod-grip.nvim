@@ -12,6 +12,8 @@ jobs:
         with:
           neovim: true
           version: ${{ matrix.neovim }}
+      - name: Seed SQLite test database
+        run: sqlite3 tests/seed_sqlite.db < tests/seed_sqlite.sql
       - name: Run unit tests
         run: |
           nvim --headless -u tests/minimal_init.lua -l tests/run_specs.lua

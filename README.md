@@ -69,7 +69,7 @@ duckdb::memory:            ← single-query scratch (tables don't persist betwee
 **Top right:** Query pad with a SQL query.
 **Values:** `resolved` column color-codes true/false. Severity values highlight out-of-range rows. NULL cells display as `•NULL•`.
 
-An example database is included. `:GripStart` opens it. Seventeen tables. Something in the consumer incidents does not add up. Walkthrough: [docs/softrear-internal.md](docs/softrear-internal.md)
+An example database is included. `:GripStart` opens it. Seventeen tables. Something in the consumer incidents does not add up. Walkthrough: [demo/softrear-internal.md](demo/softrear-internal.md)
 
 ## Features
 

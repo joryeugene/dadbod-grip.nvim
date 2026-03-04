@@ -1,67 +1,13 @@
 # dadbod-grip.nvim
 
-## Released
+## Shipped since v2.4
 
-### v1.0.0 - Editable Data Grids
-DataGrip-style grids with box-drawing UI, inline cell editing, visual change
-staging, live SQL preview, PostgreSQL support, DBUI integration, composite PK
-support, read-only auto-detection, navigation, CSV export, undo, help popup.
+- v2.5: Mutation preview (`C-CR` stages, `gD` diff float, `u` cancel, `a` apply). Multi-schema.
+- v2.6: Sidebar nav (`go`/`gb`), pickers (`gh`/`gc`/`gt`), wide table scroll, tab nav `1-5`.
+- v2.7: `--write`/`--watch` file modes, password masking, `gn` null filter, `gV` DDL float, `gi`/`gI` alignment, `:GripStart` + Softrear Portal demo.
+- v2.8: SafeState cursor after edit, Chonk welcome screen (`;`), block-centered art float.
 
-### v1.1.0 - Multi-Database
-Adapter system with SQLite, DuckDB, MySQL/MariaDB adapters. RFC 4180 CSV
-parser. DuckDB file-as-table querying (`:Grip /path/to/data.parquet`).
-
-### v1.2.0 - Sort, Filter, Paginate
-Column sort (s/S), quick filter (f), freeform WHERE (C-f), clear filter (F),
-pagination (]p/[p), query composition module.
-
-### v1.3.0 - FK Navigation & Data Intelligence
-FK navigation (gf) with breadcrumb trail and back stack (C-o). Aggregate on
-selection (ga), column statistics (gS), multi-format export (gE).
-
-### v1.4.0 - Grid Enhancements
-Column pinning (1-9/0), auto-fit, column hide/show (-/g-/gH), conditional
-cell formatting, batch edit, visual copy/paste, multi-level undo (50 deep).
-
-### v2.0.0 - Standalone Workflow
-EXPLAIN viewer, transaction wrapper, schema browser (go), table picker (gT),
-query pad (gQ), saved queries, connection profiles, data diff (gD).
-
-### v2.1.0 - Schema Operations (DDL)
-Table properties (gI), column rename (R), column add/drop (+/x), drop table,
-create table.
-
-### v2.2.0 - Quality of Life
-Remote file querying via DuckDB httpfs, saved filter presets (gp/gP),
-Grip Table box-drawing export format, Telescope saved queries picker.
-
-### v2.3.0 - Query History & Compact Diff
-Query history with JSONL storage and Telescope search (gh, :GripHistory).
-Auto-records every :Grip query, query pad execution, staged DML, and EXPLAIN.
-Consecutive dedup, password redaction, 500-entry cap.
-
-Compact diff mode for narrow terminals (<120 cols). Stacked key-value layout
-showing PK context + changed columns with old -> new format. Auto-detects
-terminal width, toggle with gv.
-
-### v2.4.0 - Data Intelligence
-Sparkline data profiling (gR, :GripProfile) with per-column completeness,
-cardinality, min/max, and Unicode distribution charts.
-
-Query Doctor: plain-English EXPLAIN with severity levels, cost bars, and
-actionable index suggestions. Replaces raw EXPLAIN output.
-
-AI SQL generation (gA, :GripAsk) with multi-provider support (Anthropic,
-OpenAI, Gemini, Ollama). Schema context auto-assembled from metadata.
-
-Query execution timer in statusline and history.
-
-### Ongoing
-- 328 unit tests across 14 spec files
-- Adapter-specific type_zoo seeds (PG: 34 types, MySQL: 28 types, DuckDB: 34 types, SQLite: 26 types + coercion row)
-- Committed SQLite test DB (tests/seed_sqlite.db) for zero-setup testing
-- Structural sharing in data.lua, sampled column widths
-- Vimdoc help file (doc/dadbod-grip.txt)
+Full history: `git log --oneline`.
 
 ---
 
@@ -77,7 +23,8 @@ release. Roughly ordered by expected impact.
 - [x] Query Doctor plain-English EXPLAIN -- v2.4.0
 - [x] AI SQL generation (gA, :GripAsk) -- v2.4.0
 - [x] Query execution timer -- v2.4.0
-- [ ] Live watch mode (`:GripWatch`, re-execute on interval, highlight changed cells)
+- [x] Live watch mode (`--watch` flag, re-execute on file change) -- v2.7
+- [x] `:GripStart` demo portal (Softrear Inc., 17 tables) -- v2.7
 - [ ] DuckDB cross-database federation (`:GripAttach`, ATTACH pg/mysql/sqlite, cross-DB JOINs)
 - [ ] Generate sync SQL from diff (make table A match table B, emit INSERT/UPDATE/DELETE migration from `gD` output)
 - [ ] Import from clipboard/pipe (`gI` in empty grid or `:GripImport`, detect CSV/JSON/TSV, preview before INSERT, map columns)
