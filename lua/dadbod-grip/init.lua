@@ -2021,12 +2021,12 @@ function M.setup(opts)
         -- Seed on first open
         if c._demo_sql and c._demo_sql ~= "" then
           local db_path = c.url:gsub("^duckdb:", ""):gsub("^sqlite:", "")
-          if vim.fn.filereadable(db_path) == 0 then
-            vim.fn.mkdir(vim.fn.fnamemodify(db_path, ":h"), "p")
-            local bin = db_path:match("%.duckdb$") and "duckdb" or "sqlite3"
-            vim.fn.system(bin .. " " .. vim.fn.shellescape(db_path)
-              .. " < " .. vim.fn.shellescape(c._demo_sql))
-          end
+          -- Always reseed: demo db is not user data; fresh state picks up schema updates
+          if vim.fn.filereadable(db_path) == 1 then vim.fn.delete(db_path) end
+          vim.fn.mkdir(vim.fn.fnamemodify(db_path, ":h"), "p")
+          local bin = db_path:match("%.duckdb$") and "duckdb" or "sqlite3"
+          vim.fn.system(bin .. " " .. vim.fn.shellescape(db_path)
+            .. " < " .. vim.fn.shellescape(c._demo_sql))
         end
         connections.switch(c.url)
         vim.schedule(function()
