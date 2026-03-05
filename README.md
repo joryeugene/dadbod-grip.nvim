@@ -457,12 +457,21 @@ The plugin ships a `lazy.lua` spec so all commands work as lazy-load triggers au
 { "<leader>dd", "<cmd>GripStart<cr>", desc = "DB demo" },
 ```
 
-**Recommended extras:**
+**nvim-cmp integration (optional):**
+
+dadbod-grip ships built-in SQL completion — tables, columns, aliases, and DuckDB federation — with no extra plugins required. To integrate with nvim-cmp, add the source to your cmp setup:
 
 ```lua
--- SQL completion in query pad (auto-completes table/column names)
-{ "kristijanhusak/vim-dadbod-completion", ft = { "sql" } }
+require("cmp").setup({
+  sources = {
+    { name = "dadbod_grip" },  -- dadbod-grip built-in SQL completion
+    { name = "nvim_lsp" },
+    { name = "buffer" },
+  },
+})
 ```
+
+Without nvim-cmp, completions fire automatically as you type (TextChangedI) and `<C-Space>` opens the menu manually.
 
 ### packer.nvim
 
@@ -638,7 +647,7 @@ Open each table with `:Grip <table_name>` and verify rendering, editing, sort/fi
 ## Ecosystem
 
 - **[vim-dadbod](https://github.com/tpope/vim-dadbod)** started Vim database tooling. Optional. If installed, grip reads its `g:db`/`g:dbs` variables as connection sources for smooth migration from existing dadbod or DBUI setups.
-- **[vim-dadbod-completion](https://github.com/kristijanhusak/vim-dadbod-completion)** adds SQL table and column completion in the query pad.
+- **[vim-dadbod-completion](https://github.com/kristijanhusak/vim-dadbod-completion)** is an alternative SQL completion source. dadbod-grip's built-in completion is self-contained, alias-aware, and federation-aware — no additional plugins needed for the query pad.
 - **[vim-dadbod-ui](https://github.com/kristijanhusak/vim-dadbod-ui)** is a sidebar tree browser with saved queries. Optional since grip has its own schema browser and query pad.
 
 ---

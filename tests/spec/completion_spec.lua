@@ -271,6 +271,73 @@ do
   restore()
 end
 
+-- ── extract_aliases ───────────────────────────────────────────────────────────
+
+local ea = completion.extract_aliases
+
+-- FROM table alias (no AS)
+do
+  local a = ea("SELECT * FROM employees e WHERE e.id = 1")
+  eq(a["e"], "employees", "extract: FROM table alias")
+end
+
+-- FROM table AS alias
+do
+  local a = ea("SELECT * FROM employees AS e")
+  eq(a["e"], "employees", "extract: FROM table AS alias")
+end
+
+-- JOIN table alias
+do
+  local a = ea("FROM orders o JOIN employees e ON o.emp_id = e.id")
+  eq(a["o"], "orders",    "extract: JOIN o=orders")
+  eq(a["e"], "employees", "extract: JOIN e=employees")
+end
+
+-- Multi-join: FROM + two JOINs
+do
+  local a = ea("SELECT * FROM orders o JOIN employees e ON e.id = o.emp_id JOIN departments d ON d.id = e.dept_id")
+  eq(a["o"], "orders",      "extract: multi o=orders")
+  eq(a["e"], "employees",   "extract: multi e=employees")
+  eq(a["d"], "departments", "extract: multi d=departments")
+end
+
+-- SQL keyword as alias is skipped (FROM employees WHERE)
+do
+  local a = ea("SELECT * FROM employees WHERE id = 1")
+  eq(a["where"], nil, "extract: WHERE is not an alias")
+end
+
+-- No aliases in a plain single-table query
+do
+  local a = ea("SELECT id, name FROM employees")
+  eq(next(a), nil, "extract: no aliases in simple query")
+end
+
+-- AS form wins over bare form for the same alias key
+do
+  local a = ea("FROM employees AS e JOIN employees e ON true")
+  eq(a["e"], "employees", "extract: AS form preserved")
+end
+
+-- Alias tracking integrates with complete() via dotted context
+do
+  local restore = mock_db({ employees = {
+    { column_name = "emp_id",   data_type = "integer", is_nullable = "NO"  },
+    { column_name = "emp_name", data_type = "text",    is_nullable = "YES" },
+  }})
+  completion.invalidate(PG_URL)
+  -- full_sql contains the alias declaration; before-cursor is the dotted access
+  local full_sql = "SELECT e.emp_name FROM employees e WHERE e."
+  local aliases  = ea(full_sql)
+  local items    = completion.complete("SELECT e.", PG_URL, aliases)
+  local names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+  ok(names["emp_id"],   "alias+complete: emp_id via alias e")
+  ok(names["emp_name"], "alias+complete: emp_name via alias e")
+  restore()
+end
+
 -- ── summary ───────────────────────────────────────────────────────────────────
 print(string.format("\ncompletion_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

@@ -21,14 +21,17 @@ local function ensure_buf(url)
   vim.bo[_pad_bufnr].filetype = "sql"
   vim.api.nvim_buf_set_name(_pad_bufnr, "grip://query")
   vim.b[_pad_bufnr].db = url
-  -- Native SQL completion via <C-x><C-o>. vim-dadbod-completion still works
-  -- for users who have it (b:db is set above). This omnifunc adds federation
-  -- awareness (alias.table.column after :GripAttach) that dadbod-completion lacks.
+  -- SQL completion: three paths that cooperate.
+  -- 1. omnifunc  → <C-x><C-o> (Vim-standard) and nvim-cmp { name = 'omni' } source
+  -- 2. auto-trigger → TextChangedI fires vim.fn.complete() for non-cmp users
+  -- 3. nvim-cmp source → register_cmp_source() so cmp users get first-class integration
   vim.bo[_pad_bufnr].omnifunc = "v:lua.require'dadbod-grip.completion'.omnifunc"
   local completion = require("dadbod-grip.completion")
   completion.setup_auto_complete(_pad_bufnr, function()
     return vim.b[_pad_bufnr].db or vim.g.db
   end)
+  -- Register as nvim-cmp source (no-op when nvim-cmp is not installed).
+  completion.register_cmp_source()
   -- Pre-warm schema cache so the first keystroke doesn't block on DB I/O.
   vim.schedule(function()
     local u = (vim.b[_pad_bufnr] and vim.b[_pad_bufnr].db) or vim.g.db
@@ -109,6 +112,22 @@ local function setup_keymaps(bufnr, url)
     local sql = M.get_content()
     if sql then run_sql(cur_url(), sql) end
   end, { buffer = bufnr, silent = true, desc = "Grip: run query" })
+
+  -- C-Space: manually trigger SQL completion (more intuitive than <C-x><C-o>).
+  -- Prefers nvim-cmp when available; falls back to native omnifunc popup.
+  vim.keymap.set("i", "<C-Space>", function()
+    local ok, cmp = pcall(require, "cmp")
+    if ok then
+      cmp.complete()
+    else
+      local comp = require("dadbod-grip.completion")
+      local col   = comp.omnifunc(1, "")
+      local items = comp.omnifunc(0, "")
+      if type(items) == "table" and #items > 0 then
+        vim.fn.complete(col + 1, items)
+      end
+    end
+  end, { buffer = bufnr, silent = true, desc = "Grip: trigger SQL completion" })
 
   -- Visual C-CR: run selection (line-wise: runs all selected lines)
   vim.keymap.set("v", "<C-CR>", function()

@@ -1,6 +1,8 @@
 -- completion.lua: native SQL completion for the query pad.
--- Implements omnifunc for <C-x><C-o> and M.complete() for testing.
+-- Implements omnifunc (<C-x><C-o>), auto-trigger (TextChangedI), and
+-- a first-class nvim-cmp source ({ name = 'dadbod_grip' }).
 -- Works for all adapters. Handles DuckDB cross-database federation.
+-- Supports SQL alias tracking: FROM employees e → e. completes employees cols.
 
 local M = {}
 
@@ -47,6 +49,66 @@ function M.invalidate(url)
       _cache[k] = nil
     end
   end
+end
+
+-- ── Alias extraction ───────────────────────────────────────────────────────────
+
+-- SQL keywords that cannot be table aliases.
+local _ALIAS_KEYWORDS = {
+  WHERE=1, ON=1, SET=1, INNER=1, LEFT=1, RIGHT=1, FULL=1, OUTER=1, CROSS=1,
+  HAVING=1, GROUP=1, ORDER=1, LIMIT=1, OFFSET=1, UNION=1, INTERSECT=1,
+  EXCEPT=1, INTO=1, AS=1, AND=1, OR=1, NOT=1, NULL=1, IS=1, IN=1,
+  LIKE=1, BETWEEN=1, WHEN=1, THEN=1, ELSE=1, END=1, CASE=1, WITH=1,
+  SELECT=1, FROM=1, JOIN=1, BY=1,
+}
+
+--- Parse a SQL string and return a map of alias → table_name.
+--- Recognises FROM/JOIN with optional AS keyword.
+--- Aliases that match SQL keywords are skipped.
+--- Returns { ["e"] = "employees", ["d"] = "departments", ... } (lowercase keys/values).
+function M.extract_aliases(sql)
+  if not sql or sql == "" then return {} end
+  local up  = sql:upper()
+  local aliases = {}
+
+  -- Strip quotes from table name (handles "table", `table`, 'table').
+  -- Use long-bracket literal to avoid Lua escape issues with backtick.
+  local function strip_quotes(s)
+    return (s:gsub([=[^["'`](.*)["'`]$]=], "%1"))
+  end
+
+  -- Pattern A/C: FROM/JOIN table AS alias
+  for tbl, alias in up:gmatch("[%u][%u]*%s+([%w_%.\"'`]+)%s+AS%s+([%w_]+)") do
+    local a_up = alias:upper()
+    if not _ALIAS_KEYWORDS[a_up] then
+      aliases[alias:lower()] = strip_quotes(tbl):lower()
+    end
+  end
+
+  -- Pattern B/D: FROM/JOIN table alias (no AS)
+  -- Match FROM or JOIN specifically to avoid false hits inside SELECT lists
+  for kw, tbl, alias in up:gmatch("(FROM%s+)([%w_%.\"'`]+)%s+([%w_]+)") do
+    _ = kw  -- unused, present to anchor the pattern
+    local a_up = alias:upper()
+    if not _ALIAS_KEYWORDS[a_up] then
+      local key = alias:lower()
+      if not aliases[key] then   -- AS-form wins if already set
+        aliases[key] = strip_quotes(tbl):lower()
+      end
+    end
+  end
+  for kw, tbl, alias in up:gmatch("(JOIN%s+)([%w_%.\"'`]+)%s+([%w_]+)") do
+    _ = kw
+    local a_up = alias:upper()
+    if not _ALIAS_KEYWORDS[a_up] then
+      local key = alias:lower()
+      if not aliases[key] then
+        aliases[key] = strip_quotes(tbl):lower()
+      end
+    end
+  end
+
+  return aliases
 end
 
 -- ── Context parsing ────────────────────────────────────────────────────────────
@@ -266,9 +328,14 @@ function M.omnifunc(findstart, base)
     local col  = vim.api.nvim_win_get_cursor(0)[2]
     local before = line:sub(1, col)
 
+    -- Extract aliases from the full buffer so dotted completion resolves
+    -- e.g. "SELECT e." where "FROM employees e" appears elsewhere in the query.
+    local all_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    local aliases   = M.extract_aliases(table.concat(all_lines, "\n"))
+
     -- For dotted completion, we need the full context including qualifier.
     -- The `base` from Vim may strip the qualifier, so we use `before` directly.
-    local raw_items = M.complete(before, url)
+    local raw_items = M.complete(before, url, aliases)
     local vim_items = {}
     for _, it in ipairs(raw_items) do
       table.insert(vim_items, {
@@ -304,7 +371,11 @@ function M.setup_auto_complete(bufnr, url_fn)
       -- Keyword contexts (table/column): require ≥1 char to avoid firing on bare keyword
       if (ctx.type == "table" or ctx.type == "column") and #ctx.word == 0 then return end
 
-      local raw = M.complete(before, url)
+      -- Extract aliases from full buffer for alias-aware dotted completion
+      local all_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+      local aliases   = M.extract_aliases(table.concat(all_lines, "\n"))
+
+      local raw = M.complete(before, url, aliases)
       if #raw == 0 then return end
 
       -- Compute start column (same walk-back as omnifunc findstart)
@@ -323,6 +394,72 @@ function M.setup_auto_complete(bufnr, url_fn)
       end
     end,
   })
+end
+
+-- ── nvim-cmp source ────────────────────────────────────────────────────────────
+
+--- Register dadbod-grip as a first-class nvim-cmp completion source.
+--- Safe to call multiple times — nvim-cmp deduplicates by source name.
+--- Users opt in by adding { name = 'dadbod_grip' } to their cmp sources:
+---
+---   require('cmp').setup({ sources = { { name = 'dadbod_grip' }, ... } })
+---
+--- Without nvim-cmp installed this is a no-op.
+function M.register_cmp_source()
+  local ok, cmp = pcall(require, "cmp")
+  if not ok then return end
+
+  local source = {}
+
+  -- Only active when a database connection is configured for the buffer.
+  function source:is_available()
+    local url = vim.b.db or vim.g.db
+    return url ~= nil and url ~= ""
+  end
+
+  function source:get_debug_name()
+    return "dadbod_grip"
+  end
+
+  -- Fire automatically on "." (dotted context: alias.col, tbl.col, fed.tbl.col).
+  -- Keyword context (FROM, WHERE) is handled by the TextChangedI autocmd.
+  function source:get_trigger_characters()
+    return { "." }
+  end
+
+  function source:complete(params, callback)
+    local url = vim.b.db or vim.g.db
+    if not url or url == "" then callback(nil) return end
+
+    local before = params.context.cursor_before_line
+    local bufnr  = params.context.bufnr
+
+    local all_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local aliases   = M.extract_aliases(table.concat(all_lines, "\n"))
+
+    local raw = M.complete(before, url, aliases)
+    if #raw == 0 then callback(nil) return end
+
+    -- Map to LSP CompletionItem format that nvim-cmp expects.
+    local cmp_types = require("cmp.types")
+    local items = {}
+    for _, it in ipairs(raw) do
+      -- Choose kind: table entries get Module icon, columns get Field icon.
+      local kind = cmp_types.lsp.CompletionItemKind.Field
+      if it.menu == "[table]" then
+        kind = cmp_types.lsp.CompletionItemKind.Module
+      end
+      table.insert(items, {
+        label      = it.word,
+        detail     = it.menu,
+        kind       = kind,
+        insertText = it.word,
+      })
+    end
+    callback({ items = items, isIncomplete = false })
+  end
+
+  cmp.register_source("dadbod_grip", source)
 end
 
 return M

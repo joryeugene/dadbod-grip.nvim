@@ -141,8 +141,9 @@
 | Key | Action |
 |-----|--------|
 | `<C-CR>` | Execute query |
-| (auto) | SQL completion fires as you type (tables, columns, dotted, federation-aware) |
-| `<C-x><C-o>` | SQL completion: manual trigger / nvim-cmp fallback |
+| (auto) | SQL completion fires as you type — tables, columns, aliases, federation |
+| `<C-Space>` | Manually trigger SQL completion |
+| `<C-x><C-o>` | SQL completion: Vim-standard omnifunc / nvim-cmp source |
 | `gA` | AI SQL generation |
 | `?` | Show help |
 | `q` | Close query pad |
