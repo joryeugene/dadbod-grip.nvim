@@ -405,7 +405,7 @@ Navigate the diagram with `j`/`k`. Move the cursor to the `consumer_incidents`
 header line. Press `<CR>`.
 
 The grid opens for that table. The ER diagram closes. Press `gG` anytime to
-return to the map and jump to another table. It is interactive — use it the
+return to the map and jump to another table. It is interactive: use it the
 way you'd use a subway map.
 
 ---

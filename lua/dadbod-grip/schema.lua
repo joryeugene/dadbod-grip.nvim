@@ -430,9 +430,8 @@ local function node_at_cursor(state)
   if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return nil end
   local cursor = vim.api.nvim_win_get_cursor(_sidebar_winid)
   local line = cursor[1]
-  -- title(1) + tabbar(1, when not file-as-table) + blank(1) = base offset 3
-  -- file-as-table has no tab bar: title(1) + blank(1) = offset 2
-  local offset = state.file_cols == nil and 3 or 2
+  -- title(1) + blank(1) = base offset 2
+  local offset = 2
   if state.filter then offset = offset + 2 end
   local node_idx = line - offset
   if node_idx >= 1 and node_idx <= #state.nodes then
