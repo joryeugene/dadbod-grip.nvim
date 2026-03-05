@@ -139,7 +139,8 @@
 | Key | Action |
 |-----|--------|
 | `<C-CR>` | Execute query |
-| `<C-x><C-o>` | SQL completion (tables, columns, federation-aware) |
+| (auto) | SQL completion fires as you type (tables, columns, dotted, federation-aware) |
+| `<C-x><C-o>` | SQL completion: manual trigger / nvim-cmp fallback |
 | `gA` | AI SQL generation |
 | `?` | Show help |
 | `q` | Close query pad |

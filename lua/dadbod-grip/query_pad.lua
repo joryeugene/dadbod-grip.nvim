@@ -25,6 +25,15 @@ local function ensure_buf(url)
   -- for users who have it (b:db is set above). This omnifunc adds federation
   -- awareness (alias.table.column after :GripAttach) that dadbod-completion lacks.
   vim.bo[_pad_bufnr].omnifunc = "v:lua.require'dadbod-grip.completion'.omnifunc"
+  local completion = require("dadbod-grip.completion")
+  completion.setup_auto_complete(_pad_bufnr, function()
+    return vim.b[_pad_bufnr].db or vim.g.db
+  end)
+  -- Pre-warm schema cache so the first keystroke doesn't block on DB I/O.
+  vim.schedule(function()
+    local u = (vim.b[_pad_bufnr] and vim.b[_pad_bufnr].db) or vim.g.db
+    if u and u ~= "" then pcall(completion.get_schema, u) end
+  end)
 
   -- Pre-fill with hint comment
   vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, {
@@ -88,17 +97,17 @@ local function setup_keymaps(bufnr, url)
   -- correct after gC / gq / any other path that switches the connection.
   local function cur_url() return vim.b[bufnr].db or vim.g.db or url end
 
-  -- C-CR: run full buffer
+  -- C-CR: run full buffer (use get_content to strip hint/AI-separator comment lines)
   vim.keymap.set("n", "<C-CR>", function()
-    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    run_sql(cur_url(), table.concat(lines, "\n"))
+    local sql = M.get_content()
+    if sql then run_sql(cur_url(), sql) end
   end, { buffer = bufnr, silent = true, desc = "Grip: run query" })
 
   -- C-CR in insert mode too
   vim.keymap.set("i", "<C-CR>", function()
     vim.cmd("stopinsert")
-    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    run_sql(cur_url(), table.concat(lines, "\n"))
+    local sql = M.get_content()
+    if sql then run_sql(cur_url(), sql) end
   end, { buffer = bufnr, silent = true, desc = "Grip: run query" })
 
   -- Visual C-CR: run selection (line-wise: runs all selected lines)

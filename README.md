@@ -521,29 +521,47 @@ grip.open_smart()
 
 ## Architecture
 
-Twenty modules with strict boundaries:
-
 ```
-init.lua        → Entry point. Commands, callbacks, orchestration.
-view.lua        → Buffer rendering, keymaps, highlights. One buffer per session.
-editor.lua      → Float cell editor. One purpose, no state leaked.
-data.lua        → Immutable state transforms. State in, state out.
-query.lua       → Pure query composition. Spec (value) → SQL string.
-db.lua          → I/O boundary + adapter dispatch by URL scheme.
-sql.lua         → Pure SQL generation. No DB calls, no state.
-schema.lua      → Sidebar tree browser. Tables, columns, PK/FK markers, DDL.
-picker.lua      → Table picker. grip_picker float with column preview.
-query_pad.lua   → SQL scratch buffer → grip grid results.
-saved.lua       → Query persistence in .grip/queries/*.sql.
-connections.lua → Connection profiles. .grip/connections.json + g:dbs.
-filters.lua     → Saved filter presets. .grip/filters.json per table.
-properties.lua  → Table properties float. Columns, indexes, stats, DDL keymaps.
-ddl.lua         → Schema operations. Rename, add/drop column, create/drop table.
-diff.lua        → Data diff engine. PK-matched row comparison with color coding.
-history.lua     → Query history. JSONL storage, recording, grip_picker browser.
-profile.lua     → Data profiling. Sparkline distributions, column stats.
-ai.lua          → AI SQL generation. Multi-provider, schema context assembly.
-adapters/       → Per-database: postgresql, sqlite, mysql, duckdb.
+  :Grip  :GripNew  :GripQuery  :GripAttach  :GripStart  ...
+                              │
+  ╔═══════════════════════════▼══════════════════════════╗
+  ║  INIT.LUA                                            ║
+  ║  parse commands · manage sessions · orchestrate      ║
+  ╚══════╦════════════════════╦══════════════════╦═══════╝
+         ║                    ║                  ║
+  ┌──────▼──────┐  ┌──────────▼──────────┐  ┌───▼──────────┐
+  │  VIEW.LUA   │  │  SCHEMA.LUA         │  │ QUERY_PAD    │
+  │  grid · UI  │  │  sidebar tree       │  │ SQL scratch  │
+  │  keymaps    │  │  metadata · DDL     │  │ → results    │
+  └──────┬──────┘  └──────────┬──────────┘  └───┬──────────┘
+         └────────────────────┼─────────────────┘
+                              │
+  ┌──────────────── FEATURES ────────────────────────────┐
+  │  AI.LUA        SQL gen · schema context assembly     │
+  │                Anthropic · OpenAI · Gemini · Ollama  │
+  │  DDL.LUA       alter · add/drop column · create/drop │
+  │  DIFF.LUA      PK-matched row comparison · colorized │
+  │  PROFILE.LUA   sparkline distributions · col stats   │
+  └──────────────────────────────┬───────────────────────┘
+                                 │
+  ┌──────────────── PURE CORE ───────────────────────────┐
+  │  no mutations · no I/O · values in, values out       │
+  │  DATA.LUA    immutable state transforms              │
+  │  QUERY.LUA   query specs as plain values             │
+  │  SQL.LUA     pure SQL string generation              │
+  └──────────────────────────────┬───────────────────────┘
+                                 │
+  ╔══════════════════════════════▼═══════════════════════╗
+  ║  DB.LUA  ─  I/O BOUNDARY                             ║
+  ║  CSV parse · adapter dispatch · transaction safety   ║
+  ╚═════╦════════════╦════════════╦════════════╦═════════╝
+        ║            ║            ║            ║
+    ┌───▼──┐    ┌───▼───┐     ┌───▼───┐   ┌────▼────────┐
+    │ psql │    │sqlite3│     │ mysql │   │ duckdb      │
+    └──────┘    └───────┘     └───────┘   │ :GripAttach │
+                                          │ cross-DB    │
+                                          │ CSV·parquet │
+                                          └─────────────┘
 ```
 
 Design principles:
@@ -593,11 +611,4 @@ Open each table with `:Grip <table_name>` and verify rendering, editing, sort/fi
 
 ---
 
-<p align="center"><pre>
-╔══╦══════════╦══════════════════╦═════╗
-║  ║ name     ║ email            ║ age ║
-╠══╬══════════╬══════════════════╬═════╣
-║  ║ chonk    ║ chonk@dadbod.vim ║  37 ║
-╚══╩══════════╩══════════════════╩═════╝
-</pre>
 <sub><b>dadbod-grip.nvim</b> · edit data like a vim buffer · <a href="https://github.com/joryeugene/dadbod-grip.nvim">github</a></sub></p>

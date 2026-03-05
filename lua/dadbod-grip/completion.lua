@@ -245,11 +245,12 @@ function M.omnifunc(findstart, base)
     local line = vim.api.nvim_get_current_line()
     local col  = vim.api.nvim_win_get_cursor(0)[2]  -- 0-indexed byte position
     local start = col
-    -- Walk back over word chars (identifier chars for SQL: alnum + underscore + dot)
-    -- But don't cross a space: only go back over [%w_.]
+    -- Walk back over word chars only (alnum + underscore).
+    -- Stop at dot, space, comma, etc. so dotted completions like
+    -- "supplier.sh" replace only "sh" and leave "supplier." intact.
     while start > 0 do
       local ch = line:sub(start, start)
-      if ch:match("[%w_%.]") then
+      if ch:match("[%w_]") then
         start = start - 1
       else
         break
@@ -278,6 +279,50 @@ function M.omnifunc(findstart, base)
     end
     return vim_items
   end
+end
+
+-- ── Auto-complete (as-you-type) ────────────────────────────────────────────────
+
+--- Install a TextChangedI autocmd that fires vim.fn.complete() in insert mode.
+--- Completions appear automatically without any keypress.
+--- url_fn() returns the current connection URL (re-read live on each keystroke).
+--- Kept separate from omnifunc so nvim-cmp users who add { name = 'omni' } also work.
+function M.setup_auto_complete(bufnr, url_fn)
+  vim.api.nvim_create_autocmd("TextChangedI", {
+    buffer = bufnr,
+    callback = function()
+      local url = url_fn()
+      if not url or url == "" then return end
+
+      local line = vim.api.nvim_get_current_line()
+      local col  = vim.api.nvim_win_get_cursor(0)[2]
+      local before = line:sub(1, col)
+
+      local ctx = M.parse_context_full(before)
+      if not ctx then return end
+
+      -- Keyword contexts (table/column): require ≥1 char to avoid firing on bare keyword
+      if (ctx.type == "table" or ctx.type == "column") and #ctx.word == 0 then return end
+
+      local raw = M.complete(before, url)
+      if #raw == 0 then return end
+
+      -- Compute start column (same walk-back as omnifunc findstart)
+      local start = col
+      while start > 0 do
+        local ch = line:sub(start, start)
+        if ch:match("[%w_]") then start = start - 1 else break end
+      end
+
+      local vim_items = {}
+      for _, it in ipairs(raw) do
+        table.insert(vim_items, { word = it.word, menu = it.menu, icase = 1 })
+      end
+      if vim.fn.pumvisible() == 0 then
+        vim.fn.complete(start + 1, vim_items)
+      end
+    end,
+  })
 end
 
 return M

@@ -845,9 +845,16 @@ function M.open(arg, url, opts)
   local bufnr = view.open(state, conn, query_sql, view_opts)
 
   -- Auto-sync query pad with the current grid query (passive background update).
-  -- If the pad buffer exists (even if hidden), it reflects the latest opened query.
+  -- Use the clean original SQL (base_sql or table name) so the pad shows what the
+  -- user wrote, not the internal pagination wrapper (SELECT * FROM (...) AS _grip ...).
   vim.schedule(function()
-    require("dadbod-grip.query_pad").sync_query(query_sql)
+    local sync_sql
+    if spec.is_raw then
+      sync_sql = spec.base_sql
+    else
+      sync_sql = "SELECT * FROM " .. (spec.table_name or "")
+    end
+    require("dadbod-grip.query_pad").sync_query(sync_sql)
   end)
 
   -- Store query spec and run initial count for pagination
