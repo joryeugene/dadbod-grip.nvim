@@ -1,39 +1,14 @@
 # dadbod-grip.nvim
 
-## Shipped since v2.4
-
-- v2.5: Mutation preview (`C-CR` stages, `gD` diff float, `u` cancel, `a` apply). Multi-schema.
-- v2.6: Sidebar nav (`go`/`gb`), pickers (`gh`/`gc`/`gt`), wide table scroll, tab nav `1-5`.
-- v2.7: `--write`/`--watch` file modes, password masking, `gn` null filter, `gV` DDL float, `gi`/`gI` alignment, `:GripStart` + Softrear Portal demo.
-- v2.8: SafeState cursor after edit, Chonk welcome screen (`;`), block-centered art float.
-- v2.9: Column filter builder (`gF`, operators =,!=,>,<,LIKE,IN,IS NULL), JSON auto-pretty-print in `K` row view and `i`/`<CR>` editor, export to file (`gX`/`:GripExport`, csv/json/sql).
-
-Full history: `git log --oneline`.
-
----
-
 ## Ideas Backlog
 
-Unimplemented ideas from prior research and specs. Not committed to any
-release. Roughly ordered by expected impact.
+Not committed to any release. Roughly ordered by expected impact.
 
 ### High Value -- Features
-- [x] Query history with Telescope search (gh, :GripHistory) -- v2.3.0
-- [x] Compact diff mode for narrow terminals (gv toggle) -- v2.3.0
-- [x] Sparkline data profiling (gR, :GripProfile) -- v2.4.0
-- [x] Query Doctor plain-English EXPLAIN -- v2.4.0
-- [x] AI SQL generation (gA, :GripAsk) -- v2.4.0
-- [x] Query execution timer -- v2.4.0
-- [x] Live watch mode (`--watch` flag, re-execute on file change) -- v2.7
-- [x] `:GripStart` demo portal (Softrear Inc., 17 tables) -- v2.7
 - [ ] DuckDB cross-database federation (`:GripAttach`, ATTACH pg/mysql/sqlite, cross-DB JOINs)
 - [ ] Generate sync SQL from diff (make table A match table B, emit INSERT/UPDATE/DELETE migration from `gD` output)
 - [ ] Import from clipboard/pipe (`gI` in empty grid or `:GripImport`, detect CSV/JSON/TSV, preview before INSERT, map columns)
 - [ ] Row duplication keymap (`yy`-style: duplicate current row as new INSERT with PK cleared)
-- [x] Sort by column (`s`/`S` cycle ASC/DESC/none, stacked sorts with indicators) -- v2.7
-- [x] Column filter builder (`gF`: pick column, operator =/</>LIKE/IN/NOT NULL, value, appends WHERE clause) -- v2.9
-- [x] JSON cell navigator (K row view auto-expands, i/CR pre-fills editor with formatted JSON) -- v2.9
-- [x] Export to file (`:GripExport csv|json|sql` dumps current result set to disk, not just clipboard) -- v2.9
 
 ### High Value -- Adapters
 - [ ] MSSQL adapter (sqlcmd CLI, `mssql://` scheme, sys.tables/sys.columns metadata, SET STATISTICS for explain, TOP N pagination, `##temp` table support)
@@ -43,7 +18,6 @@ release. Roughly ordered by expected impact.
 ### Medium Value
 - [ ] Column reordering via keymap (`<` / `>` to shift column left/right)
 - [ ] Inline column resize with `+`/`-` on header row
-- [x] Export to clipboard as markdown table (`gy` for GFM pipe table) -- v2.6
 - [ ] Bookmarked rows (mark interesting rows with `m`, recall with `'`, persist per table in `.grip/bookmarks.json`)
 - [ ] Multi-row selection for bulk ops (visual `V`-mode selects rows, then `d`=bulk DELETE, `gy`=copy all as table)
 - [ ] Column visibility toggle (`-` hides current column, `+` restores, persists per-session in `.grip/`)
