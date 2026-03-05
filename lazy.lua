@@ -24,5 +24,6 @@ return {
     "GripExport",
     "GripAttach",
     "GripDetach",
+    "GripOpen",
   },
 }

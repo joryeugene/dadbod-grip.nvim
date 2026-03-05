@@ -78,31 +78,9 @@ local function is_file_url(url)
   return false
 end
 
---- Load catalog from .grip/catalog.json (project-scoped, shared across connections).
-local function load_catalog()
-  local path = require("dadbod-grip.connections").grip_dir_path() .. "/catalog.json"
-  if vim.fn.filereadable(path) == 0 then return { files = {}, s3 = {} } end
-  local ok, data = pcall(vim.fn.json_decode,
-    table.concat(vim.fn.readfile(path), "\n"))
-  if not ok or type(data) ~= "table" then return { files = {}, s3 = {} } end
-  return { files = data.files or {}, s3 = data.s3 or {} }
-end
-
---- Persist catalog to .grip/catalog.json.
-local function save_catalog(state)
-  local conn_mod = require("dadbod-grip.connections")
-  local dir  = conn_mod.grip_dir_path()
-  local path = dir .. "/catalog.json"
-  if vim.fn.isdirectory(dir) == 0 then vim.fn.mkdir(dir, "p") end
-  local data = { files = state.catalog_files, s3 = state.catalog_s3 }
-  local ok, encoded = pcall(vim.fn.json_encode, data)
-  if ok then vim.fn.writefile({ encoded }, path) end
-end
-
 --- Get or create state for a URL.
 local function get_state(url)
   if not _states[url] then
-    local catalog = load_catalog()
     _states[url] = {
       url = url,
       items = nil,       -- { {name, type}, ... }: nil = not fetched
@@ -113,9 +91,6 @@ local function get_state(url)
       fk_cache = {},      -- table_name → fk_info[]
       nodes = {},         -- flat rendered node list
       filter = nil,       -- search filter string
-      catalog_tab   = "databases",   -- "databases" | "files" | "s3"
-      catalog_files = catalog.files, -- [{ path, display_name, expanded, cols? }]
-      catalog_s3    = catalog.s3,    -- [{ prefix, display_name, expanded, entries? }]
     }
   end
   return _states[url]
@@ -174,75 +149,9 @@ local function ensure_columns(state, table_name)
   state.fk_cache[table_name] = fk_map
 end
 
---- Build node list for the Files catalog tab.
-local function build_files_nodes(state)
-  local nodes = {}
-  table.insert(nodes, { kind = "header", text = "Files  (a=add  d=remove)" })
-  if #state.catalog_files == 0 then
-    table.insert(nodes, { kind = "header", text = "  No files added yet" })
-    return nodes
-  end
-  for idx, entry in ipairs(state.catalog_files) do
-    local expanded = entry.expanded ~= false
-    table.insert(nodes, {
-      kind = "table", name = entry.display_name or entry.path,
-      expanded = expanded, is_file = true,
-      file_key = entry.path, catalog_idx = idx,
-    })
-    if expanded and entry.cols then
-      for _, col in ipairs(entry.cols) do
-        table.insert(nodes, {
-          kind = "column",
-          name = col.column_name,
-          dtype = abbrev_type(col.data_type),
-          pk = false, fk = false,
-          table_name = entry.path, is_file = true,
-        })
-      end
-    end
-  end
-  return nodes
-end
-
---- Build node list for the S3 catalog tab.
-local function build_s3_nodes(state)
-  local nodes = {}
-  table.insert(nodes, { kind = "header", text = "S3  (a=add  d=remove)" })
-  if #state.catalog_s3 == 0 then
-    table.insert(nodes, { kind = "header", text = "  No S3 prefixes added yet" })
-    return nodes
-  end
-  for idx, entry in ipairs(state.catalog_s3) do
-    local expanded = entry.expanded ~= false
-    table.insert(nodes, {
-      kind = "table", name = entry.display_name or entry.prefix,
-      expanded = expanded, is_file = true,
-      file_key = entry.prefix, catalog_idx = idx,
-    })
-    if expanded and entry.entries then
-      for _, e in ipairs(entry.entries) do
-        local fname = (e.path or ""):match("[^/]+$") or e.path or "?"
-        table.insert(nodes, {
-          kind = "column",
-          name = fname,
-          dtype = "s3",
-          pk = false, fk = false,
-          table_name = entry.prefix, is_file = true,
-          s3_path = e.path,
-        })
-      end
-    end
-  end
-  return nodes
-end
-
 --- Build flat node list from state.
 local function build_nodes(state)
   local nodes = {}
-
-  -- Catalog tab dispatch (Files / S3)
-  if state.catalog_tab == "files" then return build_files_nodes(state) end
-  if state.catalog_tab == "s3"    then return build_s3_nodes(state)    end
 
   -- File-as-table mode: show columns of the file directly, no DB schema needed
   if state.file_cols then
@@ -427,27 +336,6 @@ local function render(state)
   end
   table.insert(lines, " " .. title)
   table.insert(highlights, { line = 0, col = 0, end_col = #lines[1], hl = "GripBorder" })
-
-  -- Tab bar (only for persistent DB connections, not file-as-table mode)
-  if state.file_cols == nil then
-    local tab_defs = { { id = "databases", label = "Databases" },
-                       { id = "files",     label = "Files"     },
-                       { id = "s3",        label = "S3"        } }
-    local tab_line = " "
-    for i, tab in ipairs(tab_defs) do
-      if i > 1 then tab_line = tab_line .. " · " end
-      tab_line = tab_line .. tab.label
-    end
-    table.insert(lines, tab_line)
-    -- Highlight active tab as GripHeader, inactive as GripReadonly
-    local offset = 1  -- leading space
-    for i, tab in ipairs(tab_defs) do
-      if i > 1 then offset = offset + 3 end  -- " · "
-      local hl = tab.id == (state.catalog_tab or "databases") and "GripHeader" or "GripReadonly"
-      table.insert(highlights, { line = 1, col = offset, end_col = offset + #tab.label, hl = hl })
-      offset = offset + #tab.label
-    end
-  end
 
   table.insert(lines, "")
 
@@ -943,86 +831,6 @@ local function setup_keymaps(url)
   -- gG: ER diagram float
   map("gG", function()
     require("dadbod-grip.er_diagram").toggle(url)
-  end)
-
-  -- <Tab> / <S-Tab>: cycle catalog tabs (Databases / Files / S3)
-  local CATALOG_TABS = { "databases", "files", "s3" }
-  local function find_tab_idx(tab_id)
-    for i, t in ipairs(CATALOG_TABS) do if t == tab_id then return i end end
-    return 1
-  end
-  map("<Tab>", function()
-    local idx = find_tab_idx(state.catalog_tab or "databases")
-    state.catalog_tab = CATALOG_TABS[(idx % #CATALOG_TABS) + 1]
-    render(state)
-  end)
-  map("<S-Tab>", function()
-    local idx = find_tab_idx(state.catalog_tab or "databases")
-    state.catalog_tab = CATALOG_TABS[((idx - 2) % #CATALOG_TABS) + 1]
-    render(state)
-  end)
-
-  -- a: add file/S3 entry (only active on Files/S3 tabs)
-  map("a", function()
-    local CANCEL = "\0"
-    if state.catalog_tab == "files" then
-      local ok, path = pcall(vim.fn.input, {
-        prompt = "File path: ", default = "", completion = "file", cancelreturn = CANCEL,
-      })
-      if not ok or path == CANCEL or path == "" then return end
-      path = vim.fn.expand(path)
-      local desc_db = require("dadbod-grip.db")
-      local cols, err = desc_db.describe_file(path, url)
-      if not cols then
-        vim.notify("Cannot read file: " .. (err or "unknown"), vim.log.levels.WARN)
-        return
-      end
-      local display_name = path:match("[^/\\]+$") or path
-      table.insert(state.catalog_files, {
-        path = path, display_name = display_name, expanded = true, cols = cols,
-      })
-      save_catalog(state)
-      render(state)
-    elseif state.catalog_tab == "s3" then
-      local ok, prefix = pcall(vim.fn.input, {
-        prompt = "S3 prefix (s3://bucket/path/): ", cancelreturn = CANCEL,
-      })
-      if not ok or prefix == CANCEL or prefix == "" then return end
-      local safe = prefix:gsub("'", "''")
-      local list_sql = string.format("SELECT path FROM glob('%s*') ORDER BY path LIMIT 200", safe)
-      local result, err = require("dadbod-grip.db").query(list_sql, url)
-      if err then
-        vim.notify("S3 list failed: " .. err, vim.log.levels.WARN)
-        return
-      end
-      local entries = {}
-      for _, row in ipairs((result or {}).rows or {}) do
-        table.insert(entries, { path = row[1] })
-      end
-      local display_name = prefix:match("s3://([^/]+)") or prefix
-      table.insert(state.catalog_s3, {
-        prefix = prefix, display_name = display_name, expanded = true, entries = entries,
-      })
-      save_catalog(state)
-      render(state)
-    end
-  end)
-
-  -- d: remove entry under cursor (only on Files/S3 tabs)
-  map("d", function()
-    if state.catalog_tab == "databases" then
-      -- On databases tab d is not wired (falls through to normal Vim d)
-      return
-    end
-    local node = node_at_cursor(state)
-    if not node or not node.catalog_idx then return end
-    if state.catalog_tab == "files" then
-      table.remove(state.catalog_files, node.catalog_idx)
-    elseif state.catalog_tab == "s3" then
-      table.remove(state.catalog_s3, node.catalog_idx)
-    end
-    save_catalog(state)
-    render(state)
   end)
 
   -- Close
