@@ -37,6 +37,12 @@ Edit data like a GUI. Navigate like Vim. Never leave your editor.
 | **Tab views** `1`-`9` History · Stats · Explain · Columns · FK | **Column Stats** `4` null% · distinct · min · max | **Query History** `3` filtered per table |
 | **Write mode** `:Grip file --write` · edit files and write back to disk | **Watch mode** `:Grip file --watch` · auto-refresh grid on a timer | **Picker `W` / `!`** open any connection in watch or write mode |
 
+<p align="center">
+<img src="assets/live.png" alt="dadbod-grip: schema sidebar, query pad, and editable grid with color-coded mutations" width="900">
+</p>
+
+An example database is included. `:GripStart` opens it with seventeen tables and something in the consumer incidents that does not add up. See the [walkthrough](demo/softrear-internal.md) for the full investigation.
+
 ## Quickstart
 
 ```lua
@@ -59,17 +65,6 @@ https://host/data.parquet  ← remote file via httpfs
 
 duckdb::memory:            ← single-query scratch (tables don't persist between queries)
 ```
-
-## What it looks like
-
-![Schema sidebar, staged mutations with color-coded rows, and analytical query pad](assets/grap.png)
-
-**Left:** Schema browser showing all 17 tables with PK/FK markers and column types.
-**Grid:** Three mutation states visible simultaneously: red strikethrough (staged delete), teal (staged update), green (staged insert). Nothing hits the database until you press `a`.
-**Top right:** Query pad with a SQL query.
-**Values:** `resolved` column color-codes true/false. Severity values highlight out-of-range rows. NULL cells display as `•NULL•`.
-
-An example database is included. `:GripStart` opens it. Seventeen tables. Something in the consumer incidents does not add up. Walkthrough: [demo/softrear-internal.md](demo/softrear-internal.md)
 
 ## Features
 
