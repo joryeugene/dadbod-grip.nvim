@@ -1,4 +1,4 @@
--- sql.lua — pure SQL generation.
+-- sql.lua: pure SQL generation.
 -- No DB calls. No state. Pure string builders.
 
 local M = {}
@@ -84,7 +84,7 @@ function M.build_insert(table_name, values, columns)
   end
 
   if #col_parts == 0 then
-    -- All defaults — INSERT with no columns
+    -- All defaults: INSERT with no columns
     return string.format("INSERT INTO %s DEFAULT VALUES", quote_ident(table_name))
   end
 

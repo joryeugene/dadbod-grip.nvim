@@ -1,4 +1,4 @@
--- adapters/mysql.lua — MySQL/MariaDB adapter (mysql CLI).
+-- adapters/mysql.lua: MySQL/MariaDB adapter (mysql CLI).
 -- All functions receive a resolved, non-nil URL.
 -- All functions return (result, err). Never throw.
 

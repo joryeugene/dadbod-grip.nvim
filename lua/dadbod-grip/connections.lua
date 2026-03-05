@@ -1,4 +1,4 @@
--- connections.lua — connection profile management.
+-- connections.lua: connection profile management.
 -- Reads from .grip/connections.json, g:dbs (DBUI compat), $DATABASE_URL.
 -- All functions return (result, err). Never throw.
 
@@ -59,7 +59,7 @@ end
 --- Mask the password in a DB URL for display. Returns URL unchanged if no password found.
 local function mask_url(url)
   if not url or url == "" then return url end
-  -- Match ://user:password@host — replace password with ***
+  -- Match ://user:password@host: replace password with ***
   return (url:gsub("(://[^:@/]+:)([^@]+)(@)", function(pre, _, at)
     return pre .. "***" .. at
   end))
@@ -149,7 +149,7 @@ function M.list()
     end
   end
 
-  -- g:dbs (DBUI compat) — also persist globally for cross-project access
+  -- g:dbs (DBUI compat): also persist globally for cross-project access
   local gdbs = read_gdbs()
   local new_global = false
   local global_existing = read_json_connections(global_connections_path(), "global")
@@ -193,7 +193,7 @@ function M.list()
     table.insert(all, { name = "vim.g.db", url = gdb, source = "global" })
   end
 
-  -- ── Starter connections — shown until dismissed or already present ──────
+  -- ── Starter connections: shown until dismissed or already present ──────
   local data_dir = vim.fn.stdpath("data") .. "/grip"
   local has_duck = vim.fn.executable("duckdb") == 1
 
@@ -224,7 +224,7 @@ function M.list()
     end
   end
 
-  -- Softrear Inc. Analyst Portal™ — built-in, always at the bottom
+  -- Softrear Inc. Analyst Portal™: built-in, always at the bottom
   local hidden = vim.fn.stdpath("data") .. "/grip/softrear.hidden"
   local sql_files = vim.api.nvim_get_runtime_file("demo/softrear.sql", false)
   if #sql_files > 0 and vim.fn.filereadable(hidden) == 0 then
@@ -278,9 +278,9 @@ end
 --- Switch active connection. Routes file connections through grip.open(),
 --- DB connections through vim.g.db + workspace open.
 --- Auto-saves to .grip/connections.json if not already persisted.
---- opts: { write = bool, watch_ms = number } — session-only, never persisted.
+--- opts: { write = bool, watch_ms = number }: session-only, never persisted.
 function M.switch(url, name, conn_type, opts)
-  -- Strip session-only flags — they must never reach the connection registry
+  -- Strip session-only flags: they must never reach the connection registry
   url = strip_flags(url)
   -- Resolve type: param > stored connections > auto-detect
   local file_conns = read_file_connections()

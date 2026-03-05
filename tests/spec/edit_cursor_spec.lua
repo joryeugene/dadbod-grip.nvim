@@ -1,4 +1,4 @@
--- edit_cursor_spec.lua — tests for view._snap_col byte-to-column mapping
+-- edit_cursor_spec.lua: tests for view._snap_col byte-to-column mapping
 --
 -- Verifies that _snap_col correctly snaps mid-separator bytes left and
 -- in-column bytes to the right column, using a two-row scenario where
@@ -22,7 +22,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 
@@ -49,7 +49,7 @@ end
 
 -- Two-row scenario: "id" col = 6 display chars, "name" col = 8 display chars
 --   Row 1 (edited):  id="foo   "  (6 bytes, 6 display)
---   Row 2 (next):    id="·NULL·"  (8 bytes, 6 display — each "·" is U+00B7 = 2 bytes)
+--   Row 2 (next):    id="·NULL·"  (8 bytes, 6 display: each "·" is U+00B7 = 2 bytes)
 local bp_row1 = make_bp({ { name = "id", bytes = 6 }, { name = "name", bytes = 8 } })
 local bp_row2 = make_bp({ { name = "id", bytes = 8 }, { name = "name", bytes = 8 } })
 

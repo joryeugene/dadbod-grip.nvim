@@ -1,4 +1,4 @@
--- type_nav_spec.lua — RED test: w/b/Tab navigation on header and type rows
+-- type_nav_spec.lua: RED test: w/b/Tab navigation on header and type rows
 local view = require("dadbod-grip.view")
 local data = require("dadbod-grip.data")
 
@@ -11,7 +11,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

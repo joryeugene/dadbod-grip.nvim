@@ -99,7 +99,8 @@ Extensions install automatically. Attachments persist and restore on reconnect.
 - **Pure SQL generation** with live preview before applying changes.
 - **Transaction safety** wraps all DML in BEGIN/COMMIT with ROLLBACK on error.
 - **Batch editing** in visual mode to set, delete, or NULL multiple rows at once.
-- **Two-tier undo + redo**: local staging undo (50-deep) with `<C-r>` redo, plus transaction undo that reverses committed changes (10-deep, with confirmation). NULL values in typed columns (boolean, integer, geometry) are correctly restored as SQL NULL — not as empty strings.
+- **Row cloning** via `c` duplicates the current row as a staged INSERT with primary keys cleared. Edit the PK fields, then apply.
+- **Two-tier undo + redo**: local staging undo (50-deep) with `<C-r>` redo, plus transaction undo that reverses committed changes (10-deep, with confirmation). NULL values in typed columns (boolean, integer, geometry) are correctly restored as SQL NULL, not empty strings.
 - **Mutation preview**: `UPDATE`, `DELETE`, and `INSERT` from the query pad show affected rows before executing. SET values appear teal (modified), DELETE rows appear red, INSERT rows appear green. Press `a` to execute, `u` to cancel.
 
 ### Query and Navigation
@@ -145,11 +146,11 @@ Extensions install automatically. Attachments persist and restore on reconnect.
 
 Files opened via `:Grip` support two modes that turn static files into live, editable datasets.
 
-**Write mode** — `:Grip /path/to/data.parquet --write`
+**Write mode:** `:Grip /path/to/data.parquet --write`
 
 Stage inline cell edits as normal, then press `a` to apply. Instead of running DML against a database, grip uses DuckDB's `COPY TO` to write the modified data back to disk in the original format. Parquet, CSV, TSV, JSON, NDJSON, and Arrow are all supported. A destructive-action confirmation fires before the file is overwritten. Remote `https://` URLs are always read-only regardless of the flag.
 
-**Watch mode** — `:Grip /path/to/data.csv --watch` or `:Grip file.csv --watch=10s`
+**Watch mode:** `:Grip /path/to/data.csv --watch` or `:Grip file.csv --watch=10s`
 
 The grid re-runs the query on a timer and updates rows automatically. Default interval is 5 seconds; use `--watch=Ns` to set a custom one. Watch pauses while you have staged changes so you never lose in-progress edits to a background refresh.
 
@@ -160,7 +161,7 @@ Both modes are available from the connection picker and live on any open grid:
 | Write mode | `!` on a `[file]` connection | `g!` to toggle |
 | Watch mode | `W` on any connection | `gW` to toggle |
 
-Active modes show as a colored badge in the grid's winbar: red `✎ WRITE` and blue `↺ 5s`. Modes are never persisted — always opt-in per session.
+Active modes show as a colored badge in the grid's winbar: red `✎ WRITE` and blue `↺ 5s`. Modes are never persisted; always opt-in per session.
 
 ### Additional
 - **Composite primary key support** for multi-column WHERE clauses.
@@ -207,6 +208,7 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `p` | Paste clipboard into cell |
 | `P` | Paste multi-line clipboard into consecutive rows |
 | `o` | Insert new row after cursor |
+| `c` | Clone row (copy values, clear PKs) |
 | `d` | Toggle delete on current row |
 | `u` | Undo last edit (multi-level) |
 | `<C-r>` | Redo |
@@ -276,7 +278,7 @@ Keys `2`–`9` also work in the schema sidebar to open any table directly in the
 | `gD` | Diff against another table |
 | `gv` | Toggle compact/wide diff layout |
 | `gE` | Export to clipboard (CSV, TSV, JSON, SQL INSERT, Markdown, Grip Table) |
-| `gX` | Export to file (csv/json/sql) — also `:GripExport` |
+| `gX` | Export to file (csv/json/sql). Also `:GripExport` |
 
 ### Inspection
 
@@ -417,7 +419,7 @@ The plugin ships a `lazy.lua` spec so all commands work as lazy-load triggers au
 }
 ```
 
-**Demo** (Softrear Analyst Portal — no database needed):
+**Demo** (Softrear Analyst Portal, no database needed):
 
 ```lua
 { "<leader>dd", "<cmd>GripStart<cr>", desc = "DB demo" },

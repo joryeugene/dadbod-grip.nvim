@@ -1,4 +1,4 @@
--- view_spec.lua — unit tests for classify_cell conditional formatting
+-- view_spec.lua: unit tests for classify_cell conditional formatting
 local view = require("dadbod-grip.view")
 
 local pass = 0
@@ -10,7 +10,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

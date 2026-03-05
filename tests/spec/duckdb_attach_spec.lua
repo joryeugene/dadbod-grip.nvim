@@ -1,4 +1,4 @@
--- tests/spec/duckdb_attach_spec.lua — DuckDB cross-database federation
+-- tests/spec/duckdb_attach_spec.lua: DuckDB cross-database federation
 dofile("tests/minimal_init.lua")
 local adapter = require("dadbod-grip.adapters.duckdb")
 

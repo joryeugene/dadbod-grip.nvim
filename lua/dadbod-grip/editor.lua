@@ -1,4 +1,4 @@
--- editor.lua — float cell editor.
+-- editor.lua: float cell editor.
 -- Minimal: one purpose, no state leaked to caller.
 
 local M = {}

@@ -1,4 +1,4 @@
--- data.lua — pure state transforms.
+-- data.lua: pure state transforms.
 -- All functions take state, return new state. No mutation. No self.
 
 local M = {}
@@ -84,7 +84,7 @@ function M.new(query_result)
 end
 
 -- M.add_change(state, row_idx, field, value) → State
--- value=nil means "set to NULL" — stored as NULL_SENTINEL internally so the
+-- value=nil means "set to NULL": stored as NULL_SENTINEL internally so the
 -- key survives in the Lua table (assigning nil would remove it).
 function M.add_change(state, row_idx, field, value)
   local s = edit_copy(state)
@@ -146,7 +146,7 @@ function M.clone_row(state, row_idx)
   for _, col in ipairs(s.columns) do
     if not pk_set[col] then
       local v = M.effective_value(state, row_idx, col)
-      -- Skip nil and "" — both represent NULL in original rows (psql --csv quirk)
+      -- Skip nil and "": both represent NULL in original rows (psql --csv quirk)
       if v ~= nil and v ~= "" then values[col] = v end
     end
     -- PK columns: omit so DB SERIAL/AUTO_INCREMENT generates a new ID on commit

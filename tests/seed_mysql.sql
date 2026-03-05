@@ -1,4 +1,4 @@
--- seed_mysql.sql — pathological test fixtures for dadbod-grip (MySQL/MariaDB).
+-- seed_mysql.sql: pathological test fixtures for dadbod-grip (MySQL/MariaDB).
 -- Usage: mysql -u root -e "CREATE DATABASE IF NOT EXISTS grip_test"
 --        mysql -u root grip_test < tests/seed_mysql.sql
 --

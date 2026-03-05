@@ -1,4 +1,4 @@
--- data_spec.lua — unit tests for data.lua (pure state transforms)
+-- data_spec.lua: unit tests for data.lua (pure state transforms)
 local data = require("dadbod-grip.data")
 
 local function make_state(overrides)
@@ -25,7 +25,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

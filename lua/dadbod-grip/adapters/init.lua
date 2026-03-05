@@ -1,4 +1,4 @@
--- adapters/init.lua — adapter registry.
+-- adapters/init.lua: adapter registry.
 -- Detects DB type from URL scheme, returns the correct adapter module.
 
 local M = {}

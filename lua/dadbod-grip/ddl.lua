@@ -1,4 +1,4 @@
--- ddl.lua — DDL operations (rename, add, drop columns; create/drop tables).
+-- ddl.lua: DDL operations (rename, add, drop columns; create/drop tables).
 -- Each operation previews the SQL, asks for confirmation, then executes.
 
 local db   = require("dadbod-grip.db")

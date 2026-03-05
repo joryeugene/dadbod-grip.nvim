@@ -5,10 +5,22 @@
 Not committed to any release. Roughly ordered by expected impact.
 
 ### High Value -- Features
-- [ ] DuckDB cross-database federation (`:GripAttach`, ATTACH pg/mysql/sqlite, cross-DB JOINs)
+- [x] DuckDB cross-database federation (`:GripAttach`, ATTACH pg/mysql/sqlite, cross-DB JOINs): shipped v3.0.0
+- [x] Row cloning (`c`: duplicate current row as staged INSERT with PKs cleared): shipped
+- [ ] Import from clipboard/pipe (`gI` / `:GripImport`: detect CSV/JSON/TSV, preview columns, stage as INSERT batch; DuckDB: `read_csv_auto()`; PG: COPY or multi-INSERT)
 - [ ] Generate sync SQL from diff (make table A match table B, emit INSERT/UPDATE/DELETE migration from `gD` output)
-- [ ] Import from clipboard/pipe (`gI` in empty grid or `:GripImport`, detect CSV/JSON/TSV, preview before INSERT, map columns)
-- [ ] Row duplication keymap (`yy`-style: duplicate current row as new INSERT with PK cleared)
+
+### High Value -- DuckDB Extensions
+- [ ] Iceberg/Delta Lake tables (`INSTALL iceberg`: open `iceberg://` paths as live tables, expose partition metadata in sidebar)
+- [ ] Spatial extension (`INSTALL spatial`: render geometry columns, `ST_AsText()` in row view, bbox stats in profiling)
+- [ ] Full-text search (`INSTALL fts`: `PRAGMA create_fts_index`, surface FTS indexes in schema sidebar, `gF` MATCH operator)
+- [ ] MotherDuck branching (`:GripBranch` to create/switch/diff MotherDuck branches, branch name in statusline)
+
+### High Value -- AI Integration
+- [ ] Natural language result explanation (`gA` in grid asks AI to summarize what the current result set means in plain English)
+- [ ] Anomaly detection in profiling (AI scans `gR` profiling output and flags statistical outliers with reasoning)
+- [ ] Schema-aware query pad autocomplete (send table/column DDL as context to AI on each keystroke in query pad)
+- [ ] pgvector support (render `vector` columns in row view, `gF` generates `ORDER BY vec <=> $1 LIMIT N` similarity queries, profiling shows dimension count and index type)
 
 ### High Value -- Adapters
 - [ ] MSSQL adapter (sqlcmd CLI, `mssql://` scheme, sys.tables/sys.columns metadata, SET STATISTICS for explain, TOP N pagination, `##temp` table support)

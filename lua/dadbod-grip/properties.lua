@@ -1,4 +1,4 @@
--- properties.lua — table properties float.
+-- properties.lua: table properties float.
 -- Shows full table metadata: columns, PKs, FKs, indexes, row estimate, size.
 -- Opened via gI from a grip grid or :GripProperties command.
 

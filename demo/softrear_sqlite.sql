@@ -1,7 +1,7 @@
 -- ============================================================
 -- SOFTREAR INC. TISSUE INTELLIGENCE PLATFORM™
--- Internal Operations Database — SQLite Edition
--- CLASSIFICATION: PROPRIETARY — DO NOT DISTRIBUTE
+-- Internal Operations Database: SQLite Edition
+-- CLASSIFICATION: PROPRIETARY: DO NOT DISTRIBUTE
 -- (If you are reading this, your IP has been logged.)
 -- ============================================================
 --
@@ -13,7 +13,7 @@
 -- ============================================================
 --
 -- NOTE: This is the SQLite-compatible version. It contains only
--- the hand-written named rows — the key data that carries the
+-- the hand-written named rows: the key data that carries the
 -- narrative. Filler rows (generated via DuckDB range()) are omitted.
 -- For the full 500+ row dataset, use demo/softrear.sql with DuckDB.
 -- ============================================================
@@ -593,7 +593,7 @@ ALTER TABLE rolls ADD COLUMN attributes TEXT;
 ALTER TABLE people_on_to_us ADD COLUMN threat_profile TEXT;
 ALTER TABLE internal_investigations ADD COLUMN case_metadata TEXT;
 
--- rolls.attributes — product specification objects
+-- rolls.attributes: product specification objects
 UPDATE rolls SET attributes = '{"color":"beige","material":"recycled_fiber","weight_kg":0.8,"ply_count":1,"notes":"flagship budget SKU"}' WHERE sku = 'ULTRA_BUDGET_XTRM';
 UPDATE rolls SET attributes = '{"color":"white","material":"virgin_pulp","weight_kg":1.6,"embossing":"owl_pattern","fragrance":null}' WHERE sku = 'CLOUD_TOUCH_4PLY';
 UPDATE rolls SET attributes = '{"color":"off_white","material":"reinforced_cellulose","weight_kg":2.1,"tensile_class":"industrial","safety_rating":{"plumbing":"not_recommended","industrial":"approved"}}' WHERE sku = 'TITANIUM_TRIPLE_PLY';
@@ -605,14 +605,14 @@ UPDATE rolls SET attributes = '{"color":"grey","material":"industrial_pulp","wei
 UPDATE rolls SET attributes = '{"color":"multicolor","material":"premium_cellulose","weight_kg":1.4,"confetti_elements":true,"adhesion_risk":"high","recall_reason":"confetti_bonding"}' WHERE sku = 'CONFETTI_PARTY_2PLY';
 UPDATE rolls SET attributes = '{"color":"white","material":"aloe_infused_cellulose","weight_kg":1.3,"active_ingredient":"aloe_vera","concentration_ppm":12,"dermatologist_tested":false}' WHERE sku = 'ALOE_FRESH_2PLY';
 
--- people_on_to_us.threat_profile — nested threat intelligence objects
+-- people_on_to_us.threat_profile: nested threat intelligence objects
 UPDATE people_on_to_us SET threat_profile = '{"risk_level":"critical","platforms":["YouTube","encrypted_channel"],"assets_compromised":["formula_2019","supplier_contracts","cartel_photos"],"last_activity":{"date":"2024-02-28","type":"video_upload","title":"The Formula They Dont Want You To See"}}' WHERE id = 1;
 UPDATE people_on_to_us SET threat_profile = '{"risk_level":"neutralized","platforms":["Academia","LinkedIn"],"assets_compromised":["formula_reverse_engineered"],"acquisition_status":{"acquired":true,"date":"2023-Q2","clearance_level":"R_D_restricted"}}' WHERE id = 2;
 UPDATE people_on_to_us SET threat_profile = '{"risk_level":"high","platforms":["Twitter","backup_accounts"],"followers":40000,"knows":{"formula_changed":true,"supplier_info":"partial"},"current_status":"monitoring"}' WHERE id = 3;
-UPDATE people_on_to_us SET threat_profile = '{"risk_level":"critical","platforms":["Reddit"],"assets_compromised":["complete_formula_2019"],"post_archive_exists":true,"estimated_copies":"unknown","notes":"sleeper — will resurface"}' WHERE id = 4;
+UPDATE people_on_to_us SET threat_profile = '{"risk_level":"critical","platforms":["Reddit"],"assets_compromised":["complete_formula_2019"],"post_archive_exists":true,"estimated_copies":"unknown","notes":"sleeper: will resurface"}' WHERE id = 4;
 UPDATE people_on_to_us SET threat_profile = '{"risk_level":"medium","platforms":["Reddit"],"subscribers":12000,"knows":{"shanghai_supplier":true,"bamboo_don_specifically":false},"current_status":"inactive_3_months"}' WHERE id = 5;
 
--- internal_investigations.case_metadata — case intelligence with nested structures
+-- internal_investigations.case_metadata: case intelligence with nested structures
 UPDATE internal_investigations SET case_metadata = '{"priority":"high","watchers":3,"evidence_files":["spreadsheet_v7.xlsx","comparison_photos.zip"],"risk_assessment":{"exposure_risk":8,"resolution_probability":0.3},"tags":["formula","twitter"]}' WHERE id = 1;
 UPDATE internal_investigations SET case_metadata = '{"priority":"critical","watchers":5,"evidence_files":["full_recipe.txt","supplier_contracts.pdf","photos.zip"],"risk_assessment":{"exposure_risk":10,"resolution_probability":0.05},"tags":["formula","cartel","supplier"]}' WHERE id = 2;
 UPDATE internal_investigations SET case_metadata = '{"priority":"resolved","watchers":0,"outcome":"acquired","acquisition_details":{"division":"R_D","clearance":"restricted","nda_signed":true},"tags":["formula","academic"]}' WHERE id = 3;

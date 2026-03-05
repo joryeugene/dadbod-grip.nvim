@@ -1,4 +1,4 @@
--- picker.lua — table picker with column preview.
+-- picker.lua: table picker with column preview.
 -- Uses grip_picker (zero external deps). Never throw.
 
 local db = require("dadbod-grip.db")

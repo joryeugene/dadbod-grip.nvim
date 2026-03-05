@@ -1,4 +1,4 @@
--- ddl_spec.lua — unit tests for DDL module scoping, SQL generation, quoting
+-- ddl_spec.lua: unit tests for DDL module scoping, SQL generation, quoting
 local ddl = require("dadbod-grip.ddl")
 local sql = require("dadbod-grip.sql")
 
@@ -11,7 +11,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

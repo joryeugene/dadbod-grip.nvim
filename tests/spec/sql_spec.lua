@@ -1,4 +1,4 @@
--- sql_spec.lua — unit tests for sql.lua (pure SQL generation)
+-- sql_spec.lua: unit tests for sql.lua (pure SQL generation)
 local sql = require("dadbod-grip.sql")
 
 local pass = 0
@@ -10,7 +10,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 
@@ -151,7 +151,7 @@ end)
 -- ── IS NULL in WHERE clause ──────────────────────────────────────────────────
 
 test("build_update: empty-string pk value uses IS NULL (csv null)", function()
-  -- CSV NULL is represented as "" — must not emit WHERE id = '' on typed PK columns
+  -- CSV NULL is represented as "": must not emit WHERE id = '' on typed PK columns
   local result = sql.build_update("users", { id = "" }, { name = "alice" })
   contains(result, '"id" IS NULL')
   assert(not result:find('"id" = \'\'', 1, true), "should not have = ''")

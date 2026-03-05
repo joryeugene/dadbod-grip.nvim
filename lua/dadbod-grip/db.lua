@@ -1,4 +1,4 @@
--- db.lua — database facade.
+-- db.lua: database facade.
 -- Delegates to adapters based on URL scheme.
 -- All functions return (result, err). Never throw.
 

@@ -1,4 +1,4 @@
--- grip_picker_spec.lua — tests for the self-contained floating list picker.
+-- grip_picker_spec.lua: tests for the self-contained floating list picker.
 
 local grip_picker = require("dadbod-grip.grip_picker")
 
@@ -11,7 +11,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 
@@ -242,7 +242,7 @@ test("j wraps from last item to first", function()
   press(buf, "j")
   press(buf, "j")
 
-  -- Now at item 3 (last) — j should wrap to item 1
+  -- Now at item 3 (last): j should wrap to item 1
   press(buf, "j")
 
   local lines = buf_lines(buf)

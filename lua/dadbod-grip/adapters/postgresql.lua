@@ -1,4 +1,4 @@
--- adapters/postgresql.lua — PostgreSQL adapter (psql CLI).
+-- adapters/postgresql.lua: PostgreSQL adapter (psql CLI).
 -- All functions receive a resolved, non-nil URL.
 -- All functions return (result, err). Never throw.
 

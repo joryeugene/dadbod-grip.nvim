@@ -79,7 +79,7 @@ watch-fixture:
     echo "id,name,score,ts" > "$FILE"
     echo "1,alice,90,$(date -u +%H:%M:%S)" >> "$FILE"
     echo "2,bob,75,$(date -u +%H:%M:%S)"   >> "$FILE"
-    echo "Watching: appending to $FILE every 4s — Ctrl-C to stop"
+    echo "Watching: appending to $FILE every 4s: Ctrl-C to stop"
     N=3
     while true; do
         sleep 4

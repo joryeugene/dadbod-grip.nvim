@@ -1,4 +1,4 @@
--- seed_pg.sql — pathological test fixtures for dadbod-grip (PostgreSQL).
+-- seed_pg.sql: pathological test fixtures for dadbod-grip (PostgreSQL).
 -- Usage: createdb grip_test && psql grip_test < tests/seed_pg.sql
 --
 -- Covers: CRUD, composite PKs, JSON, unicode, wide tables,

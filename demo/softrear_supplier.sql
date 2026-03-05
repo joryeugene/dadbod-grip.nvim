@@ -1,4 +1,4 @@
--- softrear_supplier.sql — Leaked supplier logistics database (SQLite)
+-- softrear_supplier.sql: Leaked supplier logistics database (SQLite)
 -- Seeded by :GripStart alongside the main Softrear database.
 -- Attach with: :GripAttach sqlite:.grip/supplier_intel.db  supplier
 

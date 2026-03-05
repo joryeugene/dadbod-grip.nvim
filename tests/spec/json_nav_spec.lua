@@ -1,4 +1,4 @@
--- json_nav_spec.lua — TDD spec for view.json_to_lines()
+-- json_nav_spec.lua: TDD spec for view.json_to_lines()
 -- Exported as M._json_to_lines for testing.
 -- Run: just test
 local view = require("dadbod-grip.view")
@@ -12,7 +12,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

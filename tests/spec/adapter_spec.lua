@@ -1,4 +1,4 @@
--- adapter_spec.lua — unit tests for adapter URL parsing, output parsing, SQL rewriting
+-- adapter_spec.lua: unit tests for adapter URL parsing, output parsing, SQL rewriting
 local mysql = require("dadbod-grip.adapters.mysql")
 local sqlite = require("dadbod-grip.adapters.sqlite")
 local duckdb = require("dadbod-grip.adapters.duckdb")
@@ -13,7 +13,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 
@@ -452,7 +452,7 @@ test("duckdb get_constraints: returns empty list on query failure", function()
     with_system_mock("", "Error: table not found", 1, function()
       local result, err = duckdb.get_constraints("missing", "duckdb::memory:")
       eq(#result, 0, "empty list on error")
-      -- error is returned (or nil — either is acceptable since duckdb silences errors)
+      -- error is returned (or nil: either is acceptable since duckdb silences errors)
     end)
   end)
 end)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-dadbod-grip.nvim mascot — pixel art animated flexing data-dad.
+dadbod-grip.nvim mascot: pixel art animated flexing data-dad.
 Run: python3 assets/gen_mascot.py
 """
 from PIL import Image
@@ -95,7 +95,7 @@ BASE.append(r(12, 'K' * 14))                   # 4
 for _ in range(3):
     BASE.append(box(12, 'N' * 12))             # 5-7
 
-# ROW 8: beanie cuff — SAME WIDTH as body (not wider!)
+# ROW 8: beanie cuff: SAME WIDTH as body (not wider!)
 BASE.append(box(12, 'L' * 12))                 # 8
 
 # ROW 9: K bottom of beanie (same width)
@@ -110,7 +110,7 @@ BASE.append(r(12, 'K' * 14))                   # 9
 BASE.append(box(8, 'S' * 18))                  # 10 forehead
 BASE.append(box(8, 'S' * 18))                  # 11
 
-# Row 12: eyebrows — 2px wide, angled inward (slightly closer to center)
+# Row 12: eyebrows: 2px wide, angled inward (slightly closer to center)
 BASE.append(box(8, 'SSS' + 'KK' + 'S' * 8 + 'KK' + 'SSS'))   # 12 brows
 
 BASE.append(box(8, 'S' * 18))                  # 13 gap between brow & eye
@@ -142,7 +142,7 @@ BASE.append(box(7, shirt(20)))                  # 22
 for _ in range(3):
     BASE.append(box(7, shirt(20)))              # 23-25
 
-# ROWS 26-33: BELLY — widens for dadbod, then DBG text
+# ROWS 26-33: BELLY: widens for dadbod, then DBG text
 BASE.append(box(6, shirt(22)))                  # 26 belly +1
 BASE.append(box(5, shirt(24)))                  # 27 belly +2
 BASE.append(box(4, shirt(26)))                  # 28 peak belly (+3 each side)
@@ -195,11 +195,11 @@ def render(px_map):
     return img
 
 # -------------------------------------------------------
-# Arms — L-shaped flex: elbow OUT to side, forearm points INWARD toward face
+# Arms: L-shaped flex: elbow OUT to side, forearm points INWARD toward face
 #
 # Shoulder at col 7, row 21.
 # Phase 3 (full flex): elbow at col 2, forearm goes right to col 6, fist near face.
-# The fist ends at col 6-7 (face K border is at col 8) — clearly beside the head.
+# The fist ends at col 6-7 (face K border is at col 8): clearly beside the head.
 # -------------------------------------------------------
 def thick_px(points, fill, t=2):
     result = {}
@@ -223,7 +223,7 @@ def left_arm(phase):
         dict(upper=[(7, 21), (6, 22), (5, 22)],
              fore =[(5, 22), (4, 23), (3, 23)],
              fist =[(3, 22)]),
-        # 1: arm rising — elbow out, fist at shoulder height
+        # 1: arm rising: elbow out, fist at shoulder height
         dict(upper=[(6, 21), (5, 21), (4, 20), (3, 20)],
              fore =[(3, 20), (3, 19), (4, 18)],
              fist =[(4, 17)]),
@@ -231,7 +231,7 @@ def left_arm(phase):
         dict(upper=[(6, 21), (5, 20), (4, 19), (3, 18), (2, 17)],
              fore =[(2, 17), (2, 16), (3, 15)],
              fist =[(3, 14), (4, 14)]),
-        # 3: FULL FLEX ᕦ — elbow out at chest, forearm UP, fist at brow
+        # 3: FULL FLEX ᕦ: elbow out at chest, forearm UP, fist at brow
         dict(upper=[(6, 21), (5, 20), (4, 19), (3, 18), (2, 17)],
              fore =[(2, 17), (2, 16), (3, 15), (4, 14), (5, 13)],
              fist =[(5, 12), (6, 12)]),

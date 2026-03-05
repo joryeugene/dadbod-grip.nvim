@@ -1,4 +1,4 @@
--- seed_sqlite.sql — pathological test fixtures for dadbod-grip (SQLite).
+-- seed_sqlite.sql: pathological test fixtures for dadbod-grip (SQLite).
 -- Usage: sqlite3 tests/seed_sqlite.db < tests/seed_sqlite.sql
 --
 -- Mirrors tests/seed_pg.sql (PostgreSQL) as closely as SQLite allows.

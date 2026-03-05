@@ -320,7 +320,7 @@ ANALYSIS AND EXPORT ~
   gV              Show CREATE TABLE DDL in floating window
   gD              Diff current table against another table
   gE              Export to clipboard in 6 formats (see |grip-export|)
-  gX              Export to file (csv/json/sql) — also :GripExport
+  gX              Export to file (csv/json/sql): also :GripExport
 
 INSPECTION ~
                                                         *grip-inspection*

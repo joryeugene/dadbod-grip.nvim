@@ -1,4 +1,4 @@
--- saved.lua — save/load SQL queries in .grip/queries/.
+-- saved.lua: save/load SQL queries in .grip/queries/.
 -- Project-local storage; uses grip_picker (zero external deps).
 
 local M = {}

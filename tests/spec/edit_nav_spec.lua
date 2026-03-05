@@ -1,4 +1,4 @@
--- edit_nav_spec.lua — TDD tests for M._next_edit_cursor
+-- edit_nav_spec.lua: TDD tests for M._next_edit_cursor
 --
 -- Tests the pure function that computes where the cursor should land
 -- after editing a cell (spreadsheet-style: advance to next row, same column).
@@ -22,7 +22,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

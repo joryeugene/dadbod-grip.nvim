@@ -1,4 +1,4 @@
--- schema.lua — sidebar schema tree browser.
+-- schema.lua: sidebar schema tree browser.
 -- Tables/views with expandable columns showing types + PK/FK markers.
 -- Lazy column fetching on expand.
 
@@ -83,7 +83,7 @@ local function get_state(url)
   if not _states[url] then
     _states[url] = {
       url = url,
-      items = nil,       -- { {name, type}, ... } — nil = not fetched
+      items = nil,       -- { {name, type}, ... }: nil = not fetched
       file_cols = nil,   -- for file-as-table: { {column_name, data_type}, ... }
       expanded = {},      -- set of expanded table names
       col_cache = {},     -- table_name → column_info[]
@@ -372,7 +372,7 @@ local function render(state)
       local display_name = #label > max_name
           and ("…" .. label:sub(-(max_name - 1))) or label
       table.insert(lines, arrow .. display_name)
-      -- No special hl for table names — keep it clean
+      -- No special hl for table names: keep it clean
     elseif node.kind == "column" then
       -- All prefixes are 6 display cols wide.
       local prefix
@@ -608,7 +608,7 @@ local function setup_keymaps(url)
     render(state)
   end)
 
-  -- Filter/search — vim.fn.input() avoids dressing/noice float interception
+  -- Filter/search: vim.fn.input() avoids dressing/noice float interception
   map("/", function()
     local CANCEL = "\0"
     local ok, input = pcall(vim.fn.input, { prompt = "Filter: ", default = state.filter or "", cancelreturn = CANCEL })

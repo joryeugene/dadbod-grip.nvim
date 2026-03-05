@@ -1,4 +1,4 @@
--- init.lua — wiring + :Grip command.
+-- init.lua: wiring + :Grip command.
 -- Entry point. Parses arg, validates connection, orchestrates modules.
 
 local db     = require("dadbod-grip.db")
@@ -174,7 +174,7 @@ local function do_apply_file_writeback(bufnr, session)
     end
   end
 
-  -- 4. Apply inserts (no rowid needed — appended at end)
+  -- 4. Apply inserts (no rowid needed: appended at end)
   for _, ins in ipairs(inserts) do
     table.insert(stmts, sql.build_insert("_grip_w", ins.values, ins.columns))
   end
@@ -265,7 +265,7 @@ local function do_apply(bufnr, url)
   local apply_ms = math.floor((vim.uv.hrtime() - t_apply) / 1e6)
 
   if err then
-    -- Transaction failed — DB auto-rolled back
+    -- Transaction failed: DB auto-rolled back
     local err_lines = { "✗ Transaction rolled back (" .. total .. " statement(s))", "" }
     for chunk in (err .. "\n"):gmatch("([^\n]+)\n?") do
       if chunk ~= "" then table.insert(err_lines, "  " .. chunk) end
@@ -276,7 +276,7 @@ local function do_apply(bufnr, url)
     return
   end
 
-  -- Success — compute reverse SQL for transaction undo before clearing staging
+  -- Success: compute reverse SQL for transaction undo before clearing staging
   local reverse_stmts = {}
   local col_idx = {}
   for i, col in ipairs(st.columns) do col_idx[col] = i end
@@ -736,7 +736,7 @@ function M.open(arg, url, opts)
     local stmt_type = mutation_sql:upper():match("^%s*(%u+)") or "SQL"
 
     -- Unwrap BEGIN/COMMIT (or START TRANSACTION) blocks: extract inner DML for mutation preview.
-    -- Executing just the inner statement is correct — BEGIN/COMMIT is unnecessary for single stmts.
+    -- Executing just the inner statement is correct: BEGIN/COMMIT is unnecessary for single stmts.
     if stmt_type == "BEGIN" or stmt_type == "START" then
       local inner = mutation_sql
         :gsub("^%s*START%s+TRANSACTION%s*;%s*\n?", "")
@@ -753,7 +753,7 @@ function M.open(arg, url, opts)
           return
         end
       end
-      -- No DML inside — fall through to DDL confirm
+      -- No DML inside: fall through to DDL confirm
     end
 
     -- For UPDATE/DELETE/INSERT/REPLACE: show preview grid with a:execute / U:cancel
@@ -999,7 +999,7 @@ end
 function M.open_smart()
   local bufnr = vim.api.nvim_get_current_buf()
 
-  -- Case 1: DBUI SQL query buffer — has b:dbui_table_name + b:db (string URL)
+  -- Case 1: DBUI SQL query buffer: has b:dbui_table_name + b:db (string URL)
   local dbui_table = vim.b[bufnr].dbui_table_name
   if dbui_table and dbui_table ~= "" then
     local url = vim.b[bufnr].db
@@ -1022,7 +1022,7 @@ function M.open_smart()
     return
   end
 
-  -- Case 2: dbout result buffer — b:db is a dict with db_url
+  -- Case 2: dbout result buffer: b:db is a dict with db_url
   local db_obj = vim.b[bufnr].db
   if type(db_obj) == "table" and db_obj.db_url then
     local url = db_obj.db_url
@@ -1071,7 +1071,7 @@ function M.open_smart()
     return
   end
 
-  -- Case 3: No DBUI/dbout context — show table picker
+  -- Case 3: No DBUI/dbout context: show table picker
   local conn = vim.b.db
   if type(conn) == "table" then conn = conn.db_url end
   if not conn or conn == "" then conn = vim.g.db end
@@ -1098,7 +1098,7 @@ function M.open_welcome()
     end
   end
 
-  -- If already visible in any window, just focus it — reuse, don't replace
+  -- If already visible in any window, just focus it: reuse, don't replace
   if welcome_buf then
     for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
       if vim.api.nvim_win_get_buf(winid) == welcome_buf then
@@ -1149,7 +1149,7 @@ function M.open_welcome()
     "  postgresql://user:pass@host:5432/dbname",
     "  mysql://user:pass@host:3306/dbname",
     "  sqlite:path/to/file.db      duckdb:path/to/file.duckdb",
-    "  duckdb::memory:             (single-query only — no persistence)",
+    "  duckdb::memory:             (single-query only: no persistence)",
     "  /path/to/file.csv           (or .parquet .json .xlsx)",
     "  https://host/data.parquet   (remote via httpfs)",
     "",
@@ -1191,7 +1191,7 @@ function M.open_welcome()
   vim.bo[welcome_buf].modified   = false
   vim.bo[welcome_buf].filetype   = "grip-welcome"
 
-  -- Syntax highlights for welcome screen — deferred so they survive FileType autocmds
+  -- Syntax highlights for welcome screen: deferred so they survive FileType autocmds
   local ns_w = vim.api.nvim_create_namespace("grip_welcome")
   vim.api.nvim_buf_clear_namespace(welcome_buf, ns_w, 0, -1)
   vim.schedule(function()
@@ -2012,7 +2012,7 @@ function M.setup(opts)
     desc  = "Switch database connection",
   })
 
-  -- :GripAttach [dsn] [alias] — attach external DB to DuckDB session
+  -- :GripAttach [dsn] [alias]: attach external DB to DuckDB session
   vim.api.nvim_create_user_command("GripAttach", function(cmd_opts)
     local connections = require("dadbod-grip.connections")
     local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
@@ -2052,7 +2052,7 @@ function M.setup(opts)
     desc  = "Attach external database to DuckDB session",
   })
 
-  -- :GripDetach [alias] — detach a previously attached database
+  -- :GripDetach [alias]: detach a previously attached database
   vim.api.nvim_create_user_command("GripDetach", function(cmd_opts)
     local connections = require("dadbod-grip.connections")
     local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
@@ -2091,7 +2091,7 @@ function M.setup(opts)
     desc  = "Detach database from DuckDB session",
   })
 
-  -- :GripStart — open the Softrear Analyst Portal directly
+  -- :GripStart: open the Softrear Analyst Portal directly
   vim.api.nvim_create_user_command("GripStart", function()
     local connections = require("dadbod-grip.connections")
     local conns = connections.list()
@@ -2131,12 +2131,12 @@ function M.setup(opts)
     vim.notify("Softrear Portal not found. Is the plugin in your runtimepath?", vim.log.levels.WARN)
   end, { desc = "Open the Softrear Inc. Analyst Portal" })
 
-  -- :GripHome — return to the welcome screen from anywhere
+  -- :GripHome: return to the welcome screen from anywhere
   vim.api.nvim_create_user_command("GripHome", function()
     M.open_welcome()
   end, { desc = "Open dadbod-grip welcome screen" })
 
-  -- :GripExport — export current result set to a file
+  -- :GripExport: export current result set to a file
   vim.api.nvim_create_user_command("GripExport", function()
     local bufnr = vim.api.nvim_get_current_buf()
     view.do_export(bufnr)

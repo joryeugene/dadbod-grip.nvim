@@ -1,4 +1,4 @@
--- adapters/duckdb.lua — DuckDB adapter (duckdb CLI).
+-- adapters/duckdb.lua: DuckDB adapter (duckdb CLI).
 -- All functions receive a resolved, non-nil URL.
 -- All functions return (result, err). Never throw.
 
@@ -560,7 +560,7 @@ function M.url_to_dsn(url)
   -- SQLite: already in correct format
   if url:find("^sqlite:") then return url end
 
-  -- Strip postgres(ql):// prefix — Lua ? only makes one char optional,
+  -- Strip postgres(ql):// prefix: Lua ? only makes one char optional,
   -- so we match both schemes explicitly
   local pg_rest = url:match("^postgresql://(.+)") or url:match("^postgres://(.+)")
   if pg_rest then

@@ -1,4 +1,4 @@
--- grid_reuse_spec.lua — integration test for grid window reuse
+-- grid_reuse_spec.lua: integration test for grid window reuse
 -- RED/GREEN: verifies view.open() with reuse_win does not stack grid windows.
 local view = require("dadbod-grip.view")
 local data = require("dadbod-grip.data")
@@ -12,7 +12,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

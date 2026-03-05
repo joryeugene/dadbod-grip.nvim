@@ -1,4 +1,4 @@
--- tests/spec/duckdb_federation_spec.lua — integration: list_tables with attachments
+-- tests/spec/duckdb_federation_spec.lua: integration: list_tables with attachments
 -- Requires: duckdb CLI, sqlite3 CLI
 dofile("tests/minimal_init.lua")
 

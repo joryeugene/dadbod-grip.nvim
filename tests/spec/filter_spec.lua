@@ -1,4 +1,4 @@
--- filter_spec.lua — TDD spec for query.build_filter_clause()
+-- filter_spec.lua: TDD spec for query.build_filter_clause()
 -- Run: just test
 -- All tests should FAIL before implementation, PASS after.
 local query = require("dadbod-grip.query")
@@ -12,7 +12,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

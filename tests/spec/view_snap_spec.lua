@@ -1,4 +1,4 @@
--- view_snap_spec.lua — unit tests for M._snap_col (pure separator snap logic)
+-- view_snap_spec.lua: unit tests for M._snap_col (pure separator snap logic)
 -- Tests that cursor in separator between columns snaps to the LEFT (current) column,
 -- not the RIGHT (next) column.
 --
@@ -19,7 +19,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

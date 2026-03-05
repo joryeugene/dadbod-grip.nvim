@@ -1,4 +1,4 @@
--- grip_picker.lua — self-contained floating list picker. Zero external deps.
+-- grip_picker.lua: self-contained floating list picker. Zero external deps.
 --
 -- M.open(opts):
 --   title    : string                       float title
@@ -367,7 +367,7 @@ function M.open(opts)
   end
 
   -- Filter (/ or gp)
-  -- vim.fn.input() always uses native cmdline — never intercepted by dressing/noice
+  -- vim.fn.input() always uses native cmdline: never intercepted by dressing/noice
   local function activate_filter()
     local prompt = filter ~= "" and ("Filter [" .. filter .. "]: ") or "Filter: "
     local CANCEL = "\0"

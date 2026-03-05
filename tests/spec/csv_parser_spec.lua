@@ -1,4 +1,4 @@
--- csv_parser_spec.lua — unit tests for db.parse_csv (RFC 4180 CSV parser)
+-- csv_parser_spec.lua: unit tests for db.parse_csv (RFC 4180 CSV parser)
 local db = require("dadbod-grip.db")
 
 local pass = 0
@@ -10,7 +10,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

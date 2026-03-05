@@ -1,4 +1,4 @@
--- init_spec.lua — unit tests for resolve_query routing and is_queryable_file
+-- init_spec.lua: unit tests for resolve_query routing and is_queryable_file
 local grip = require("dadbod-grip")
 
 local pass = 0
@@ -10,7 +10,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

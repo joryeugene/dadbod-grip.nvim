@@ -1,4 +1,4 @@
--- query_spec.lua — unit tests for query.lua (pure query composition)
+-- query_spec.lua: unit tests for query.lua (pure query composition)
 local query = require("dadbod-grip.query")
 
 local pass = 0
@@ -10,7 +10,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

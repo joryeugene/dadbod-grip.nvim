@@ -1,4 +1,4 @@
--- query.lua — pure query composition.
+-- query.lua: pure query composition.
 -- No I/O. No state. No side effects. Values in, strings out.
 -- Query spec is a plain Lua table (a value, not an object).
 
@@ -31,7 +31,7 @@ end
 
 --- Create a spec for a raw SELECT/WITH query.
 function M.new_raw(sql_str, page_size)
-  -- Strip trailing semicolons — raw SQL gets wrapped in a subquery
+  -- Strip trailing semicolons: raw SQL gets wrapped in a subquery
   local cleaned = sql_str and sql_str:gsub(";%s*$", "") or sql_str
   return {
     table_name = nil,
@@ -121,13 +121,13 @@ end
 --- Handles quoting: numeric strings are unquoted, all others get single-quote wrapping.
 --- Operators: "=", "!=", ">", "<", "LIKE", "IN", "BETWEEN", "NULL", "NOT NULL"
 --- For "IN": value is comma-separated, each item quoted/unquoted individually.
---- For "BETWEEN": value is "low,high" — two comma-separated values.
+--- For "BETWEEN": value is "low,high": two comma-separated values.
 --- For "LIKE": auto-wraps value with %…% if no % present (substring intent assumed).
 --- For "NULL" / "NOT NULL": value is ignored.
 function M.build_filter_clause(col, op, value)
   local col_q = sql_mod.quote_ident(col)
 
-  -- IS NULL / IS NOT NULL — no value needed
+  -- IS NULL / IS NOT NULL: no value needed
   if op == "NULL" then
     return col_q .. " IS NULL"
   elseif op == "NOT NULL" then
@@ -154,7 +154,7 @@ function M.build_filter_clause(col, op, value)
     return col_q .. " IN (" .. table.concat(parts, ",") .. ")"
   end
 
-  -- BETWEEN: parse "low,high" — two comma-separated values
+  -- BETWEEN: parse "low,high": two comma-separated values
   if op == "BETWEEN" then
     local parts = {}
     for item in tostring(value):gmatch("[^,]+") do
@@ -173,7 +173,7 @@ function M.build_filter_clause(col, op, value)
     val_str = "%" .. val_str .. "%"
   end
 
-  -- =, !=, >, <, LIKE — single value
+  -- =, !=, >, <, LIKE: single value
   return col_q .. " " .. op .. " " .. quote_user_val(val_str)
 end
 

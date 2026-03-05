@@ -1,4 +1,4 @@
--- adapters/sqlite.lua — SQLite adapter (sqlite3 CLI).
+-- adapters/sqlite.lua: SQLite adapter (sqlite3 CLI).
 -- All functions receive a resolved, non-nil URL.
 -- All functions return (result, err). Never throw.
 

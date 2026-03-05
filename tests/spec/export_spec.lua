@@ -1,4 +1,4 @@
--- export_spec.lua — TDD spec for view._format_export()
+-- export_spec.lua: TDD spec for view._format_export()
 -- The pure formatting function is exported as view._format_export(rows, cols, format, table_name).
 -- Run: just test
 local view = require("dadbod-grip.view")
@@ -12,7 +12,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

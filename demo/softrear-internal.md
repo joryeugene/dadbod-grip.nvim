@@ -48,7 +48,7 @@ Press `gR`.
 Data profiling opens. Every column gets a distribution and completeness check
 simultaneously:
 
-- `softness_score`: bimodal — a dense cluster at 1–3, another at 7–10, with
+- `softness_score`: bimodal: a dense cluster at 1–3, another at 7–10, with
   almost nothing in between. Two product lines with no middle ground.
 - `tensile_strength`: heavily right-skewed, with a long tail to the right.
 - `discontinued`: roughly 6% of SKUs are discontinued.
@@ -149,7 +149,7 @@ Navigate to `youtube_comments`.
 
 Press `gn` on the `conspiracy_adjacent` column.
 
-The NULL filter engages. Roughly 190 rows become visible — comments that the
+The NULL filter engages. Roughly 190 rows become visible: comments that the
 Threat Assessment team has not yet reviewed. The unreviewed set includes:
 
 ```
@@ -316,7 +316,8 @@ One directive has `publicly_acknowledged = true`:
 "Greg is authorized to self-certify all SKUs. This is intentional."
 ```
 
-They told the public about Greg.
+They told the public about Greg. The other three directives show the communication
+strategy: name the problem internally, build policy to prevent naming it externally.
 
 ---
 
@@ -376,6 +377,7 @@ The formatted table copies to clipboard. The dossier is ready.
 | Deep FK drill | `gf` (×2) | youtube_comments → suspicious_persons → investigations |
 | Quality certifications | `go` on `quality_certifications` | Revealed Greg, the score of 8, and the score of 2 |
 | Leadership directives | `s` descending by `publicly_acknowledged` | Found what they admitted to publicly |
+| Clone row | `c` | Duplicate a row with PKs cleared, ready to stage as a new record |
 | Mutation diff | `gD` | Staged rationale change shown before apply |
 | Export | `gE` | Markdown table to clipboard |
 
@@ -387,6 +389,12 @@ softness_score zero still ships. The person who had the recipe was acquired and
 now works in R&D.
 
 The data was here the whole time.
+
+The three questions asked at the start have answers. The product quality problem
+originates at the Shanghai supplier: discounted material, relabeled before
+customs, failed tests suppressed. The people who know the most were acquired,
+threatened, or sent coupons. The decisions were made deliberately, documented
+openly, and committed to main.
 
 ---
 
@@ -433,7 +441,8 @@ Press `<C-CR>`.
 
 Every shipment from Bamboo Don declared `Grade A Bamboo Fiber`. The
 `actual_contents` column reads `Grade C Mixed Pulp` for every row that maps to
-a recalled production batch.
+a recalled production batch. Every recalled batch traces back to knowingly
+mislabeled incoming material.
 
 ### Check the ingredient tests
 
@@ -451,6 +460,8 @@ ORDER BY it.contaminant_level DESC
 
 Three failed tests. The highest contaminant level is 8.7 (scale of 10). The
 tester notes for that row: "Sample relabeled before customs. Original grade: C."
+A contaminant level of 8.7 fails any food-adjacent safety threshold. The
+relabeling happened before customs inspection, not after it.
 
 ### The pricing arrangement
 
@@ -466,7 +477,8 @@ ORDER BY p.discount_pct DESC
 ```
 
 The Shanghai territory pays 40% less per ton under `loyalty_tier = 'founding_partner'`.
-Every other territory pays full price.
+Every other territory pays full price. The discount created the incentive. The
+relabeling preserved the margin.
 
 The supply chain root cause is now complete: discounted supplier, relabeled
 ingredients, failed quality tests, recalled batches, zero-softness product,

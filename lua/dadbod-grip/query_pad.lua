@@ -1,4 +1,4 @@
--- query_pad.lua — SQL scratch buffer that pipes results into grip grids.
+-- query_pad.lua: SQL scratch buffer that pipes results into grip grids.
 -- ft=sql enables vim-dadbod-completion if installed.
 -- b:db = connection URL for completion context.
 
@@ -97,7 +97,7 @@ local function setup_keymaps(bufnr, url)
     run_sql(cur_url(), table.concat(lines, "\n"))
   end, { buffer = bufnr, silent = true, desc = "Grip: run query" })
 
-  -- Visual C-CR: run selection (line-wise — runs all selected lines)
+  -- Visual C-CR: run selection (line-wise: runs all selected lines)
   vim.keymap.set("v", "<C-CR>", function()
     -- feedkeys Esc to exit visual mode and set '< '> marks, then run
     local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
@@ -172,7 +172,7 @@ local function setup_keymaps(bufnr, url)
     require("dadbod-grip").open_welcome()
   end, { buffer = bufnr, silent = true, desc = "Grip: welcome screen" })
 
-  -- ?: help popup (same full grid help — useful for keymap reference while writing SQL)
+  -- ?: help popup (same full grid help: useful for keymap reference while writing SQL)
   vim.keymap.set("n", "?", function()
     require("dadbod-grip.view").show_help()
   end, { buffer = bufnr, silent = true, desc = "Grip: help" })

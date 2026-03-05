@@ -1,4 +1,4 @@
--- mutation_spec.lua — tests for UPDATE/DELETE detection and preview flow
+-- mutation_spec.lua: tests for UPDATE/DELETE detection and preview flow
 local pass = 0
 local fail = 0
 
@@ -8,7 +8,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

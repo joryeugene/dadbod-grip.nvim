@@ -1,4 +1,4 @@
--- run_specs.lua — test runner for headless Neovim
+-- run_specs.lua: test runner for headless Neovim
 -- Usage: nvim --headless -u tests/minimal_init.lua -l tests/run_specs.lua
 --
 -- Runs all *_spec.lua files in tests/spec/ and exits with non-zero on failure.

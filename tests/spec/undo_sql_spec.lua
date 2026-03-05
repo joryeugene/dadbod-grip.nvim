@@ -1,4 +1,4 @@
--- undo_sql_spec.lua — TDD tests for undo reverse-SQL generation from raw CSV values.
+-- undo_sql_spec.lua: TDD tests for undo reverse-SQL generation from raw CSV values.
 --
 -- All four adapters (PostgreSQL, MySQL, SQLite, DuckDB) represent NULL as ""
 -- in their CSV output. The undo path must normalize "" → SQL NULL.
@@ -18,7 +18,7 @@ local function test(name, fn)
     pass = pass + 1
   else
     fail = fail + 1
-    print("FAIL: " .. name .. " — " .. tostring(err))
+    print("FAIL: " .. name .. ": " .. tostring(err))
   end
 end
 

@@ -1,4 +1,4 @@
--- view.lua — buffer rendering + keymaps.
+-- view.lua: buffer rendering + keymaps.
 -- One buffer per grip session. State in M._sessions[bufnr].
 
 local data    = require("dadbod-grip.data")
@@ -87,7 +87,7 @@ local function ensure_highlights()
   vim.cmd("hi! GripModified  gui=bold ctermfg=177 guifg=#c084fc ctermbg=236 guibg=#1a0a30")
   vim.cmd("hi! GripDeleted   gui=strikethrough ctermfg=203 guifg=#f38ba8 ctermbg=236 guibg=#2d1418")
   vim.cmd("hi! GripInserted  gui=bold ctermfg=113 guifg=#a6e3a1 ctermbg=236 guibg=#162d18")
-  -- Staged NULL: peach/flamingo fg — signals "value cleared" (distinct from red=deleted, violet=modified)
+  -- Staged NULL: peach/flamingo fg: signals "value cleared" (distinct from red=deleted, violet=modified)
   vim.cmd("hi! GripNullStaged gui=bold ctermfg=216 guifg=#fab387 ctermbg=236 guibg=#2d1800")
   vim.cmd("hi! GripReadonly  gui=italic ctermfg=243 guifg=#6c7086")
   vim.cmd("hi! GripBorder    gui=bold ctermfg=147 guifg=#cba6f7")
@@ -296,7 +296,7 @@ local function title_line(session, columns, widths, total_width)
     title_dw = vim.fn.strdisplaywidth(title)
   end
 
-  -- If still too wide (e.g. available <= 4 — very narrow grid), show gH hint if it fits
+  -- If still too wide (e.g. available <= 4: very narrow grid), show gH hint if it fits
   if title_dw > available then
     if inner >= 4 then
       title = " gH "
@@ -596,7 +596,7 @@ local function build_render(session, opts)
 
   local status_str = " " .. table.concat(status_parts, "  │  ")
   table.insert(lines, status_str)
-  -- Highlight timing badge — query=yellow, applied=green
+  -- Highlight timing badge: query=yellow, applied=green
   if timing_str then
     local ts, te = status_str:find(timing_str, 1, true)
     if ts then
@@ -612,7 +612,7 @@ local function build_render(session, opts)
     if s then push_mark(#lines, s - 1, e, "GripStatusChg") end
   end
 
-  -- ── Filter lines (one per active clause — always fully visible, never truncated) ──
+  -- ── Filter lines (one per active clause: always fully visible, never truncated) ──
   if session.query_spec and #session.query_spec.filters > 0 then
     for _, f in ipairs(session.query_spec.filters) do
       local fline = " \xE2\x96\xBE " .. f.clause  -- ▾ clause
@@ -655,7 +655,7 @@ end
 -- ── namespace for extmarks ───────────────────────────────────────────────
 local ns = vim.api.nvim_create_namespace("dadbod_grip")
 
--- M.update_table_sessions(old_name, new_name) — patch all open grip sessions
+-- M.update_table_sessions(old_name, new_name): patch all open grip sessions
 -- that reference old_name after a table rename, then refresh them.
 function M.update_table_sessions(old_name, new_name)
   local sql_mod = require("dadbod-grip.sql")
@@ -681,7 +681,7 @@ function M.update_table_sessions(old_name, new_name)
   end
 end
 
--- M.render(bufnr, state) — wipes and rewrites buffer, reapplies extmarks
+-- M.render(bufnr, state): wipes and rewrites buffer, reapplies extmarks
 function M.render(bufnr, state)
   local session = M._sessions[bufnr]
   if not session then return end
@@ -733,7 +733,7 @@ end
 
 local UNDO_STACK_MAX = 50
 
--- M.apply_edit(bufnr, new_state) — pushes current state to undo stack, then renders.
+-- M.apply_edit(bufnr, new_state): pushes current state to undo stack, then renders.
 -- Use this for user-initiated edits (not for refresh/requery).
 function M.apply_edit(bufnr, new_state)
   local session = M._sessions[bufnr]
@@ -874,7 +874,7 @@ end
 --- return { col_name, col_idx } for the column the cursor belongs to.
 --- Snaps LEFT (to the previous column) when cursor is in a separator region,
 --- EXCEPT when the cursor is exactly one byte before a column start (last separator
---- byte) — in that case snaps RIGHT to the next column. This ensures that actions
+--- byte): in that case snaps RIGHT to the next column. This ensures that actions
 --- (edit, sort, filter) fire on the column the user is reaching toward, not the
 --- one they left. Used by get_cell() and testable without vim state.
 function M._snap_col(vis_cols, bp_row, col_nr)
@@ -1160,7 +1160,7 @@ local function json_to_lines(decoded, indent, depth)
     end
     table.insert(lines, indent .. "]")
   else
-    -- Object — sort keys for deterministic output
+    -- Object: sort keys for deterministic output
     table.insert(lines, "{")
     local keys = {}
     for k in pairs(decoded) do table.insert(keys, k) end
@@ -1432,7 +1432,7 @@ local function fetch_view_columns(table_name, url, session)
       c.column_name or "",
       c.data_type or "",
       c.is_nullable or "",
-      (c.column_default and c.column_default ~= "") and c.column_default or "—",
+      (c.column_default and c.column_default ~= "") and c.column_default or "-",
       (c.constraints and c.constraints ~= "") and c.constraints or "",
     })
   end
@@ -1549,15 +1549,15 @@ local function fetch_view_stats(table_name, url, session)
     -- row: col_name, total_rows, non_null, null_count, distinct_count, min_val, max_val
     local total = tonumber(row[2]) or 0
     local nulls = tonumber(row[4]) or 0
-    local null_pct = total > 0 and string.format("%.1f%%", (nulls / total) * 100) or "—"
+    local null_pct = total > 0 and string.format("%.1f%%", (nulls / total) * 100) or "-"
     table.insert(rows, {
       row[1] or "",               -- column
       tostring(total),            -- total
       tostring(row[3] or ""),     -- non_null
       null_pct,                   -- nulls (pct)
       tostring(row[5] or ""),     -- distinct
-      row[6] or "—",              -- min
-      row[7] or "—",              -- max
+      row[6] or "-",              -- min
+      row[7] or "-",              -- max
     })
   end
   return columns, rows, nil
@@ -1606,7 +1606,7 @@ function M.switch_view(bufnr, view_name)
   if not session then return end
 
   -- Already on this view: show hint rather than silently re-fetching
-  -- (history is excluded — it's a picker, re-opening it is fine)
+  -- (history is excluded: it's a picker, re-opening it is fine)
   local actual_view = session.current_view or "records"
   if actual_view == view_name and view_name ~= "history" then
     local full_labels = {
@@ -1649,7 +1649,7 @@ function M.switch_view(bufnr, view_name)
     return
   end
 
-  -- History opens the grip picker (same as gh) filtered to this table — not a grid
+  -- History opens the grip picker (same as gh) filtered to this table: not a grid
   if view_name == "history" then
     require("dadbod-grip.history").pick_for_table(table_name, function(sql_content)
       require("dadbod-grip.query_pad").open(url, { initial_sql = sql_content })
@@ -1657,7 +1657,7 @@ function M.switch_view(bufnr, view_name)
     return
   end
 
-  -- Explain opens the Query Health popup (same as gx) — text format is far more readable than a grid
+  -- Explain opens the Query Health popup (same as gx): text format is far more readable than a grid
   if view_name == "explain" then
     local query_sql
     if session.query_spec then
@@ -1875,7 +1875,7 @@ function M._setup_keymaps(bufnr)
     local session = M._sessions[bufnr]
     if not session then return end
 
-    -- Tier 0: mutation preview — cancel (close the preview)
+    -- Tier 0: mutation preview: cancel (close the preview)
     if session.pending_mutation then
       session.pending_mutation = nil
       session._mutation_title = nil
@@ -2748,7 +2748,7 @@ function M._setup_keymaps(bufnr)
 
     -- Fixed indicator budget: 3 display chars covers " ▲1"/`` ▼2" (stacked sort).
     -- Using a fixed constant means adding/removing stacked sorts after pressing `=`
-    -- never clips the header — the budget doesn't shrink when you press `=` on
+    -- never clips the header: the budget doesn't shrink when you press `=` on
     -- a column with only a single-arrow sort (▲ = ind_w 2) and then stack more.
     local ind_w = 3
 
@@ -3433,7 +3433,7 @@ function M._setup_keymaps(bufnr)
     if session_p.on_requery then session_p.on_requery(bufnr, new_spec) end
   end, "First page")
 
-  -- H/L: ergonomic page navigation (prev/next) — single-key aliases for [p/]p
+  -- H/L: ergonomic page navigation (prev/next): single-key aliases for [p/]p
   map("H", function()
     local session_p = M._sessions[bufnr]
     if not session_p or not session_p.query_spec then return end
@@ -3491,7 +3491,7 @@ function M._setup_keymaps(bufnr)
       return
     end
     if cell.value == nil then
-      vim.notify("NULL value — cannot follow FK", vim.log.levels.INFO)
+      vim.notify("NULL value: cannot follow FK", vim.log.levels.INFO)
       return
     end
 
@@ -3601,7 +3601,7 @@ function M._setup_keymaps(bufnr)
       if cell then
         col_name = cell.col_name
       else
-        -- Cursor may be on header/type row — resolve via byte position
+        -- Cursor may be on header/type row: resolve via byte position
         local col_nr = vim.api.nvim_win_get_cursor(0)[2]
         local cols = r.visible_columns or st_a.columns
         if r.hdr_byte_positions then
@@ -3620,7 +3620,7 @@ function M._setup_keymaps(bufnr)
     local end_line   = vim.fn.line("'>")
     local ds = r.data_start or 4
     if start_line == 0 or end_line == 0 then
-      -- No visual selection — aggregate entire column
+      -- No visual selection: aggregate entire column
       start_line = ds
       end_line = ds + #r.ordered - 1
     end
@@ -3642,7 +3642,7 @@ function M._setup_keymaps(bufnr)
     end
 
     if #values == 0 then
-      vim.notify("ga: " .. col_name .. " — no values", vim.log.levels.INFO)
+      vim.notify("ga: " .. col_name .. ": no values", vim.log.levels.INFO)
       return
     end
 
@@ -3696,7 +3696,7 @@ function M._setup_keymaps(bufnr)
     end
     local row = result.rows[1]
     local info = {
-      " " .. cell.col_name .. " — Column Statistics",
+      " " .. cell.col_name .. ": Column Statistics",
       " " .. string.rep("─", 40),
       "  Total:    " .. (row[1] or "?"),
       "  Distinct: " .. (row[2] or "?"),
@@ -4110,7 +4110,7 @@ function M._setup_keymaps(bufnr)
     end
 
     if session.write_mode then
-      -- Turning OFF — warn if staged changes exist
+      -- Turning OFF: warn if staged changes exist
       local staged = session.state and (
         next(session.state.changes or {}) or
         next(session.state.deleted or {}) or
@@ -4124,7 +4124,7 @@ function M._setup_keymaps(bufnr)
       _update_badge(bufnr)
       vim.notify("Write mode off", vim.log.levels.INFO)
     else
-      -- Turning ON — destructive-action confirm
+      -- Turning ON: destructive-action confirm
       local short = vim.fn.fnamemodify(file_path, ":t")
       local CANCEL = "\0"
       local ok, ans = pcall(vim.fn.input, {
@@ -4134,7 +4134,7 @@ function M._setup_keymaps(bufnr)
       if not ok or ans == CANCEL or (ans ~= "y" and ans ~= "yes") then return end
       session.write_mode = true
       _update_badge(bufnr)
-      vim.notify("Write mode on — edits will overwrite " .. short, vim.log.levels.INFO)
+      vim.notify("Write mode on: edits will overwrite " .. short, vim.log.levels.INFO)
     end
   end, "Toggle write mode (overwrite file on apply)")
 
@@ -4189,7 +4189,7 @@ function M._setup_keymaps(bufnr)
       vim.notify("Opening " .. detected .. " as editable table", vim.log.levels.INFO)
       grip.open(detected, s_url, { reuse_win = current_win })
     else
-      -- Detection failed — show diagnostics so we can fix the root cause
+      -- Detection failed: show diagnostics so we can fix the root cause
       vim.notify(string.format(
         "gO: could not detect table\n table_name=%s | has_spec=%s | spec.table=%s\n spec.base_sql=%s\n query_sql=%s",
         tostring(session.state.table_name),
