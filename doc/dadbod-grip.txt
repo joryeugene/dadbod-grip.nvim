@@ -1,8 +1,8 @@
-*dadbod-grip.txt*  DataGrip-style editable data grids for Neovim
+*dadbod-grip.txt*  Editable database grids for Neovim
 
 Author:   Jory Pestorious
 License:  MIT
-Requires: Neovim 0.10+, vim-dadbod
+Requires: Neovim 0.10+
 
 ==============================================================================
 CONTENTS                                                    *grip-contents*
@@ -33,12 +33,13 @@ CONTENTS                                                    *grip-contents*
 ==============================================================================
 1. INTRODUCTION                                          *grip-introduction*
 
-dadbod-grip.nvim turns Neovim into a DataGrip-style database client powered
-by vim-dadbod. It renders query results as editable grids with inline cell
-editing, visual change staging, sort/filter/pagination, foreign key
-navigation, schema browsing, and a SQL query pad.
+dadbod-grip.nvim is a database client for Neovim with support for
+PostgreSQL, MySQL, SQLite, DuckDB, and MotherDuck. Each engine gets
+schema browsing, inline cell editing, and metadata inspection.
 
-Works standalone (no vim-dadbod-ui needed) or alongside it.
+Renders query results as editable grids with visual change staging,
+sort/filter/pagination, foreign key navigation, schema browsing, and a
+SQL query pad. Works standalone or alongside vim-dadbod-ui.
 
 Quick start: >
   :GripConnect                  pick or add a database connection
@@ -51,7 +52,6 @@ Quick start: >
 2. REQUIREMENTS                                          *grip-requirements*
 
 - Neovim 0.10 or later
-- vim-dadbod (https://github.com/tpope/vim-dadbod)
 - One or more database CLI tools in PATH:
 
   PostgreSQL ......... psql
@@ -65,7 +65,6 @@ Quick start: >
 lazy.nvim (recommended): >lua
   {
     "joryeugene/dadbod-grip.nvim",
-    dependencies = { "tpope/vim-dadbod" },
     cmd = { "Grip", "GripSchema", "GripTables", "GripQuery", "GripConnect" },
     keys = {
       { "<leader>lg", function() require("dadbod-grip").open_smart() end,
@@ -85,7 +84,6 @@ Recommended extras: >lua
 packer.nvim: >lua
   use {
     "joryeugene/dadbod-grip.nvim",
-    requires = { "tpope/vim-dadbod" },
   }
 <
 

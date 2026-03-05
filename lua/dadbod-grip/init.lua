@@ -1138,7 +1138,7 @@ function M.open_welcome()
     "  ╔═╦═╦═╗",
     "  ║d║b║g║  dadbod-grip " .. ver,
     "  ╚═╩═╩═╝",
-    "  DataGrip-grade database editing, inside Neovim.",
+    "  Editable database grids, inside Neovim.",
     "",
     "  ── Get started ────────────────────────────────",
     "  gc      connect to a database",
@@ -1207,7 +1207,7 @@ function M.open_welcome()
         vim.api.nvim_buf_add_highlight(welcome_buf, ns_w, "Special", ln, 0, len)
         local vs = line:find("dadbod-grip", 1, true)
         if vs then vim.api.nvim_buf_add_highlight(welcome_buf, ns_w, "Title", ln, vs - 1, len) end
-      elseif line:find("DataGrip-grade", 1, true) then
+      elseif line:find("Editable database", 1, true) then
         vim.api.nvim_buf_add_highlight(welcome_buf, ns_w, "Comment", ln, 0, len)
       elseif line:find("= modified", 1, true) then
         -- Color legend: extmark with high priority so it shows above any syntax highlighting

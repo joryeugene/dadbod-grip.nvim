@@ -13,10 +13,9 @@ d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
 <p>
 <a href="https://github.com/joryeugene/dadbod-grip.nvim/blob/main/LICENSE"><img src="https://img.shields.io/github/license/joryeugene/dadbod-grip.nvim.svg" alt="MIT License"></a>&nbsp;
 <img src="https://img.shields.io/badge/Neovim-0.10%2B-green.svg" alt="Neovim 0.10+">&nbsp;
-<img src="https://img.shields.io/badge/requires-vim--dadbod-blue.svg" alt="requires vim-dadbod">
 </p>
-<b>DataGrip-grade database editing, inside Neovim.</b><br>
-Edit data like a GUI. Navigate like Vim. Never leave your editor.
+<b>Editable database grids for Neovim.</b><br>
+Connect to PostgreSQL, MySQL, SQLite, DuckDB, or MotherDuck and edit tables like Vim buffers.
 </td>
 <td align="center" valign="middle" width="180">
 <img src="assets/mascot.gif" width="160" alt="Chonk the dadbod-grip mascot"><br>
@@ -47,7 +46,7 @@ An example database is included. `:GripStart` opens it with seventeen tables and
 
 ```lua
 -- lazy.nvim
-{ "joryeugene/dadbod-grip.nvim", dependencies = { "tpope/vim-dadbod" } }
+{ "joryeugene/dadbod-grip.nvim" }
 ```
 
 Then `:GripConnect` to pick your database. That's it. Schema sidebar + query pad open automatically.
@@ -357,7 +356,6 @@ Keys `2`–`9` also work in the schema sidebar to open any table directly in the
 ## Requirements
 
 - **Neovim 0.10+**
-- **[vim-dadbod](https://github.com/tpope/vim-dadbod)**
 - One or more database CLI tools in PATH:
   - **PostgreSQL**: `psql`
   - **SQLite**: `sqlite3`
@@ -368,12 +366,11 @@ Keys `2`–`9` also work in the schema sidebar to open any table directly in the
 
 ### lazy.nvim (recommended)
 
-The plugin ships a `lazy.lua` spec so all commands work as lazy-load triggers automatically — no manual `cmd` list required:
+The plugin ships a `lazy.lua` spec so all commands work as lazy-load triggers automatically:
 
 ```lua
 {
   "joryeugene/dadbod-grip.nvim",
-  dependencies = { "tpope/vim-dadbod" },
 }
 ```
 
@@ -382,7 +379,6 @@ The plugin ships a `lazy.lua` spec so all commands work as lazy-load triggers au
 ```lua
 {
   "joryeugene/dadbod-grip.nvim",
-  dependencies = { "tpope/vim-dadbod" },
   keys = {
     { "<leader>db", "<cmd>GripConnect<cr>",  desc = "DB connect" },
     { "<leader>dg", "<cmd>Grip<cr>",         desc = "DB grid" },
@@ -413,7 +409,6 @@ The plugin ships a `lazy.lua` spec so all commands work as lazy-load triggers au
 ```lua
 use {
   "joryeugene/dadbod-grip.nvim",
-  requires = { "tpope/vim-dadbod" },
 }
 ```
 
@@ -564,14 +559,9 @@ Open each table with `:Grip <table_name>` and verify rendering, editing, sort/fi
 
 ## Ecosystem
 
-### Required
-
-- **[vim-dadbod](https://github.com/tpope/vim-dadbod)** provides the database adapter layer (`:DB` command, connection URLs).
-
-### Recommended
-
+- **[vim-dadbod](https://github.com/tpope/vim-dadbod)** started Vim database tooling. Optional. If installed, grip reads its `g:db`/`g:dbs` variables as connection sources for smooth migration from existing dadbod or DBUI setups.
 - **[vim-dadbod-completion](https://github.com/kristijanhusak/vim-dadbod-completion)** adds SQL table and column completion in the query pad.
-- **[vim-dadbod-ui](https://github.com/kristijanhusak/vim-dadbod-ui)** is a sidebar tree browser with saved queries and two-pane SQL workflow. Optional since grip has its own schema browser and query pad.
+- **[vim-dadbod-ui](https://github.com/kristijanhusak/vim-dadbod-ui)** is a sidebar tree browser with saved queries. Optional since grip has its own schema browser and query pad.
 
 ---
 

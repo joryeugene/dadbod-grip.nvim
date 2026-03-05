@@ -22,7 +22,6 @@ Then work through the checklists below. Each section is independent.
 | Tool | Check | Install |
 |------|-------|---------|
 | Neovim 0.10+ | `nvim --version` | https://neovim.io |
-| vim-dadbod | lazy.nvim dep | `tpope/vim-dadbod` |
 | sqlite3 | `sqlite3 --version` | `apt install sqlite3` |
 | psql | `psql --version` | `apt install postgresql-client` |
 | mysql | `mysql --version` | `apt install mysql-client` |
