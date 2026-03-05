@@ -74,8 +74,10 @@ local function read_json_connections(path, source)
   local result = {}
   for _, entry in ipairs(data) do
     if type(entry) == "table" and entry.name and entry.url then
-      table.insert(result, { name = entry.name, url = entry.url,
-                             type = entry.type, source = source or "file" })
+      local c = { name = entry.name, url = entry.url,
+                  type = entry.type, source = source or "file" }
+      if entry.attachments then c.attachments = entry.attachments end
+      table.insert(result, c)
     end
   end
   return result
@@ -102,6 +104,7 @@ local function write_file_connections(conns)
   for _, c in ipairs(conns) do
     local entry = { name = c.name, url = c.url }
     if c.type then entry.type = c.type end
+    if c.attachments and #c.attachments > 0 then entry.attachments = c.attachments end
     table.insert(data, entry)
   end
   local json = vim.fn.json_encode(data)
@@ -327,6 +330,21 @@ function M.switch(url, name, conn_type, opts)
 
   -- Regular DB connection: set vim.g.db and open full workspace
   vim.g.db = url
+
+  -- Restore persisted attachments for DuckDB connections
+  if url:find("^duckdb:") then
+    local stored_atts
+    for _, c in ipairs(file_conns) do
+      if c.url == url and c.attachments then
+        stored_atts = c.attachments
+        break
+      end
+    end
+    if stored_atts then
+      require("dadbod-grip.adapters.duckdb").load_attachments(url, stored_atts)
+    end
+  end
+
   vim.notify("Grip: connected to " .. (name or url), vim.log.levels.INFO)
 
   vim.schedule(function()
@@ -372,6 +390,28 @@ function M.current()
     end
   end
   return { name = nil, url = url }
+end
+
+--- Persist attachments for a DuckDB connection URL.
+--- Called after attach/detach to update .grip/connections.json.
+function M.save_attachments(url, attachments)
+  local file_conns = read_file_connections()
+  local found = false
+  for _, c in ipairs(file_conns) do
+    if c.url == url then
+      c.attachments = attachments and #attachments > 0 and {} or nil
+      if attachments then
+        for _, a in ipairs(attachments) do
+          table.insert(c.attachments, { dsn = a.dsn, alias = a.alias })
+        end
+      end
+      found = true
+      break
+    end
+  end
+  if found then
+    write_file_connections(file_conns)
+  end
 end
 
 --- Prompt user to enter a new connection URL + name, then switch to it.
@@ -546,6 +586,39 @@ function M.pick()
           else
             show_pass[c.url] = true
           end
+        end,
+      },
+      {
+        key            = "a",
+        label          = "a:attach",
+        close_on_select = true,
+        when           = function(c)
+          if c._new or c._temp then return false end
+          -- Show on non-DuckDB connections when current connection is DuckDB
+          local cur = vim.g.db
+          return cur and cur:find("^duckdb:") and not c.url:find("^duckdb:")
+        end,
+        fn             = function(c)
+          local CANCEL = "\0"
+          local default_alias = c.name:lower():gsub("[^%w_]", "_"):gsub("_+", "_"):gsub("^_", ""):gsub("_$", "")
+          local ok, alias = pcall(vim.fn.input, {
+            prompt = "Attach as alias: ",
+            default = default_alias,
+            cancelreturn = CANCEL,
+          })
+          if not ok or alias == CANCEL or alias == "" then return end
+          local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
+          local schema_mod = require("dadbod-grip.schema")
+          local url = vim.g.db
+          local dsn = duckdb_adapter.url_to_dsn(c.url)
+          local err = duckdb_adapter.attach(url, dsn, alias)
+          if err then
+            vim.notify("Attach failed: " .. err, vim.log.levels.ERROR)
+            return
+          end
+          M.save_attachments(url, duckdb_adapter.get_attachments(url))
+          schema_mod.refresh(url)
+          vim.notify(string.format("Attached '%s' as %s", c.name, alias))
         end,
       },
     },

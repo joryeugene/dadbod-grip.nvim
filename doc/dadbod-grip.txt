@@ -29,6 +29,7 @@ CONTENTS                                                    *grip-contents*
   20. Table Profiling .......... |grip-profiling|
   21. Query Doctor ............. |grip-explain-full|
   22. AI SQL Generation ........ |grip-ai|
+  23. Cross-DB Federation ...... |grip-federation|
 
 ==============================================================================
 1. INTRODUCTION                                          *grip-introduction*
@@ -221,6 +222,30 @@ All commands are global and available after the plugin loads.
 :GripDrop [table]
   Drop a table with typed confirmation (must type table name to confirm).
   Detects foreign key dependents and offers CASCADE if they exist.
+
+                                                              *:GripAttach*
+:GripAttach [dsn] [alias]
+  Attach an external database to the current DuckDB session. The attached
+  database becomes queryable via its alias in SQL (e.g. pg.users,
+  local.orders). Extensions (postgres_scanner, mysql_scanner,
+  sqlite_scanner, motherduck) are installed and loaded automatically.
+
+  If no arguments are provided, prompts for DSN and alias interactively.
+
+  Examples: >
+    :GripAttach postgres:dbname=sales host=localhost user=me  sales
+    :GripAttach sqlite:legacy.db  legacy
+    :GripAttach mysql:host=db.internal user=reader database=shop  shop
+    :GripAttach md:shared_analytics  cloud
+<
+  Attachments persist in .grip/connections.json under the parent connection
+  and are restored on reconnect.
+
+                                                              *:GripDetach*
+:GripDetach [alias]
+  Detach a previously attached database. Removes it from the session and
+  from persisted connection metadata. The schema sidebar updates to remove
+  the database section.
 
 ==============================================================================
 6. KEYBINDINGS                                           *grip-keybindings*
@@ -594,6 +619,10 @@ files via DuckDB's httpfs extension. The extension is loaded automatically.
 HTTP queries use a 30-second timeout. Supported formats are the same as
 file-as-table. All remote queries open in read-only mode.
 
+DuckDB federation: attach external databases via :GripAttach. Supports
+PostgreSQL (postgres_scanner), MySQL (mysql_scanner), SQLite
+(sqlite_scanner), and MotherDuck. See |grip-federation| for details.
+
 ==============================================================================
 17. PUBLIC API                                                  *grip-api*
 
@@ -722,6 +751,45 @@ Override with setup({ai={provider="openai"}}).
 
 API key resolution: env var name, "env:CUSTOM_VAR", "cmd:op read ...",
 or a direct string. See |grip-config| for the full ai config block.
+
+==============================================================================
+23. CROSS-DB FEDERATION                                    *grip-federation*
+
+DuckDB can attach external databases and query across them in a single
+session. Grip exposes this through :GripAttach and :GripDetach commands.
+
+Attach a PostgreSQL database: >
+  :GripAttach postgres:dbname=sales host=localhost user=me  pg
+<
+Attach a local SQLite file: >
+  :GripAttach sqlite:legacy.db  legacy
+<
+Query across both plus the local DuckDB: >
+  :Grip SELECT p.name, l.total
+    FROM pg.customers p
+    JOIN legacy.orders l ON p.id = l.customer_id
+    WHERE l.total > 1000
+<
+The schema sidebar groups tables by database when attachments are active:
+
+  main (12 tables)
+  pg (8 tables)
+  legacy (3 tables)
+
+MotherDuck (cloud DuckDB) works as both a primary connection and an
+attachment: >
+  :GripAttach md:shared_analytics  cloud
+<
+Extensions are managed automatically. Attaching a postgres: DSN installs
+and loads postgres_scanner. Attaching sqlite: loads sqlite_scanner.
+Attaching md: loads motherduck.
+
+Attachments persist in .grip/connections.json under the parent DuckDB
+connection. They restore automatically when you reconnect.
+
+Sidebar keymaps for federation (DuckDB connections only):
+  ga              Attach external database (prompts for DSN and alias)
+  gd              Detach attached database (prompts for alias)
 
 ==============================================================================
 vim:tw=78:ts=8:ft=help:norl:

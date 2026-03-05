@@ -2012,6 +2012,85 @@ function M.setup(opts)
     desc  = "Switch database connection",
   })
 
+  -- :GripAttach [dsn] [alias] — attach external DB to DuckDB session
+  vim.api.nvim_create_user_command("GripAttach", function(cmd_opts)
+    local connections = require("dadbod-grip.connections")
+    local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
+    local schema_mod = require("dadbod-grip.schema")
+
+    local url = vim.g.db
+    if not url or not url:find("^duckdb:") then
+      vim.notify("GripAttach: requires a DuckDB connection. Use :GripConnect to switch.", vim.log.levels.WARN)
+      return
+    end
+
+    local args = vim.split(vim.trim(cmd_opts.args or ""), "%s+")
+    local dsn, alias
+    if #args >= 2 then
+      alias = args[#args]
+      dsn = table.concat(args, " ", 1, #args - 1)
+    else
+      local CANCEL = "\0"
+      local ok_d, d = pcall(vim.fn.input, { prompt = "Connection (e.g. postgres:dbname=mydb user=me): ", cancelreturn = CANCEL })
+      if not ok_d or d == CANCEL or d == "" then return end
+      dsn = d
+      local ok_a, a = pcall(vim.fn.input, { prompt = "Alias (used in queries, e.g. pg): ", cancelreturn = CANCEL })
+      if not ok_a or a == CANCEL or a == "" then return end
+      alias = a
+    end
+
+    local err = duckdb_adapter.attach(url, dsn, alias)
+    if err then
+      vim.notify("GripAttach: " .. err, vim.log.levels.ERROR)
+      return
+    end
+    connections.save_attachments(url, duckdb_adapter.get_attachments(url))
+    schema_mod.refresh(url)
+    vim.notify(string.format("Attached '%s' as %s", dsn, alias))
+  end, {
+    nargs = "*",
+    desc  = "Attach external database to DuckDB session",
+  })
+
+  -- :GripDetach [alias] — detach a previously attached database
+  vim.api.nvim_create_user_command("GripDetach", function(cmd_opts)
+    local connections = require("dadbod-grip.connections")
+    local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
+    local schema_mod = require("dadbod-grip.schema")
+
+    local url = vim.g.db
+    if not url or not url:find("^duckdb:") then
+      vim.notify("GripDetach: requires a DuckDB connection.", vim.log.levels.WARN)
+      return
+    end
+
+    local alias = vim.trim(cmd_opts.args or "")
+    if alias == "" then
+      local atts = duckdb_adapter.get_attachments(url)
+      if #atts == 0 then
+        vim.notify("GripDetach: no databases attached.", vim.log.levels.INFO)
+        return
+      end
+      local CANCEL = "\0"
+      local names = {}
+      for _, a in ipairs(atts) do table.insert(names, a.alias) end
+      local ok, val = pcall(vim.fn.input, {
+        prompt = "Detach alias (" .. table.concat(names, ", ") .. "): ",
+        cancelreturn = CANCEL,
+      })
+      if not ok or val == CANCEL or val == "" then return end
+      alias = val
+    end
+
+    duckdb_adapter.detach(url, alias)
+    connections.save_attachments(url, duckdb_adapter.get_attachments(url))
+    schema_mod.refresh(url)
+    vim.notify(string.format("Detached '%s'", alias))
+  end, {
+    nargs = "?",
+    desc  = "Detach database from DuckDB session",
+  })
+
   -- :GripStart — open the Softrear Analyst Portal directly
   vim.api.nvim_create_user_command("GripStart", function()
     local connections = require("dadbod-grip.connections")
@@ -2027,11 +2106,22 @@ function M.setup(opts)
           local bin = db_path:match("%.duckdb$") and "duckdb" or "sqlite3"
           vim.fn.system(bin .. " " .. vim.fn.shellescape(db_path)
             .. " < " .. vim.fn.shellescape(c._demo_sql))
+          -- Seed supplier intel database for federation demo
+          local supplier_sql_files = vim.api.nvim_get_runtime_file("demo/softrear_supplier.sql", false)
+          if #supplier_sql_files > 0 then
+            local grip_dir = vim.fn.getcwd() .. "/.grip"
+            vim.fn.mkdir(grip_dir, "p")
+            local supplier_db = grip_dir .. "/supplier_intel.db"
+            if vim.fn.filereadable(supplier_db) == 1 then vim.fn.delete(supplier_db) end
+            vim.fn.system("sqlite3 " .. vim.fn.shellescape(supplier_db)
+              .. " < " .. vim.fn.shellescape(supplier_sql_files[1]))
+          end
         end
+
         connections.switch(c.url)
         vim.schedule(function()
           vim.notify(
-            "Softrear Inc. Analyst Portal\xe2\x84\xa2  \xe2\x80\x94  walkthrough: docs/softrear-internal.md",
+            "Softrear Inc. Analyst Portal\xe2\x84\xa2  .  walkthrough: demo/softrear-internal.md",
             vim.log.levels.INFO
           )
         end)

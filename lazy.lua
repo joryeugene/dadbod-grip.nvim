@@ -22,5 +22,7 @@ return {
     "GripRename",
     "GripProperties",
     "GripExport",
+    "GripAttach",
+    "GripDetach",
   },
 }

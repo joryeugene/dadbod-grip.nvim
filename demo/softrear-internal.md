@@ -387,3 +387,106 @@ softness_score zero still ships. The person who had the recipe was acquired and
 now works in R&D.
 
 The data was here the whole time.
+
+---
+
+## Cross the organizational boundary
+
+The internal investigation hit a wall at the Bamboo Don. The supplier is under
+embargo. Internal data cannot explain what happened on the other side of that
+relationship.
+
+A leaked supplier logistics database has arrived. It covers shipments,
+ingredient testing, and pricing.
+
+Attach it:
+
+```vim
+:GripAttach sqlite:.grip/supplier_intel.db  supplier
+```
+
+The schema sidebar updates. A new `supplier` section appears below `main` with
+three tables: `shipments`, `ingredient_tests`, `pricing`.
+
+### Join across databases
+
+Open the query pad (`q`). Write a cross-database join:
+
+```sql
+SELECT
+  s.ship_date,
+  s.declared_contents,
+  s.actual_contents,
+  pb.quality_score,
+  pb.recall
+FROM supplier.shipments s
+JOIN production_batches pb
+  ON pb.facility_id = (
+    SELECT id FROM facilities WHERE facility_name LIKE '%Shanghai%'
+  )
+  AND s.ship_date BETWEEN pb.batch_date AND pb.batch_date
+WHERE s.supplier_alias = 'Bamboo Don'
+ORDER BY s.ship_date
+```
+
+Press `<C-CR>`.
+
+Every shipment from Bamboo Don declared `Grade A Bamboo Fiber`. The
+`actual_contents` column reads `Grade C Mixed Pulp` for every row that maps to
+a recalled production batch.
+
+### Check the ingredient tests
+
+```sql
+SELECT
+  it.batch_ref,
+  it.bamboo_grade,
+  it.contaminant_level,
+  it.passed,
+  it.tester_notes
+FROM supplier.ingredient_tests it
+WHERE it.passed = 0
+ORDER BY it.contaminant_level DESC
+```
+
+Three failed tests. The highest contaminant level is 8.7 (scale of 10). The
+tester notes for that row: "Sample relabeled before customs. Original grade: C."
+
+### The pricing arrangement
+
+```sql
+SELECT
+  p.supplier_alias,
+  p.territory,
+  p.price_per_ton,
+  p.discount_pct,
+  p.loyalty_tier
+FROM supplier.pricing p
+ORDER BY p.discount_pct DESC
+```
+
+The Shanghai territory pays 40% less per ton under `loyalty_tier = 'founding_partner'`.
+Every other territory pays full price.
+
+The supply chain root cause is now complete: discounted supplier, relabeled
+ingredients, failed quality tests, recalled batches, zero-softness product,
+severity-10 incidents, and a person who knew too much who was acquired.
+
+### Detach when done
+
+```vim
+:GripDetach supplier
+```
+
+The sidebar returns to the original 17 tables.
+
+---
+
+## Updated feature coverage
+
+| Feature | Key | What it did |
+|---------|-----|-------------|
+| Attach external DB | `:GripAttach` | Connected supplier logistics database to DuckDB session |
+| Cross-DB JOIN | Query pad `<C-CR>` | Joined supplier shipments with internal production batches |
+| Schema grouping | Sidebar | Showed `supplier` section with 3 tables alongside `main` |
+| Detach | `:GripDetach` | Removed external database, sidebar restored |

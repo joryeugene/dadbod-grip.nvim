@@ -126,6 +126,8 @@
 | `gC` / `<C-g>` | Switch database connection |
 | `gW` | Toggle watch mode (auto-refresh on timer) |
 | `g!` | Toggle write mode (apply overwrites file) |
+| `:GripAttach` | Attach external DB to DuckDB (Postgres, MySQL, SQLite, MotherDuck) |
+| `:GripDetach` | Detach attached database |
 | `q` | Open query pad |
 | `gq` | Load saved query |
 | `gh` | Query history browser |
@@ -151,6 +153,8 @@
 | `gq` | Load saved query into query pad |
 | `gh` | Query history → load into query pad |
 | `gC` / `gc` / `<C-g>` | Switch connection |
+| `ga` | Attach external DB (DuckDB federation) |
+| `gd` | Detach attached database |
 | `?` | Show help |
 | `1` | Table picker |
 | `2-9` | Same tab views as grid (2=Records, 3=History, 4=Stats, 5=Explain, 6=Columns, 7=FK, 8=Indexes, 9=Constraints) |
@@ -160,4 +164,5 @@
 Available for future features. Check this list before assigning a new `g` keymap:
 
 **Uppercase (free):** `gA` (query pad only), `gB`, `gG`, `gJ`, `gK`, `gL`, `gM`, `gQ`, `gU`, `gZ`
-**Lowercase (free):** `gd`, `gm`, `gr`, `gw`
+**Lowercase (free in grid):** `gd`, `gm`, `gr`, `gw`
+**Lowercase (free in sidebar):** `gm`, `gr`

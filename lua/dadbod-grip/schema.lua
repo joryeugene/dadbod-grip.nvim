@@ -180,74 +180,133 @@ local function build_nodes(state)
 
   if not state.items then return nodes end
 
-  local tables = {}
-  local views = {}
+  -- Check if any items have schema grouping (cross-database federation)
+  local has_schemas = false
   for _, item in ipairs(state.items) do
-    if state.filter then
-      if not item.name:lower():find(state.filter:lower(), 1, true) then
-        goto continue
-      end
-    end
-    if item.type == "view" then
-      table.insert(views, item)
-    else
-      table.insert(tables, item)
-    end
-    ::continue::
+    if item.schema then has_schemas = true; break end
   end
 
-  -- Tables section
-  if #tables > 0 then
-    table.insert(nodes, { kind = "header", text = "Tables (" .. #tables .. ")" })
-    for _, item in ipairs(tables) do
-      local expanded = state.expanded[item.name] or false
-      table.insert(nodes, { kind = "table", name = item.name, type = item.type, expanded = expanded })
+  if has_schemas then
+    -- Group by schema, then tables/views within each schema
+    local schema_order = {}
+    local by_schema = {}
+    for _, item in ipairs(state.items) do
+      if state.filter then
+        local base = item.name:match("%.(.+)$") or item.name
+        if not base:lower():find(state.filter:lower(), 1, true) then
+          goto continue_schema
+        end
+      end
+      local s = item.schema or "main"
+      if not by_schema[s] then
+        by_schema[s] = {}
+        table.insert(schema_order, s)
+      end
+      table.insert(by_schema[s], item)
+      ::continue_schema::
+    end
 
-      if expanded then
-        ensure_columns(state, item.name)
-        local cols = state.col_cache[item.name] or {}
-        local pk_set = state.pk_cache[item.name] or {}
-        local fk_map = state.fk_cache[item.name] or {}
+    for si, schema_name in ipairs(schema_order) do
+      local items = by_schema[schema_name]
+      if si > 1 then table.insert(nodes, { kind = "sep" }) end
+      table.insert(nodes, { kind = "header", text = schema_name .. " (" .. #items .. ")" })
 
-        for _, col in ipairs(cols) do
-          local is_pk = pk_set[col.column_name] or false
-          local is_fk = fk_map[col.column_name] ~= nil
-          table.insert(nodes, {
-            kind = "column",
-            name = col.column_name,
-            dtype = abbrev_type(col.data_type),
-            pk = is_pk,
-            fk = is_fk,
-            fk_ref = fk_map[col.column_name],
-            table_name = item.name,
-          })
+      for _, item in ipairs(items) do
+        local display = item.name:match("%.(.+)$") or item.name
+        local expanded = state.expanded[item.name] or false
+        table.insert(nodes, { kind = "table", name = item.name, display = display, type = item.type, expanded = expanded })
+
+        if expanded then
+          ensure_columns(state, item.name)
+          local cols = state.col_cache[item.name] or {}
+          local pk_set = state.pk_cache[item.name] or {}
+          local fk_map = state.fk_cache[item.name] or {}
+
+          for _, col in ipairs(cols) do
+            local is_pk = pk_set[col.column_name] or false
+            local is_fk = fk_map[col.column_name] ~= nil
+            table.insert(nodes, {
+              kind = "column",
+              name = col.column_name,
+              dtype = abbrev_type(col.data_type),
+              pk = is_pk,
+              fk = is_fk,
+              fk_ref = fk_map[col.column_name],
+              table_name = item.name,
+            })
+          end
         end
       end
     end
-  end
-
-  -- Views section
-  if #views > 0 then
-    if #tables > 0 then
-      table.insert(nodes, { kind = "sep" })
+  else
+    -- Original flat layout: Tables section, then Views section
+    local tables = {}
+    local views = {}
+    for _, item in ipairs(state.items) do
+      if state.filter then
+        if not item.name:lower():find(state.filter:lower(), 1, true) then
+          goto continue
+        end
+      end
+      if item.type == "view" then
+        table.insert(views, item)
+      else
+        table.insert(tables, item)
+      end
+      ::continue::
     end
-    table.insert(nodes, { kind = "header", text = "Views (" .. #views .. ")" })
-    for _, item in ipairs(views) do
-      local expanded = state.expanded[item.name] or false
-      table.insert(nodes, { kind = "table", name = item.name, type = item.type, expanded = expanded })
 
-      if expanded then
-        ensure_columns(state, item.name)
-        local cols = state.col_cache[item.name] or {}
-        for _, col in ipairs(cols) do
-          table.insert(nodes, {
-            kind = "column",
-            name = col.column_name,
-            dtype = abbrev_type(col.data_type),
-            pk = false,
-            fk = false,
-            table_name = item.name,
-          })
+    if #tables > 0 then
+      table.insert(nodes, { kind = "header", text = "Tables (" .. #tables .. ")" })
+      for _, item in ipairs(tables) do
+        local expanded = state.expanded[item.name] or false
+        table.insert(nodes, { kind = "table", name = item.name, type = item.type, expanded = expanded })
+
+        if expanded then
+          ensure_columns(state, item.name)
+          local cols = state.col_cache[item.name] or {}
+          local pk_set = state.pk_cache[item.name] or {}
+          local fk_map = state.fk_cache[item.name] or {}
+
+          for _, col in ipairs(cols) do
+            local is_pk = pk_set[col.column_name] or false
+            local is_fk = fk_map[col.column_name] ~= nil
+            table.insert(nodes, {
+              kind = "column",
+              name = col.column_name,
+              dtype = abbrev_type(col.data_type),
+              pk = is_pk,
+              fk = is_fk,
+              fk_ref = fk_map[col.column_name],
+              table_name = item.name,
+            })
+          end
+        end
+      end
+    end
+
+    if #views > 0 then
+      if #tables > 0 then
+        table.insert(nodes, { kind = "sep" })
+      end
+      table.insert(nodes, { kind = "header", text = "Views (" .. #views .. ")" })
+      for _, item in ipairs(views) do
+        local expanded = state.expanded[item.name] or false
+        table.insert(nodes, { kind = "table", name = item.name, type = item.type, expanded = expanded })
+
+        if expanded then
+          ensure_columns(state, item.name)
+          local cols = state.col_cache[item.name] or {}
+          for _, col in ipairs(cols) do
+            table.insert(nodes, {
+              kind = "column",
+              name = col.column_name,
+              dtype = abbrev_type(col.data_type),
+              pk = false,
+              fk = false,
+              table_name = item.name,
+            })
+          end
         end
       end
     end
@@ -300,15 +359,18 @@ local function render(state)
 
   local cur_tbl = nil
   for _, node in ipairs(nodes) do
-    if node.kind == "header" then
+    if node.kind == "sep" then
+      table.insert(lines, "")
+    elseif node.kind == "header" then
       table.insert(lines, " " .. node.text)
       table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripHeader" })
     elseif node.kind == "table" then
       cur_tbl = node.name
       local arrow = node.expanded and " ▼ " or " ▶ "
       local max_name = SIDEBAR_MAX_WIDTH - 3  -- subtract arrow chars
-      local display_name = #node.name > max_name
-          and ("…" .. node.name:sub(-(max_name - 1))) or node.name
+      local label = node.display or node.name
+      local display_name = #label > max_name
+          and ("…" .. label:sub(-(max_name - 1))) or label
       table.insert(lines, arrow .. display_name)
       -- No special hl for table names — keep it clean
     elseif node.kind == "column" then
@@ -746,6 +808,24 @@ local function setup_keymaps(url)
     end)
   end
 
+  -- ga: attach external DB (DuckDB federation)
+  map("ga", function()
+    if not url or not url:find("^duckdb:") then
+      vim.notify("Attach requires a DuckDB connection.", vim.log.levels.WARN)
+      return
+    end
+    vim.cmd("GripAttach")
+  end)
+
+  -- gd: detach external DB
+  map("gd", function()
+    if not url or not url:find("^duckdb:") then
+      vim.notify("Detach requires a DuckDB connection.", vim.log.levels.WARN)
+      return
+    end
+    vim.cmd("GripDetach")
+  end)
+
   -- Close
   map("<Esc>", function() M.close() end)
 
@@ -789,6 +869,8 @@ local function setup_keymaps(url)
       "  gh        Query history",
       "  gq        Saved queries",
       "  q         Query pad",
+      "  ga        Attach external DB (DuckDB federation)",
+      "  gd        Detach attached database",
       "  D         Drop table (confirm)",
       "  +         Create table",
       "  Esc       Close sidebar",
@@ -960,15 +1042,16 @@ end
 
 --- Refresh sidebar if visible (e.g., after connection switch).
 function M.refresh(url)
-  if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
   if not url then return end
   local state = get_state(url)
+  -- Always invalidate cached tables so fresh data is fetched on next open
   state.items = nil
   state.col_cache = {}
   state.pk_cache = {}
   state.fk_cache = {}
+  -- Only re-render if sidebar is currently visible
+  if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
   fetch_tables(state)
-  -- Re-setup keymaps for new URL
   if _sidebar_bufnr and vim.api.nvim_buf_is_valid(_sidebar_bufnr) then
     setup_keymaps(url)
   end

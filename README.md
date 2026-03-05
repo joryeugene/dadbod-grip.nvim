@@ -19,11 +19,11 @@ Connect to PostgreSQL, MySQL, SQLite, DuckDB, or MotherDuck and edit tables like
 </td>
 <td align="center" valign="middle" width="180">
 <img src="assets/mascot.gif" width="160" alt="Chonk the dadbod-grip mascot"><br>
-<sub><b>Chonk</b> ᕦ( ᐛ )ᕤ</sub>
+<sub><b>Chonk</b></sub>
 </td>
 </tr></table>
 
-**Edit database tables like Vim buffers.** Rows are color-coded as you stage changes: teal for modified, red for deleted, green for inserted. A live SQL float generates the exact DML as you work. Preview the full mutation before it touches the DB, then apply in a single transaction. Reverse committed transactions. Navigate foreign keys through a breadcrumb trail. Browse schema in a sidebar with PK/FK markers and instant table open. Issue DDL through the UI: create tables, rename columns, drop with CASCADE. Profile column distributions with sparklines. Explain query plans in plain English. Generate SQL from natural language via Anthropic, OpenAI, Gemini, or Ollama. Open Parquet, CSV, and remote URLs as live DuckDB tables — with `--write` to edit files in-place and `--watch` to auto-refresh on a timer. Connects to PostgreSQL, SQLite, MySQL, and DuckDB. Every Vim motion works. Nothing installs outside Neovim.
+**Connect to PostgreSQL, MySQL, SQLite, or DuckDB and edit tables like Vim buffers.** With DuckDB as a hub, attach any combination of these databases with `:GripAttach` and JOIN data across all of them in a single query. Open Parquet, CSV, and remote URLs as live tables. Connect to MotherDuck for cloud analytics. Rows are color-coded as you stage changes: teal for modified, red for deleted, green for inserted. A live SQL float generates the exact DML as you work. Preview the full mutation before it touches the DB, then apply in a single transaction. Reverse committed transactions. Navigate foreign keys through a breadcrumb trail. Browse schema in a sidebar with PK/FK markers and instant table open. Issue DDL through the UI: create tables, rename columns, drop with CASCADE. Profile column distributions with sparklines. Explain query plans in plain English. Generate SQL from natural language via Anthropic, OpenAI, Gemini, or Ollama. Edit files in-place with `--write` and auto-refresh on a timer with `--watch`. Every Vim motion works. Nothing installs outside Neovim.
 
 | **Editing** | **Analysis** | **Schema & AI** |
 |---|---|---|
@@ -31,7 +31,8 @@ Connect to PostgreSQL, MySQL, SQLite, DuckDB, or MotherDuck and edit tables like
 | **Batch edit** visual-mode multi-row ops | **Query Doctor** plain-English EXPLAIN | **DDL** create · rename · drop via UI |
 | **Mutation preview** full SQL before apply | **Visual staging** blue · green · red rows | **File as table** Parquet · CSV · remote URLs |
 | **Transaction undo** reverse committed changes | **Live SQL preview** float updates as you stage | **AI SQL** Anthropic · OpenAI · Gemini · Ollama |
-| **Schema browser** `gb` sidebar, PK/FK markers | **Data diff** `gD` compare tables by primary key | **Multi-DB** PostgreSQL · SQLite · MySQL · DuckDB |
+| **Schema browser** `gb` sidebar, PK/FK markers | **Data diff** `gD` compare tables by primary key | **Multi-DB** PostgreSQL · SQLite · MySQL · DuckDB · MotherDuck |
+| **Cross-DB federation** `:GripAttach` Postgres · MySQL · SQLite · MotherDuck in one DuckDB session | **Column filter builder** `gF` with operators and wildcards | **Schema grouping** sidebar sections per attached database |
 | **Saved queries** project-local `.grip/queries/` | **Export** CSV · TSV · JSON · SQL · Markdown · Table | **Connection profiles** global auto-persist |
 | **Tab views** `1`-`9` History · Stats · Explain · Columns · FK | **Column Stats** `4` null% · distinct · min · max | **Query History** `3` filtered per table |
 | **Write mode** `:Grip file --write` · edit files and write back to disk | **Watch mode** `:Grip file --watch` · auto-refresh grid on a timer | **Picker `W` / `!`** open any connection in watch or write mode |
@@ -65,7 +66,32 @@ https://host/data.parquet  ← remote file via httpfs
 duckdb::memory:            ← single-query scratch (tables don't persist between queries)
 ```
 
+### Cross-database federation (DuckDB as hub)
+
+```vim
+:GripAttach postgres:dbname=sales host=localhost user=me  pg
+:GripAttach sqlite:legacy.db  legacy
+:GripAttach md:cloud_analytics  cloud
+```
+
+Then query across all of them:
+
+```sql
+SELECT pg.customers.name, legacy.orders.total
+FROM pg.customers JOIN legacy.orders ON pg.customers.id = legacy.orders.customer_id
+```
+
+Extensions install automatically. Attachments persist and restore on reconnect.
+
 ## Features
+
+### Multi-Engine and Federation
+- **PostgreSQL, MySQL, SQLite, DuckDB, MotherDuck.** Schema browsing, inline editing, and metadata inspection for each engine.
+- **Cross-database federation** via DuckDB. Attach a PostgreSQL production database and a local SQLite alongside a DuckDB analytics file with `:GripAttach`, then JOIN across all three with standard SQL.
+- **MotherDuck cloud** works as a primary connection or as an attachment to a local DuckDB session.
+- **Parquet, CSV, JSON, and remote URLs** open as live editable tables via DuckDB. No database connection needed for file queries.
+- **Extensions auto-install.** Attaching `postgres:` loads `postgres_scanner`. Attaching `sqlite:` loads `sqlite_scanner`. No manual INSTALL/LOAD.
+- **Attachments persist** in `.grip/connections.json` and restore automatically when you reconnect.
 
 ### Data Editing
 - **Inline cell editing** with a popup editor, NULL handling, and type-aware display.
