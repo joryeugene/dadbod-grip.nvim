@@ -123,11 +123,13 @@
 | `gT` / `gt` | Pick table (floating picker) |
 | `gb` | Schema browser sidebar (toggle/focus) |
 | `gO` | Open as editable table (read-only → table) |
+| `gG` | ER diagram float (tables + FK relationships) |
 | `gC` / `<C-g>` | Switch database connection |
 | `gW` | Toggle watch mode (auto-refresh on timer) |
 | `g!` | Toggle write mode (apply overwrites file) |
 | `:GripAttach` | Attach external DB to DuckDB (Postgres, MySQL, SQLite, MotherDuck) |
 | `:GripDetach` | Detach attached database |
+| `:GripOpen [path]` | Open file/HTTPS/s3:// without saving to connections (no arg = picker) |
 | `q` | Open query pad |
 | `gq` | Load saved query |
 | `gh` | Query history browser |
@@ -157,14 +159,32 @@
 | `gC` / `gc` / `<C-g>` | Switch connection |
 | `ga` | Attach external DB (DuckDB federation) |
 | `gd` | Detach attached database |
+| `gG` | ER diagram float (all tables + FK relationships) |
 | `?` | Show help |
 | `1` | Table picker |
 | `2-9` | Same tab views as grid (2=Records, 3=History, 4=Stats, 5=Explain, 6=Columns, 7=FK, 8=Indexes, 9=Constraints) |
 
-## Free `g` Keymaps (as of v2.9)
+## Free `g` Keymaps (as of v3.1)
 
 Available for future features. Check this list before assigning a new `g` keymap:
 
-**Uppercase (free):** `gA` (query pad only), `gB`, `gG`, `gJ`, `gK`, `gL`, `gM`, `gQ`, `gU`, `gZ`
+**Uppercase (free):** `gA` (query pad only), `gB`, `gJ`, `gK`, `gL`, `gM`, `gQ`, `gU`, `gZ`
 **Lowercase (free in grid):** `gd`, `gm`, `gr`, `gw`
 **Lowercase (free in sidebar):** `gm`, `gr`
+
+## Key Design Principles
+
+Surface | `q` | `<Esc>` | `?` | `gC`/`<C-g>` | `gc` | `gb` | `gG`
+--------|-----|---------|-----|--------------|------|------|-----
+Grid | query pad | (nothing) | help | connections | copy staged SQL | sidebar | ER diagram
+Sidebar | query pad | close | help | connections | connections | close | ER diagram
+Query pad | welcome screen | (nothing) | help | (nothing) | (nothing) | (nothing) | (nothing)
+Modal floats | close | close | (nothing) | (nothing) | (nothing) | (nothing) | close (toggle)
+
+Notes:
+- `q` means "to query pad" from grid/sidebar; "welcome screen" from query pad; "close" in modal floats
+- Uppercase `gX` = global/navigation actions (connections, schema browser, ER diagram)
+- Lowercase `gx` = local inspection/analysis actions (FK follow, explain, export)
+- `?` = help everywhere, always
+- `gc` in grid = "copy staged SQL" (legacy DBUI compat); `gc` in sidebar = connections
+- `:GripOpen` = command only, no grid keymap (`gO` is taken: read-only to editable)

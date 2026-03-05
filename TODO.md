@@ -23,9 +23,12 @@ Not committed to any release. Roughly ordered by expected impact.
 - [ ] pgvector support (render `vector` columns in row view, `gF` generates `ORDER BY vec <=> $1 LIMIT N` similarity queries, profiling shows dimension count and index type)
 
 ### High Value -- Adapters
+- [ ] Snowflake adapter (snowsql CLI, auth delegated to `~/.snowsql/config`, 3-level hierarchy database/schema/table, `SHOW TABLES IN DATABASE` metadata, warehouse selection)
+- [ ] BigQuery adapter (bq CLI, auth via gcloud ADC, project/dataset/table hierarchy, `bq show --format=json` for schema, `bq query --use_legacy_sql=false`)
 - [ ] MSSQL adapter (sqlcmd CLI, `mssql://` scheme, sys.tables/sys.columns metadata, SET STATISTICS for explain, TOP N pagination, `##temp` table support)
 - [ ] Turso/libSQL adapter (extend SQLite adapter with HTTP transport, auth token in URL, branch management via `:GripBranch`, time-travel queries)
 - [ ] CockroachDB adapter (extend PostgreSQL adapter, `cockroachdb://` scheme, CDC changefeed exposure, multi-region config display in properties)
+- [ ] MongoDB: deprioritized; document model incompatible with grid renderer; needs separate path (JSON tree view, not tabular)
 
 ### Medium Value
 - [ ] Column reordering via keymap (`<` / `>` to shift column left/right)

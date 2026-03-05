@@ -71,8 +71,8 @@ p50      5.9          top val    4.1 (11 rows)
 ```
 
 The max is 47.0. The median is 5.9. One product has a tensile strength of 47.0;
-for reference, standard denim is around 40. Navigate to the `sku` column, press
-`s`, and choose descending by `tensile_strength`.
+for reference, standard denim is around 40. Navigate to the `tensile_strength`
+column. Press `s` twice to sort descending (ASC then DESC).
 
 The top row is `TITANIUM_TRIPLE_PLY`, tensile strength 47.0. This product is
 physically capable of resisting damage. It is also listed in `consumer_incidents`
@@ -83,7 +83,7 @@ Plumber invoice attached."
 
 ## Consumer incidents: sort by severity
 
-Navigate to `consumer_incidents`. Sort by `severity` descending.
+Navigate to `consumer_incidents`. Navigate to the `severity` column. Press `s` twice to sort descending.
 
 Every row with `severity = 10` has `incident_type = 'airplane'`, without
 exception. There are dozens of them. Airline bathrooms represent a structural
@@ -100,17 +100,15 @@ The notes column for two rows at the top reads:
 
 ## Filter to the high-severity non-airplane incidents
 
-Press `f` and enter:
-
-```sql
-incident_type = 'emergency_situation' AND severity > 7
-```
+Navigate to a row where `incident_type` is `emergency_situation`. Press `f` to
+filter to that type. Navigate to the `severity` column. Press `gF`, choose `>`,
+enter `7`.
 
 The grid narrows. The top result is `ULTRA_BUDGET_XTRM`, severity 9. The note
 field reads: "Open floor plan. No music. The third floor is now the second floor
 people."
 
-Press `gp` and save this filter as `high_severity_incidents`. It will be there
+Press `gP` and save this filter as `high_severity_incidents`. It will be there
 next quarter.
 
 ---
@@ -198,7 +196,7 @@ This is the production index on the product catalog.
 
 ## Ask a question about the threat landscape
 
-Press `q` to open the query pad. Press `A` and describe what you need:
+Press `q` to open the query pad. Press `gA` and describe what you need:
 
 ```
 which subreddits have the most anti-Softrear threads by upvote count,
@@ -220,7 +218,7 @@ GROUP BY subreddit
 ORDER BY total_upvotes DESC
 ```
 
-Press `<CR>`. `brandconspiracies` leads by total upvotes. `softreartruth` has
+Press `<C-CR>`. `brandconspiracies` leads by total upvotes. `softreartruth` has
 the highest average threat level. The overlap between them is
 r/brandconspiracies post #5: "I work in supply chain and I'm not allowed to say
 what I know about Softrear." 67,420 upvotes.
@@ -256,11 +254,8 @@ finding. No further notes.
 
 Navigate to `people_on_to_us`. Sort by `evidence_strength` descending.
 
-Three rows have `evidence_strength = 10`. Press `f`:
-
-```sql
-what_they_know LIKE '%formula%'
-```
+Three rows have `evidence_strength = 10`. Navigate to the `what_they_know`
+column. Press `gF`, choose `LIKE`, enter `%formula%`.
 
 Six rows match. All have documented knowledge of the formula change.
 The `our_response` values across these rows are:
@@ -323,28 +318,24 @@ strategy: name the problem internally, build policy to prevent naming it externa
 
 ## Stage a correction and review the diff
 
-Navigate to `executive_decisions`. Filter:
-
-```sql
-rationale = 'dream' AND outcome = 'recall'
-```
+Navigate to `executive_decisions`. Navigate to a row where `rationale` is
+`dream`. Press `f`. Navigate to a row where `outcome` is `recall`. Press `f`.
 
 Two rows match. Open the cell editor on the `rationale` field of the first row.
-Change `dream` to `actual_data`. Press `C-CR` to stage.
+Change `dream` to `actual_data`. Press `<CR>` to save and stage.
 
-Press `gD`.
+Press `gs`.
 
-The diff float opens:
+The staged SQL float opens:
 
-```diff
- decision_text: Launch LAVENDER_INFUSED_3PLY nationwide
--rationale: dream
-+rationale: actual_data
- outcome: recall
+```sql
+UPDATE executive_decisions
+SET rationale = 'actual_data'
+WHERE id = <row_id>;
 ```
 
-The change is staged, not applied. Press `u` to cancel, or `a` to apply to the
-database. The diff remains visible until you act.
+The change is staged, not applied. Press `u` to undo, or `a` to apply to the
+database. Press `<Esc>` to dismiss the float.
 
 ---
 
@@ -366,19 +357,20 @@ The formatted table copies to clipboard. The dossier is ready.
 | Data profiling | `gR` | Bimodal softness distribution at a glance |
 | Column statistics | `gS` | Revealed tensile=47.0 outlier |
 | Sort | `s` | Every severity=10 is type=airplane |
-| Filter | `f` | Narrowed to high-severity non-flight incidents |
-| Save filter preset | `gp` | `high_severity_incidents` reusable next session |
+| Filter | `f` + `gF` | Narrowed to high-severity non-flight incidents |
+| Save filter preset | `gP` | `high_severity_incidents` reusable next session |
 | FK drill-down | `gf` | Traced incident → roll → batch → facility → Bamboo Don |
 | Null filter | `gn` | Surfaced 190 unreviewed threat comments |
 | Column picker | `gH` | Focused view to 4 signal columns |
 | DDL float | `gV` | Found `acquired` in CHECK constraint, `idx_good_vibes_only` in indexes |
-| AI SQL generation | `A` | Natural language → window function SQL |
+| AI SQL generation | `gA` | Natural language → window function SQL |
 | Save query | `:GripSave` | `threat_landscape` named and reloadable |
 | Deep FK drill | `gf` (×2) | youtube_comments → suspicious_persons → investigations |
 | Quality certifications | `go` on `quality_certifications` | Revealed Greg, the score of 8, and the score of 2 |
 | Leadership directives | `s` descending by `publicly_acknowledged` | Found what they admitted to publicly |
 | Clone row | `c` | Duplicate a row with PKs cleared, ready to stage as a new record |
-| Mutation diff | `gD` | Staged rationale change shown before apply |
+| Staged SQL preview | `gs` | Staged rationale change shown before apply |
+| ER diagram | `gG` | Schema map: tables as boxes, FK chains as arrows |
 | Export | `gE` | Markdown table to clipboard |
 
 **Total keystrokes: ~40.**
@@ -395,6 +387,26 @@ originates at the Shanghai supplier: discounted material, relabeled before
 customs, failed tests suppressed. The people who know the most were acquired,
 threatened, or sent coupons. The decisions were made deliberately, documented
 openly, and committed to main.
+
+---
+
+## Map the schema
+
+Before touching a single row, you need to know what you're looking at.
+Seventeen tables. Press `gG`.
+
+The ER diagram opens: every table as a box, every foreign key as an arrow,
+the full chain depth laid out left-to-right. You can see it immediately:
+`consumer_incidents` → `rolls` → `production_batches` → `facilities` →
+`bamboo_cartel_members`. The supply chain is four hops deep and it's all in
+front of you before you've run a single query.
+
+Navigate the diagram with `j`/`k`. Move the cursor to the `consumer_incidents`
+header line. Press `<CR>`.
+
+The grid opens for that table. The ER diagram closes. Press `gG` anytime to
+return to the map and jump to another table. It is interactive — use it the
+way you'd use a subway map.
 
 ---
 
@@ -494,6 +506,49 @@ The sidebar returns to the original 17 tables.
 
 ---
 
+## Query a public registry
+
+The supplier investigation used a local SQLite attachment. The same technique
+works for any public parquet file on the internet: no install, no credentials.
+
+Open a public dataset directly:
+
+```vim
+:GripOpen https://raw.githubusercontent.com/duckdb/duckdb-data/main/parquet-testing/userdata1.parquet
+```
+
+The grid opens. DuckDB's httpfs extension streams the file. Sort, filter, and
+profile it like any local table.
+
+To JOIN it against internal data without saving:
+
+```sql
+SELECT
+  u.first_name,
+  u.last_name,
+  ci.severity,
+  ci.incident_type
+FROM consumer_incidents ci
+JOIN read_parquet(
+  'https://raw.githubusercontent.com/duckdb/duckdb-data/main/parquet-testing/userdata1.parquet'
+) u ON ci.id = u.id
+ORDER BY ci.severity DESC
+LIMIT 20
+```
+
+Press `<C-CR>`. Local DuckDB rows joined against a remote parquet file with no
+intermediate download.
+
+To save this source for repeated use:
+
+```vim
+gc → + New connection → paste the URL → name it "registry"
+```
+
+It appears in gc as `[file] registry` from then on.
+
+---
+
 ## Updated feature coverage
 
 | Feature | Key | What it did |
@@ -502,3 +557,6 @@ The sidebar returns to the original 17 tables.
 | Cross-DB JOIN | Query pad `<C-CR>` | Joined supplier shipments with internal production batches |
 | Schema grouping | Sidebar | Showed `supplier` section with 3 tables alongside `main` |
 | Detach | `:GripDetach` | Removed external database, sidebar restored |
+| ER diagram | `gG` | Schema map: tables as boxes, FK chains as arrows |
+| Open URL | `:GripOpen` | Remote parquet streamed via httpfs, no download |
+| Remote JOIN | Query pad | JOIN read_parquet('https://...') against local tables |

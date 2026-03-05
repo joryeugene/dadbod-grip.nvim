@@ -30,6 +30,7 @@ CONTENTS                                                    *grip-contents*
   21. Query Doctor ............. |grip-explain-full|
   22. AI SQL Generation ........ |grip-ai|
   23. Cross-DB Federation ...... |grip-federation|
+  24. S3 and Remote Files ....... |grip-s3-files|
 
 ==============================================================================
 1. INTRODUCTION                                          *grip-introduction*
@@ -247,6 +248,22 @@ All commands are global and available after the plugin loads.
   from persisted connection metadata. The schema sidebar updates to remove
   the database section.
 
+                                                               *:GripOpen*
+:GripOpen [path]
+  Open any data source directly without saving to connections. Accepts
+  file paths, HTTPS URLs, and s3:// paths (via DuckDB httpfs).
+  If no argument is provided, opens the connection picker (same as gc).
+
+  Examples: >
+    :GripOpen ~/data/report.parquet
+    :GripOpen https://example.com/dataset.parquet
+    :GripOpen s3://my-bucket/data.parquet
+    :GripOpen s3://my-bucket/prefix/
+<
+  For s3:// prefixes (no file extension), opens the query pad pre-filled
+  with a glob() query. For specific files, opens an editable grid directly.
+  Requires DuckDB as the active connection for file and S3 access.
+
 ==============================================================================
 6. KEYBINDINGS                                           *grip-keybindings*
 
@@ -360,6 +377,9 @@ SCHEMA AND WORKFLOW ~
                                                           *grip-workflow*
   go / gT / gt    Table picker (fuzzy finder)
   gb              Schema browser (focus if open; close from inside)
+  gG              ER diagram float (all tables and FK relationships)
+                  Press <CR> on a table header to open it in a grid.
+                  Press q or gG again to close.
   gC / <C-g>      Switch database connection
   gO              Open read-only query result as editable table
   gW              Toggle watch mode (auto-refresh every 5s; skips when staged)
@@ -790,6 +810,38 @@ connection. They restore automatically when you reconnect.
 Sidebar keymaps for federation (DuckDB connections only):
   ga              Attach external database (prompts for DSN and alias)
   gd              Detach attached database (prompts for alias)
+
+==============================================================================
+24. S3 AND REMOTE FILES                                       *grip-s3-files*
+
+DuckDB can query remote files directly via the httpfs extension.
+
+HTTPS files (no credentials needed): >
+  :GripOpen https://example.com/data.parquet
+<
+
+S3 files (with credentials in environment): >
+  :GripOpen s3://my-bucket/data/report.parquet
+<
+
+S3 prefix (browse bucket contents): >
+  :GripOpen s3://my-bucket/data/
+<
+  Opens the query pad pre-filled with a glob() query.
+
+Save a remote file as a named connection: >
+  gc → + New connection → paste URL → give it a name
+<
+
+Cross-federation with remote files: >
+  SELECT l.user_id, r.event_date
+  FROM local.users l
+  JOIN read_parquet('s3://my-bucket/events.parquet') r ON l.user_id = r.user_id
+<
+
+For S3 access, set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in your
+environment. Public buckets work without credentials.
+DuckDB's httpfs extension installs automatically on first use.
 
 ==============================================================================
 vim:tw=78:ts=8:ft=help:norl:

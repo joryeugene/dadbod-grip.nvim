@@ -48,6 +48,7 @@ end
 local function is_file_url(url)
   if not url or url == "" then return false end
   if url:match("^https?://") then return true end
+  if url:match("^s3://") then return true end
   local lower = url:lower():gsub("[?#].*$", "")
   for _, ext in ipairs({ ".parquet", ".csv", ".tsv", ".json", ".ndjson", ".jsonl",
                           ".xlsx", ".orc", ".arrow", ".ipc" }) do
@@ -419,7 +420,7 @@ end
 --- Prompt user to enter a new connection URL + name, then switch to it.
 local function prompt_new_connection()
   local CANCEL = "\0"
-  local ok, url = pcall(vim.fn.input, { prompt = "Connection URL: ", cancelreturn = CANCEL })
+  local ok, url = pcall(vim.fn.input, { prompt = "Connection URL, file path, or s3://: ", cancelreturn = CANCEL })
   if not ok or url == CANCEL or url == "" then
     require("dadbod-grip").open_welcome(); return
   end
@@ -477,8 +478,12 @@ function M.pick()
     on_cancel = function() require("dadbod-grip").open_welcome() end,
     display = function(c)
       if c._new or c._temp then return c.name end
-      local is_file = c.type == "file" or (not c.type and is_file_url(c.url))
-      local tag = is_file and "[file] " or "[db]   "
+      local tag
+      if c.type == "file" or (not c.type and is_file_url(c.url)) then
+        tag = "[file] "
+      else
+        tag = "[db]   "
+      end
       local pad = string.rep(" ", max_name - vim.fn.strdisplaywidth(c.name))
       local url = show_pass[c.url] and c.url or mask_url(c.url)
       return tag .. c.name .. pad .. "  " .. url
@@ -601,6 +606,15 @@ function M.pick()
           return cur and cur:find("^duckdb:") and not c.url:find("^duckdb:")
         end,
         fn             = function(c)
+          if c._new or c._temp then return end
+          -- Guard: grip_picker fires fn regardless of `when` predicate label
+          local url = vim.g.db
+          if not url or not url:find("^duckdb:") then
+            vim.notify(
+              "Attach requires an active DuckDB connection. Switch to DuckDB with gc first.",
+              vim.log.levels.WARN)
+            return
+          end
           local CANCEL = "\0"
           local default_alias = c.name:lower():gsub("[^%w_]", "_"):gsub("_+", "_"):gsub("^_", ""):gsub("_$", "")
           local ok, alias = pcall(vim.fn.input, {
@@ -620,11 +634,16 @@ function M.pick()
           end
           M.save_attachments(url, duckdb_adapter.get_attachments(url))
           schema_mod.refresh(url)
-          vim.notify(string.format("Attached '%s' as %s", c.name, alias))
+          vim.notify(string.format("Attached '%s' as %s", c.name, alias), vim.log.levels.INFO)
         end,
       },
     },
   })
+end
+
+--- Expose the .grip/ directory path for other modules (schema catalog, etc.).
+function M.grip_dir_path()
+  return grip_dir()
 end
 
 return M

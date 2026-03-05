@@ -575,9 +575,24 @@ local function build_render(session, opts)
 
   -- Row/page info
   if session.query_spec and session.total_rows then
-    table.insert(status_parts, qmod.page_info(session.query_spec, session.total_rows))
+    local page_str = qmod.page_info(session.query_spec, session.total_rows)
+    -- Directional hints when result spans multiple pages
+    local spec = session.query_spec
+    local total_pages = math.max(1, math.ceil(session.total_rows / spec.page_size))
+    if total_pages > 1 then
+      local nav = {}
+      if spec.page > 1 then nav[#nav + 1] = "H←" end
+      if spec.page < total_pages then nav[#nav + 1] = "→L" end
+      page_str = page_str .. "  " .. table.concat(nav, "  ")
+    end
+    table.insert(status_parts, page_str)
   else
-    table.insert(status_parts, #st.rows .. " rows")
+    local row_str = #st.rows .. " rows"
+    -- Safety hint: if result maxed out page_size, more data likely exists
+    if session.query_spec and #st.rows >= session.query_spec.page_size then
+      row_str = row_str .. "  →L?"
+    end
+    table.insert(status_parts, row_str)
   end
 
   local timing_str
@@ -4253,6 +4268,18 @@ function M._setup_keymaps(bufnr)
     end
   end
 
+  -- gG: ER diagram float
+  map("gG", function()
+    local session = M._sessions[bufnr]
+    local s_url = session and session.url
+    if not s_url then s_url = require("dadbod-grip.db").get_url() end
+    if not s_url then
+      vim.notify("ER Diagram: no database connection", vim.log.levels.WARN)
+      return
+    end
+    require("dadbod-grip.er_diagram").toggle(s_url)
+  end, "ER diagram (FK relationships)")
+
   -- ?: help popup
   map("?", function()
     local session = M._sessions[bufnr]
@@ -4346,6 +4373,9 @@ function M.show_help(opts)
       "  Schema & Workflow",
       "  go/gT/gt  Pick table (floating picker)",
       "  gb        Schema browser (toggle/focus)",
+      "  gG        ER diagram: every table as a box, every FK as an arrow",
+      "            ↳ <CR> on a table header to open that table",
+      "            ↳ press gG again from the grid to return to the map",
       "  gO        Open as editable table (read-only → table)",
       "  gC/<C-g>  Switch database connection",
       "  gW        Toggle watch mode (auto-refresh on timer)",
@@ -4358,6 +4388,7 @@ function M.show_help(opts)
       "  gA        AI SQL generation (from query pad)",
       "  :GripAttach  Attach external DB to DuckDB session",
       "  :GripDetach  Detach attached database",
+      "  :GripOpen    Open file/HTTPS/s3:// without saving to connections",
       "            ↳ context: schema DDL for ≤30 tables (cols, types, PKs, FKs)",
       "            ↳ + existing query pad SQL if present (AI will modify it)",
       "            ↳ provider: ANTHROPIC_API_KEY → OPENAI → GEMINI → Ollama",

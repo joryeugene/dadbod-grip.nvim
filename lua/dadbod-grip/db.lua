@@ -203,4 +203,19 @@ function M.get_constraints(table_name, url)
   return adapter.get_constraints(table_name, conn)
 end
 
+--- Describe the columns of a local/remote file via DuckDB DESCRIBE.
+--- Returns (cols, nil) on success where cols = { {column_name, data_type} }.
+--- Returns (nil, err_string) on failure.
+function M.describe_file(path, url)
+  local safe = path:gsub("'", "''")
+  local sql  = string.format("DESCRIBE SELECT * FROM '%s' LIMIT 0", safe)
+  local result, err = M.query(sql, url)
+  if err or not result then return nil, err or "describe failed" end
+  local cols = {}
+  for _, row in ipairs(result.rows or {}) do
+    table.insert(cols, { column_name = row[1], data_type = row[2] })
+  end
+  return cols, nil
+end
+
 return M

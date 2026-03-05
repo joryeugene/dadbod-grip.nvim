@@ -83,6 +83,37 @@ FROM pg.customers JOIN legacy.orders ON pg.customers.id = legacy.orders.customer
 
 Extensions install automatically. Attachments persist and restore on reconnect.
 
+### DuckDB: Files, HTTPS, and S3
+
+When your active connection is DuckDB, any file DuckDB can read becomes a live queryable table.
+
+One-shot access (not saved to connections):
+
+```vim
+:GripOpen ~/data/report.parquet
+:GripOpen https://example.com/dataset.parquet
+:GripOpen s3://my-bucket/data.parquet
+```
+
+Save as a named connection (appears in `gc` every time):
+
+```
+gc → + New connection → paste file path or URL → give it a name
+```
+
+Cross-federation: local DuckDB + remote parquet + attached Postgres:
+
+```sql
+SELECT l.user_id, r.event_date, p.email
+FROM local_events l
+JOIN read_parquet('s3://my-bucket/events.parquet') r ON l.id = r.id
+JOIN pg.users p ON l.user_id = p.user_id
+```
+
+DuckDB's httpfs extension installs automatically on first use. For S3 access, set
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in your environment. Public buckets
+work without credentials.
+
 ## Features
 
 ### Multi-Engine and Federation
@@ -114,6 +145,7 @@ Extensions install automatically. Attachments persist and restore on reconnect.
 - **AI SQL generation** via `A` or `:GripAsk` turning natural language into SQL queries using Anthropic, OpenAI, Gemini, or local Ollama. AI reads existing query pad SQL to modify it rather than generating from scratch. Schema context cached per connection.
 
 ### Schema and Workflow
+- **ER diagram** via `gG` rendering every table as a box with columns and type indicators, every foreign key as an arrow, and the full FK chain depth laid out left-to-right. Press `<CR>` on any table header to jump directly into that table's grid. Press `gG` again to return to the map. Works from the grid, the query pad, and the schema sidebar. Use it to navigate an unfamiliar schema the way you'd use a subway map.
 - **Schema browser** via `:GripSchema` or `gb` showing a sidebar tree with columns, types, and PK/FK markers. `gb` opens/focuses the browser from any buffer; pressing `gb` from inside closes it.
 - **Table picker** via `:GripTables` or `gT` / `gt` providing a fuzzy finder with column preview. Available from all three buffers: grid, query pad, and sidebar. In the sidebar, `go` opens the table under cursor with `ORDER BY created_at / PK DESC` so the latest rows appear first.
 - **SQL query pad** via `:GripQuery` or `q` opening a scratch buffer that pipes results into editable grids.

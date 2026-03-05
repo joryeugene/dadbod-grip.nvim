@@ -868,6 +868,9 @@ function M.open(arg, url, opts)
     local count_result = db.query(count_sql, conn)
     if count_result and count_result.rows[1] then
       session.total_rows = tonumber(count_result.rows[1][1]) or 0
+      -- Re-render: view.open() rendered before total_rows was set, so the status bar
+      -- showed "N rows" instead of "Page X/Y (N rows)". Render again now that we have it.
+      M._render_if_visible(bufnr)
     end
     -- Auto-fetch column info for conditional formatting
     if table_name_arg and not session._column_info then
@@ -2054,7 +2057,7 @@ function M.setup(opts)
     connections.save_attachments(url, duckdb_adapter.get_attachments(url))
     require("dadbod-grip.completion").invalidate(url)
     schema_mod.refresh(url)
-    vim.notify(string.format("Attached '%s' as %s", dsn, alias))
+    vim.notify(string.format("Attached '%s' as %s", dsn, alias), vim.log.levels.INFO)
   end, {
     nargs = "*",
     desc  = "Attach external database to DuckDB session",
@@ -2094,11 +2097,33 @@ function M.setup(opts)
     connections.save_attachments(url, duckdb_adapter.get_attachments(url))
     require("dadbod-grip.completion").invalidate(url)
     schema_mod.refresh(url)
-    vim.notify(string.format("Detached '%s'", alias))
+    vim.notify(string.format("Detached '%s'", alias), vim.log.levels.INFO)
   end, {
     nargs = "?",
     desc  = "Detach database from DuckDB session",
   })
+
+  -- :GripOpen [path]: open any data source without saving to connections
+  vim.api.nvim_create_user_command("GripOpen", function(opts)
+    local path = vim.fn.trim(opts.args or "")
+    local connections = require("dadbod-grip.connections")
+    if path == "" then
+      connections.pick()
+      return
+    end
+    path = vim.fn.expand(path)
+    -- S3 prefix (no file extension): open query pad pre-filled with glob()
+    if path:match("^s3://") and not path:match("%.[a-zA-Z0-9]+$") then
+      local safe = path:gsub("'", "''")
+      local sql_str = string.format("SELECT * FROM glob('%s*') LIMIT 100", safe)
+      local cur = connections.current()
+      require("dadbod-grip.query_pad").open(cur and cur.url or "", { initial_sql = sql_str })
+    else
+      -- file path, HTTPS URL, or s3://...parquet: ephemeral (nil name = not saved)
+      connections.switch(path, nil, nil, nil)
+    end
+  end, { nargs = "?", complete = "file",
+         desc = "Open any data source (file, HTTPS, s3://) without saving" })
 
   -- :GripStart: open the Softrear Analyst Portal directly
   vim.api.nvim_create_user_command("GripStart", function()
