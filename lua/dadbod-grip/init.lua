@@ -855,14 +855,11 @@ function M.open(arg, url, opts)
   -- Auto-sync query pad with the current grid query (passive background update).
   -- Use the clean original SQL (base_sql or table name) so the pad shows what the
   -- user wrote, not the internal pagination wrapper (SELECT * FROM (...) AS _grip ...).
+  -- Skip when the query originated from the pad itself (from_pad=true): the SQL is
+  -- already there and we must not clobber the user's buffer.
   vim.schedule(function()
-    local sync_sql
-    if spec.is_raw then
-      sync_sql = spec.base_sql
-    else
-      sync_sql = "SELECT * FROM " .. (spec.table_name or "")
-    end
-    require("dadbod-grip.query_pad").sync_query(sync_sql)
+    if opts and opts.from_pad then return end
+    require("dadbod-grip.query_pad").sync_query(query.clean_sql(spec))
   end)
 
   -- Store query spec and run initial count for pagination

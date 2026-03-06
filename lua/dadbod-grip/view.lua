@@ -1786,7 +1786,7 @@ function M._setup_keymaps(bufnr)
     local s_url = session_q and session_q.url
     local initial_sql
     if session_q and session_q.query_spec then
-      initial_sql = qmod.build_sql(session_q.query_spec)
+      initial_sql = qmod.clean_sql(session_q.query_spec)
     elseif session_q and session_q.query_sql then
       initial_sql = session_q.query_sql
     end
@@ -4373,7 +4373,7 @@ function M._setup_keymaps(bufnr)
     local s_url = session_2 and session_2.url
     local initial_sql
     if session_2 and session_2.query_spec then
-      initial_sql = qmod.build_sql(session_2.query_spec)
+      initial_sql = qmod.clean_sql(session_2.query_spec)
     elseif session_2 and session_2.query_sql then
       initial_sql = session_2.query_sql
     end

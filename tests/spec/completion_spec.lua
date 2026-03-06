@@ -440,7 +440,7 @@ end
 -- The OLD fallback used b.information_schema.tables which fails for SQLite.
 -- The NEW fallback must use duckdb_tables() WHERE database_name = 'b' instead.
 do
-  local ATT_URL = "duckdb:attach_fallback_test.duckdb"
+  local ATT_URL = "duckdb:" .. vim.fn.tempname() .. "_attach_fallback_test.duckdb"
   local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
 
   -- Register "b" as a SQLite attachment (no real DuckDB needed for this test)
@@ -489,7 +489,7 @@ end
 -- Three-part "b.butts.col" when schema cache is cold should use duckdb_columns(),
 -- not b.information_schema.columns (SQLite has no information_schema).
 do
-  local ATT2_URL = "duckdb:fed_col_fallback_test.duckdb"
+  local ATT2_URL = "duckdb:" .. vim.fn.tempname() .. "_fed_col_fallback_test.duckdb"
   local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
   duckdb_adapter._attach_unchecked(ATT2_URL, "sqlite:/tmp/test_butts2.db", "b")
 

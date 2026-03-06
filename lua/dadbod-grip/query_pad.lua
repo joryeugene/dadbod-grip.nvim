@@ -7,6 +7,21 @@ local M = {}
 local _ag = vim.api.nvim_create_augroup("DadbodGripQueryPad", { clear = true })
 local _pad_bufnr = nil
 
+--- Return true when `lines` contains real SQL content.
+--- Strips the hint comment (-- C-CR:...) and AI separator (-- AI generated:)
+--- before deciding. Blank/whitespace-only remaining lines = no real content.
+--- This is the single canonical check used by sync_query, M.open, and append_sql.
+local function _has_real_content(lines)
+  local real = {}
+  for _, line in ipairs(lines) do
+    if not line:match("^%-%- C%-CR:") and not line:match("^%-%- AI generated:") then
+      table.insert(real, line)
+    end
+  end
+  return table.concat(real, "\n"):match("^%s*(.-)%s*$") ~= ""
+end
+M._has_real_content = _has_real_content  -- exported for unit tests
+
 --- Register completion keymaps for the query pad buffer.
 --- Called once at buffer creation and re-called on BufEnter (via vim.schedule) to
 --- override buffer-local keymaps that completion plugins (blink.cmp etc.) register
@@ -171,7 +186,9 @@ local function run_sql(url, sql)
     end
   end
   local grip = require("dadbod-grip")
-  grip.open(sql, url, reuse_win and { reuse_win = reuse_win } or nil)
+  local run_opts = reuse_win and { reuse_win = reuse_win } or {}
+  run_opts.from_pad = true
+  grip.open(sql, url, run_opts)
 end
 
 --- Set up buffer-local keymaps.
@@ -435,12 +452,10 @@ function M.open(url, opts)
 
   vim.api.nvim_set_current_win(pad_win)
 
-  -- Pre-fill if requested and buffer has only the hint or is empty
+  -- Pre-fill if requested and buffer has no real SQL content
   if opts.initial_sql then
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    local is_empty = #lines == 0 or (#lines == 1 and lines[1] == "")
-    local is_hint = #lines >= 1 and lines[1]:match("^%-%- C%-CR:")
-    if is_empty or is_hint then
+    if not _has_real_content(lines) then
       local sql_lines = vim.split(opts.initial_sql, "\n")
       vim.bo[bufnr].modifiable = true
       vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, sql_lines)
@@ -456,12 +471,10 @@ function M.append_sql(sql_text, opts)
   opts = opts or {}
   if not _pad_bufnr or not vim.api.nvim_buf_is_valid(_pad_bufnr) then return end
   local lines = vim.api.nvim_buf_get_lines(_pad_bufnr, 0, -1, false)
-  local is_empty = #lines == 0 or (#lines == 1 and lines[1] == "")
-  local is_hint = #lines >= 1 and lines[1]:match("^%-%- C%-CR:")
 
   local sql_lines = vim.split(sql_text, "\n")
   vim.bo[_pad_bufnr].modifiable = true
-  if is_empty or is_hint or opts.replace then
+  if not _has_real_content(lines) or opts.replace then
     vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, sql_lines)
   else
     local append = { "", "-- AI generated:" }
@@ -478,15 +491,26 @@ function M.append_sql(sql_text, opts)
 end
 
 --- Silently sync the query pad with the SQL from the just-opened grid.
---- Called automatically when a table or query opens so the pad always reflects
---- the current grid. No-op if the pad buffer doesn't exist yet.
---- Unlike append_sql, this always replaces without appending.
+--- Called automatically when a table or query opens from outside the pad (sidebar,
+--- table picker, FK navigation). No-op if the pad buffer doesn't exist yet.
+--- Behaviour: populate an empty/hint-only pad; append below existing content
+--- so user queries are never clobbered.
 function M.sync_query(sql_text)
   if not _pad_bufnr or not vim.api.nvim_buf_is_valid(_pad_bufnr) then return end
   if not sql_text or sql_text:match("^%s*$") then return end
+  local lines = vim.api.nvim_buf_get_lines(_pad_bufnr, 0, -1, false)
   local sql_lines = vim.split(sql_text, "\n")
   vim.bo[_pad_bufnr].modifiable = true
-  vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, sql_lines)
+  if not _has_real_content(lines) then
+    vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, sql_lines)
+  else
+    local append = { "" }
+    vim.list_extend(append, sql_lines)
+    vim.api.nvim_buf_set_lines(_pad_bufnr, -1, -1, false, append)
+    local total = vim.api.nvim_buf_line_count(_pad_bufnr)
+    local win = vim.fn.bufwinid(_pad_bufnr)
+    if win ~= -1 then pcall(vim.api.nvim_win_set_cursor, win, { total, 0 }) end
+  end
   vim.bo[_pad_bufnr].modified = false
 end
 
@@ -505,6 +529,12 @@ function M.get_content()
   local content = table.concat(real, "\n"):match("^%s*(.-)%s*$")
   if content == "" then return nil end
   return content
+end
+
+--- Testing hook: override the internal pad buffer reference.
+--- NOT for production use.
+function M._set_pad_bufnr(bufnr)
+  _pad_bufnr = bufnr
 end
 
 return M

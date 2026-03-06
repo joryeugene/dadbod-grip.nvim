@@ -322,4 +322,15 @@ function M.build_count_sql(spec)
   return table.concat(parts, " ")
 end
 
+--- Return the user-visible SQL for a spec (no pagination wrapper).
+--- Use this to pre-fill the query pad. build_sql() is for DB execution only.
+--- For raw specs returns spec.base_sql; for table specs returns "SELECT * FROM table".
+function M.clean_sql(spec)
+  if spec.is_raw then
+    return spec.base_sql
+  else
+    return "SELECT * FROM " .. (spec.table_name or "")
+  end
+end
+
 return M
