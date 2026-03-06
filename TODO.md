@@ -7,6 +7,11 @@ Not committed to any release. Roughly ordered by expected impact.
 ### High Value -- Features
 - [x] DuckDB cross-database federation (`:GripAttach`, ATTACH pg/mysql/sqlite, cross-DB JOINs): shipped v3.0.0
 - [x] Row cloning (`c`: duplicate current row as staged INSERT with PKs cleared): shipped
+- [x] Column filter builder (`gF` with operators and wildcards): shipped v2.9
+- [x] Export to file (`gX` / `:GripExport`: CSV, JSON, SQL INSERT): shipped v2.9
+- [x] Column visibility toggle (`-` hide, `g-` restore all, `gH` picker): shipped
+- [x] ER diagram (`gG` / `4`: tree-spine float, FK follow, breadcrumb nav): shipped v3.3.0
+- [x] Built-in SQL completion (nvim-cmp source, alias tracking, `<C-Space>`): shipped v3.3.0
 - [ ] Import from clipboard/pipe (`gI` / `:GripImport`: detect CSV/JSON/TSV, preview columns, stage as INSERT batch; DuckDB: `read_csv_auto()`; PG: COPY or multi-INSERT)
 - [ ] Generate sync SQL from diff (make table A match table B, emit INSERT/UPDATE/DELETE migration from `gD` output)
 
@@ -35,7 +40,6 @@ Not committed to any release. Roughly ordered by expected impact.
 - [ ] Inline column resize with `+`/`-` on header row
 - [ ] Bookmarked rows (mark interesting rows with `m`, recall with `'`, persist per table in `.grip/bookmarks.json`)
 - [ ] Multi-row selection for bulk ops (visual `V`-mode selects rows, then `d`=bulk DELETE, `gy`=copy all as table)
-- [ ] Column visibility toggle (`-` hides current column, `+` restores, persists per-session in `.grip/`)
 - [ ] Quick data generation (`:GripFill` to populate empty table with N rows of realistic fake data per column type)
 
 ### Exploration

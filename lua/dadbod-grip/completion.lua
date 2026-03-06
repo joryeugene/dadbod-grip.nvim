@@ -452,7 +452,7 @@ end
 -- ── nvim-cmp source ────────────────────────────────────────────────────────────
 
 --- Register dadbod-grip as a first-class nvim-cmp completion source.
---- Safe to call multiple times — nvim-cmp deduplicates by source name.
+--- Safe to call multiple times; nvim-cmp deduplicates by source name.
 --- Users opt in by adding { name = 'dadbod_grip' } to their cmp sources:
 ---
 ---   require('cmp').setup({ sources = { { name = 'dadbod_grip' }, ... } })

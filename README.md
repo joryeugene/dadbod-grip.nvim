@@ -146,7 +146,7 @@ work without credentials.
 - **AI SQL generation** via `A` or `:GripAsk` turning natural language into SQL queries using Anthropic, OpenAI, Gemini, or local Ollama. AI reads existing query pad SQL to modify it rather than generating from scratch. Schema context cached per connection.
 
 ### Schema and Workflow
-- **ER diagram** via `gG` or `4` — a tree-spine float showing every table with PK/FK/column summary, arranged by FK depth with box-drawing connectors. Press `<CR>` on any table to open its grid. Press `f` to follow a foreign key and `H` to go back (breadcrumb trail updates). `Tab`/`S-Tab` cycle between tables. Press `gG` or `q` to close. Column names truncate gracefully; overflow columns show a right-aligned `+N` count. Works from the grid, the query pad, and the schema sidebar.
+- **ER diagram** via `gG` or `4`: a tree-spine float showing every table with PK/FK/column summary, arranged by FK depth with box-drawing connectors. Press `<CR>` on any table to open its grid. Press `f` to follow a foreign key and `H` to go back (breadcrumb trail updates). `Tab`/`S-Tab` cycle between tables. Press `gG` or `q` to close. Column names truncate gracefully; overflow columns show a right-aligned `+N` count. Works from the grid, the query pad, and the schema sidebar.
 - **Schema browser** via `:GripSchema` or `gb` showing a sidebar tree with columns, types, and PK/FK markers. `gb` opens/focuses the browser from any buffer; pressing `gb` from inside closes it.
 - **Table picker** via `:GripTables` or `gT` / `gt` providing a fuzzy finder with column preview. Available from all three buffers: grid, query pad, and sidebar. In the sidebar, `go` opens the table under cursor with `ORDER BY created_at / PK DESC` so the latest rows appear first.
 - **SQL query pad** via `:GripQuery` or `q` opening a scratch buffer that pipes results into editable grids.
@@ -293,7 +293,7 @@ Keys `1`–`3` navigate between the three primary surfaces. Each key has a **pri
 | `2` | Query pad | Query history |
 | `3` | Grid / records | Table picker |
 
-Keys `4`–`9` are **depth views** — lenses applied to the current table, available from grid, sidebar, and query pad:
+Keys `4`–`9` are **depth views**: lenses applied to the current table, available from grid, sidebar, and query pad:
 
 | Key | View | Description |
 |-----|------|-------------|
@@ -371,7 +371,7 @@ Note: explain query plan is at `gx` (Query Doctor).
 | `gC` / `<C-g>` | Switch database connection |
 | `gG` / `4` | ER diagram float |
 | `1` | Schema sidebar |
-| `2` | Query history (secondary — already in query pad) |
+| `2` | Query history (secondary; already in query pad) |
 | `3` | Jump to grid (table picker if no grid is open) |
 | `5`–`9` | Jump to grid in depth view (5=Stats, 6=Columns, 7=FK, 8=Indexes, 9=Constraints) |
 
@@ -391,7 +391,7 @@ Note: explain query plan is at `gx` (Query Doctor).
 | `y` | Yank table or column name |
 | `r` | Refresh schema |
 | `go` | Open table under cursor, ORDER BY latest (created_at / PK DESC) |
-| `1` | Connections picker (secondary — already in sidebar) |
+| `1` | Connections picker (secondary; already in sidebar) |
 | `2` | Open query pad |
 | `3` | Jump to grid / open table under cursor (table picker if no node) |
 | `4` | ER diagram float |
@@ -478,7 +478,7 @@ The plugin ships a `lazy.lua` spec so all commands work as lazy-load triggers au
 
 **nvim-cmp integration (optional):**
 
-dadbod-grip ships built-in SQL completion — tables, columns, aliases, and DuckDB federation — with no extra plugins required. To integrate with nvim-cmp, add the source to your cmp setup:
+dadbod-grip ships built-in SQL completion (tables, columns, aliases, and DuckDB federation) with no extra plugins required. To integrate with nvim-cmp, add the source to your cmp setup:
 
 ```lua
 require("cmp").setup({
@@ -673,7 +673,7 @@ Open each table with `:Grip <table_name>` and verify rendering, editing, sort/fi
 ## Ecosystem
 
 - **[vim-dadbod](https://github.com/tpope/vim-dadbod)** started Vim database tooling. Optional. If installed, grip reads its `g:db`/`g:dbs` variables as connection sources for smooth migration from existing dadbod or DBUI setups.
-- **[vim-dadbod-completion](https://github.com/kristijanhusak/vim-dadbod-completion)** is an alternative SQL completion source. dadbod-grip's built-in completion is self-contained, alias-aware, and federation-aware — no additional plugins needed for the query pad.
+- **[vim-dadbod-completion](https://github.com/kristijanhusak/vim-dadbod-completion)** is an alternative SQL completion source. dadbod-grip's built-in completion is self-contained, alias-aware, and federation-aware; no additional plugins needed for the query pad.
 - **[vim-dadbod-ui](https://github.com/kristijanhusak/vim-dadbod-ui)** is a sidebar tree browser with saved queries. Optional since grip has its own schema browser and query pad.
 
 ---

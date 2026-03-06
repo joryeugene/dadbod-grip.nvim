@@ -2,7 +2,7 @@
 -- Tests for the tree-spine ER diagram layout (antifragile design).
 --
 -- Every table owns exactly one unique line. Navigation uses
--- line_to_node[row] — pure row lookup, no column arithmetic.
+-- line_to_node[row]: pure row lookup, no column arithmetic.
 --
 -- build_content returns: lines, {}, line_to_node, table_lines
 --   line_to_node[1idx] = {name, kind, prefix_len}
@@ -162,7 +162,7 @@ with_mock_schema(function()
     if bamb_pk and cons_pk then
       -- Both '●' symbols should appear at the same display column (visually aligned).
       -- Box-drawing chars (└──) are 3 UTF-8 bytes but 1 display column each,
-      -- so byte offsets differ — compare display widths instead.
+      -- so byte offsets differ; compare display widths instead.
       local strdw = vim.fn.strdisplaywidth
       local bamb_disp = strdw(bamb_line:sub(1, bamb_pk - 1))
       local cons_disp = strdw(cons_line:sub(1, cons_pk - 1))
@@ -235,7 +235,7 @@ do
       -- No column name segment should exceed 13 display chars (12 + "…")
       -- Split on the double-space separator and check each part after the icon
       for part in line_str:gmatch("%S+") do
-        -- parts like "unanimous_wi…" — extract just the name portion (after icon byte)
+        -- parts like "unanimous_wi…": extract just the name portion (after icon byte)
         if part ~= "●" and part ~= "⬡" and part ~= "○" and
            part ~= "t" and not part:match("^%+%d") then
           ok(vim.fn.strdisplaywidth(part) <= 13,

@@ -3,7 +3,7 @@
 --- Registered as gG in grid (view.lua) and schema sidebar (schema.lua)
 ---
 --- Antifragile design: every table is on exactly one unique line.
---- Navigation uses line_to_node[row] — pure row lookup, zero column math.
+--- Navigation uses line_to_node[row]: pure row lookup, zero column math.
 --- Adding tables or columns never breaks layout; tree just grows vertically.
 
 local M = {}
@@ -145,7 +145,7 @@ end
 -- ── tree collector (pass 1) ───────────────────────────────────────────────────
 
 --- Collect {name, name_prefix, col_sum} records for a subtree (DFS).
---- Does NOT build lines — caller does alignment pass after.
+--- Does NOT build lines; caller does alignment pass after.
 --- col_sums: pre-computed {tbl → summary string} with per-slot widths applied.
 local function collect_subtree(t, line_prefix, is_root, is_last,
                                 children_of, entries, visited, col_sums)
@@ -553,7 +553,7 @@ function M.show(url, scroll_to)
     end
   end)
 
-  -- <CR>: open table under cursor in grid (pure row lookup — no column math)
+  -- <CR>: open table under cursor in grid (pure row lookup, no column math)
   map("<CR>", function()
     local cur_row = vim.api.nvim_win_get_cursor(0)[1]
     local node    = line_to_node[cur_row]
@@ -565,7 +565,7 @@ function M.show(url, scroll_to)
     require("dadbod-grip").open(node.name, url)
   end)
 
-  -- f: follow FK — jump to the referenced table in the tree, push history
+  -- f: follow FK, jump to the referenced table in the tree, push history
   local CANCEL = "\0"
   map("f", function()
     local cur_row = vim.api.nvim_win_get_cursor(0)[1]

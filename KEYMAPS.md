@@ -151,7 +151,7 @@ Note: explain query plan is accessible via `gx` (removed from tab system).
 | Key | Action |
 |-----|--------|
 | `<C-CR>` | Execute query |
-| (auto) | SQL completion fires as you type — tables, columns, aliases, federation |
+| (auto) | SQL completion fires as you type: tables, columns, aliases, federation |
 | `<C-Space>` | Manually trigger SQL completion |
 | `<C-x><C-o>` | SQL completion: Vim-standard omnifunc / nvim-cmp source |
 | `gA` | AI SQL generation |

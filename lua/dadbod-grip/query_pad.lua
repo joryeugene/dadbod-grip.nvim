@@ -10,7 +10,7 @@ local _pad_bufnr = nil
 --- Register completion keymaps for the query pad buffer.
 --- Called once at buffer creation and re-called on BufEnter (via vim.schedule) to
 --- override buffer-local keymaps that completion plugins (blink.cmp etc.) register
---- on every BufEnter. Last registration wins — ours must be last.
+--- on every BufEnter. Last registration wins; ours must be last.
 local function setup_completion_keymaps(bufnr)
   local function fk(s)
     return vim.api.nvim_replace_termcodes(s, true, true, true)
@@ -292,12 +292,12 @@ local function setup_keymaps(bufnr, url)
   local VIEW_MAP = { [4]="er_diagram", [5]="stats", [6]="columns",
                      [7]="fk", [8]="indexes", [9]="constraints" }
 
-  -- 1: schema sidebar (primary — not in sidebar right now)
+  -- 1: schema sidebar (primary, not in sidebar right now)
   vim.keymap.set("n", "1", function()
     require("dadbod-grip.schema").toggle(cur_url())
   end, { buffer = bufnr, silent = true, desc = "Grip: schema sidebar" })
 
-  -- 2: query history (secondary — already in query pad)
+  -- 2: query history (secondary, already in query pad)
   vim.keymap.set("n", "2", function()
     require("dadbod-grip.history").pick(function(sql_content)
       vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(sql_content, "\n"))
