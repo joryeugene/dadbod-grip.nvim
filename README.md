@@ -46,8 +46,8 @@ An example database is included. `:GripStart` opens it with seventeen tables and
 ## Quickstart
 
 ```lua
--- lazy.nvim
-{ "joryeugene/dadbod-grip.nvim" }
+-- lazy.nvim (always latest stable release)
+{ "joryeugene/dadbod-grip.nvim", version = "*" }
 ```
 
 Then `:GripConnect` to pick your database. That's it. Schema sidebar + query pad open automatically.
@@ -439,11 +439,14 @@ Note: explain query plan is at `gx` (Query Doctor).
 
 ### lazy.nvim (recommended)
 
-The plugin ships a `lazy.lua` spec so all commands work as lazy-load triggers automatically:
+The plugin ships a `lazy.lua` spec so all commands work as lazy-load triggers automatically.
+
+`version = "*"` tracks the latest stable release tag. Omit it to track HEAD (rolling).
 
 ```lua
 {
   "joryeugene/dadbod-grip.nvim",
+  version = "*",   -- always latest stable; remove to track HEAD
 }
 ```
 
@@ -452,6 +455,7 @@ The plugin ships a `lazy.lua` spec so all commands work as lazy-load triggers au
 ```lua
 {
   "joryeugene/dadbod-grip.nvim",
+  version = "*",
   keys = {
     { "<leader>db", "<cmd>GripConnect<cr>",  desc = "DB connect" },
     { "<leader>dg", "<cmd>Grip<cr>",         desc = "DB grid" },
@@ -491,7 +495,14 @@ Without nvim-cmp, completions fire automatically as you type (TextChangedI) and 
 ```lua
 use {
   "joryeugene/dadbod-grip.nvim",
+  tag = "v*",   -- latest stable release
 }
+```
+
+### vim-plug
+
+```vim
+Plug 'joryeugene/dadbod-grip.nvim', { 'tag': 'v*' }
 ```
 
 ## Configuration
