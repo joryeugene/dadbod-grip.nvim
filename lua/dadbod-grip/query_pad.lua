@@ -6,6 +6,72 @@ local M = {}
 
 local _pad_bufnr = nil
 
+--- Register completion keymaps for the query pad buffer.
+--- Called once at buffer creation and re-called on BufEnter (via vim.schedule) to
+--- override buffer-local keymaps that completion plugins (blink.cmp etc.) register
+--- on every BufEnter. Last registration wins — ours must be last.
+local function setup_completion_keymaps(bufnr)
+  local function fk(s)
+    return vim.api.nvim_replace_termcodes(s, true, true, true)
+  end
+
+  -- C-Space: alias for <C-x><C-o>. Vim passes the actual typed word as base,
+  -- so context parsing (table/column/keyword) works correctly.
+  vim.keymap.set("i", "<C-Space>", function()
+    vim.api.nvim_feedkeys(fk("<C-x><C-o>"), "n", false)
+  end, { buffer = bufnr, silent = true, desc = "Grip: trigger SQL completion" })
+
+  -- Tab: navigate cmp popup → navigate native popup → trigger omnifunc → literal tab.
+  vim.keymap.set("i", "<Tab>", function()
+    local ok, cmp = pcall(require, "cmp")
+    if ok and cmp.visible() then
+      cmp.select_next_item({ behavior = cmp.SelectBehavior.Select })
+    elseif vim.fn.pumvisible() == 1 then
+      vim.api.nvim_feedkeys(fk("<C-n>"), "n", false)
+    else
+      local line = vim.api.nvim_get_current_line()
+      local col  = vim.api.nvim_win_get_cursor(0)[2]
+      if line:sub(1, col):match("[%a%d_%.%*]$") then
+        vim.api.nvim_feedkeys(fk("<C-x><C-o>"), "n", false)
+      else
+        vim.api.nvim_feedkeys(fk("<Tab>"), "n", false)
+      end
+    end
+  end, { buffer = bufnr, silent = true, desc = "Grip: trigger or navigate completion" })
+
+  -- Down/Up/S-Tab: navigate popup (cmp or native), fall through otherwise.
+  local function nav(next_key, prev_key, is_next)
+    return function()
+      local ok, cmp = pcall(require, "cmp")
+      if ok and cmp.visible() then
+        if is_next then
+          cmp.select_next_item({ behavior = cmp.SelectBehavior.Select })
+        else
+          cmp.select_prev_item({ behavior = cmp.SelectBehavior.Select })
+        end
+      elseif vim.fn.pumvisible() == 1 then
+        vim.api.nvim_feedkeys(fk(is_next and "<C-n>" or "<C-p>"), "n", false)
+      else
+        vim.api.nvim_feedkeys(fk(is_next and next_key or prev_key), "n", false)
+      end
+    end
+  end
+  vim.keymap.set("i", "<Down>",  nav("<Down>",  "<Up>",   true),  { buffer = bufnr, silent = true, desc = "Grip: next completion or down" })
+  vim.keymap.set("i", "<Up>",    nav("<Down>",  "<Up>",   false), { buffer = bufnr, silent = true, desc = "Grip: prev completion or up" })
+  vim.keymap.set("i", "<S-Tab>", nav("<S-Tab>", "<S-Tab>",false), { buffer = bufnr, silent = true, desc = "Grip: prev completion or shift-tab" })
+
+  -- CR: confirm selected item; otherwise normal newline.
+  vim.keymap.set("i", "<CR>", function()
+    local ok, cmp = pcall(require, "cmp")
+    if ok and cmp.visible() and cmp.get_selected_entry() then
+      cmp.confirm({ select = false })
+    elseif vim.fn.pumvisible() == 1 then
+      vim.api.nvim_feedkeys(fk("<C-y>"), "n", false)
+    else
+      vim.api.nvim_feedkeys(fk("<CR>"), "n", false)
+    end
+  end, { buffer = bufnr, silent = true, desc = "Grip: confirm completion or newline" })
+end
 
 --- Get or create the query pad buffer.
 local function ensure_buf(url)
@@ -52,6 +118,17 @@ local function ensure_buf(url)
     callback = function()
       local saved = require("dadbod-grip.saved")
       saved.save_prompt(_pad_bufnr)
+    end,
+  })
+
+  -- BufEnter: re-register completion keymaps after completion plugins (blink.cmp etc.)
+  -- have had their BufEnter handlers run. vim.schedule defers us to after all BufEnter
+  -- autocmds, so our buffer-local keymaps are always registered last and win.
+  local bufnr_ref = _pad_bufnr
+  vim.api.nvim_create_autocmd("BufEnter", {
+    buffer = _pad_bufnr,
+    callback = function()
+      vim.schedule(function() setup_completion_keymaps(bufnr_ref) end)
     end,
   })
 
@@ -113,21 +190,7 @@ local function setup_keymaps(bufnr, url)
     if sql then run_sql(cur_url(), sql) end
   end, { buffer = bufnr, silent = true, desc = "Grip: run query" })
 
-  -- C-Space: manually trigger SQL completion (more intuitive than <C-x><C-o>).
-  -- Prefers nvim-cmp when available; falls back to native omnifunc popup.
-  vim.keymap.set("i", "<C-Space>", function()
-    local ok, cmp = pcall(require, "cmp")
-    if ok then
-      cmp.complete()
-    else
-      local comp = require("dadbod-grip.completion")
-      local col   = comp.omnifunc(1, "")
-      local items = comp.omnifunc(0, "")
-      if type(items) == "table" and #items > 0 then
-        vim.fn.complete(col + 1, items)
-      end
-    end
-  end, { buffer = bufnr, silent = true, desc = "Grip: trigger SQL completion" })
+  setup_completion_keymaps(bufnr)
 
   -- Visual C-CR: run selection (line-wise: runs all selected lines)
   vim.keymap.set("v", "<C-CR>", function()
@@ -162,6 +225,11 @@ local function setup_keymaps(bufnr, url)
   vim.keymap.set("n", "gb", function()
     require("dadbod-grip.schema").toggle(cur_url())
   end, { buffer = bufnr, silent = true, desc = "Grip: schema browser" })
+
+  -- gG: ER diagram float
+  vim.keymap.set("n", "gG", function()
+    require("dadbod-grip.er_diagram").toggle(cur_url())
+  end, { buffer = bufnr, silent = true, desc = "Grip: ER diagram" })
 
   -- gw: jump to main content window: grid > welcome (silent no-op if neither exists)
   vim.keymap.set("n", "gw", function()
@@ -215,6 +283,61 @@ local function setup_keymaps(bufnr, url)
   end
   vim.keymap.set("n", "gC", _pick_conn, { buffer = bufnr, silent = true, desc = "Grip: switch connection" })
   vim.keymap.set("n", "<C-g>", _pick_conn, { buffer = bufnr, silent = true, desc = "Grip: switch connection" })
+
+  -- ── tab view keymaps (1-9) ───────────────────────────────────────────────
+  -- 1-3: surface navigation  4=ER diagram float  5-9: table-depth views
+  local VIEW_MAP = { [4]="er_diagram", [5]="stats", [6]="columns",
+                     [7]="fk", [8]="indexes", [9]="constraints" }
+
+  -- 1: schema sidebar (primary — not in sidebar right now)
+  vim.keymap.set("n", "1", function()
+    require("dadbod-grip.schema").toggle(cur_url())
+  end, { buffer = bufnr, silent = true, desc = "Grip: schema sidebar" })
+
+  -- 2: query history (secondary — already in query pad)
+  vim.keymap.set("n", "2", function()
+    require("dadbod-grip.history").pick(function(sql_content)
+      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(sql_content, "\n"))
+      vim.bo[bufnr].modified = false
+    end)
+  end, { buffer = bufnr, silent = true, desc = "Grip: query history" })
+
+  -- 3: jump to grid (primary), or table picker if no grid is open
+  vim.keymap.set("n", "3", function()
+    local view_mod = require("dadbod-grip.view")
+    local win = view_mod.find_content_win()
+    if win then
+      vim.api.nvim_set_current_win(win)
+    else
+      local u = cur_url()
+      require("dadbod-grip.picker").pick_table(u, function(name)
+        require("dadbod-grip").open(name, u)
+      end)
+    end
+  end, { buffer = bufnr, silent = true, desc = "Grip: jump to grid" })
+
+  -- 4: ER diagram float; 5-9: jump to grid + switch to that view
+  for n = 4, 9 do
+    local view_name = VIEW_MAP[n]
+    vim.keymap.set("n", tostring(n), function()
+      if view_name == "er_diagram" then
+        require("dadbod-grip.er_diagram").toggle(cur_url())
+        return
+      end
+      local view_mod = require("dadbod-grip.view")
+      local win = view_mod.find_content_win()
+      if win then
+        local gbuf = vim.api.nvim_win_get_buf(win)
+        vim.api.nvim_set_current_win(win)
+        view_mod.switch_view(gbuf, view_name)
+      else
+        local u = cur_url()
+        require("dadbod-grip.picker").pick_table(u, function(name)
+          require("dadbod-grip").open(name, u)
+        end)
+      end
+    end, { buffer = bufnr, silent = true, desc = "Grip: view " .. view_name })
+  end
 end
 
 --- Open the query pad.

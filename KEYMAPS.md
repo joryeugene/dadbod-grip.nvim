@@ -104,17 +104,27 @@
 | `gy` | Yank table as Markdown pipe table |
 
 ### Tab Views (1-9)
-| Key | Action |
-|-----|--------|
-| `1` | Table picker |
-| `2` | Records (default view) |
-| `3` | Query History |
-| `4` | Column Stats |
-| `5` | Explain (query plan) |
+
+Surface navigation (smart: "press again" = secondary action):
+
+| Key | Primary | Secondary (already on that surface) |
+|-----|---------|-------------------------------------|
+| `1` | Open sidebar | Connections picker |
+| `2` | Open query pad | Query history |
+| `3` | Grid / records | Table picker |
+
+Table-depth views (consistent across grid, sidebar, query pad):
+
+| Key | View |
+|-----|------|
+| `4` | ER diagram float (all tables + FK relationships, same as `gG`) |
+| `5` | Column Stats |
 | `6` | Columns (schema) |
 | `7` | Foreign Keys |
 | `8` | Indexes |
 | `9` | Constraints |
+
+Note: explain query plan is accessible via `gx` (removed from tab system).
 
 ### Schema & Workflow
 | Key | Action |
@@ -147,6 +157,15 @@
 | `gA` | AI SQL generation |
 | `?` | Show help |
 | `q` | Close query pad |
+| `1` | Open sidebar |
+| `2` | Query history (secondary: already in query pad) |
+| `3` | Jump to grid (table picker if no grid is open) |
+| `4` | ER diagram float |
+| `5` | Jump to grid + Column Stats view |
+| `6` | Jump to grid + Columns view |
+| `7` | Jump to grid + Foreign Keys view |
+| `8` | Jump to grid + Indexes view |
+| `9` | Jump to grid + Constraints view |
 
 ## Schema Sidebar (ft=grip-schema)
 
@@ -162,8 +181,11 @@
 | `gd` | Detach attached database |
 | `gG` | ER diagram float (all tables + FK relationships) |
 | `?` | Show help |
-| `1` | Table picker |
-| `2-9` | Same tab views as grid (2=Records, 3=History, 4=Stats, 5=Explain, 6=Columns, 7=FK, 8=Indexes, 9=Constraints) |
+| `1` | Connections picker (secondary: already in sidebar) |
+| `2` | Open query pad |
+| `3` | Jump to grid / open table under cursor as records (table picker if no node) |
+| `4` | ER diagram float |
+| `5-9` | Open table under cursor in that view (5=Stats, 6=Columns, 7=FK, 8=Indexes, 9=Constraints) |
 
 ## Free `g` Keymaps (as of v3.1)
 

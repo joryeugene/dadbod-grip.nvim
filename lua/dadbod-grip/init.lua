@@ -1164,10 +1164,10 @@ function M.open_welcome()
     "  https://host/data.parquet   (remote via httpfs)",
     "",
     "  ── Navigate ───────────────────────────────────",
-    "  1       table picker         2-9   sidebar tabs (Cols/FK/Idx)",
-    "  go      open table           H/L   page",
-    "  gT      table picker (grid)  gb    schema browser",
-    "  w/b/e   column nav",
+    "  1       schema sidebar        2     query pad",
+    "  3       table picker          gO    open as editable table",
+    "  w/b/e   column nav            H/L   page",
+    "  4-9     ER/Stats/Cols/FK/Idx/Cstr",
     "",
     "  ── Edit ───────────────────────────────────────",
     "  <CR>    edit cell            x     set null",
@@ -1288,10 +1288,36 @@ function M.open_welcome()
   wmap("gb",    function()
     require("dadbod-grip.schema").toggle(cur_conn())
   end, "Schema browser")
+  wmap("gG", function()
+    local conn = cur_conn()
+    if not conn then
+      vim.notify("ER Diagram: no database connection", vim.log.levels.WARN)
+      return
+    end
+    require("dadbod-grip.er_diagram").toggle(conn)
+  end, "ER diagram")
   wmap("?",     function() view.show_help() end, "Full keymap help")
   wmap("A",     function()
     require("dadbod-grip.ai").ask(cur_conn())
   end, "AI SQL assistant")
+
+  -- 1-3: surface navigation from welcome screen
+  wmap("1", function()
+    require("dadbod-grip.schema").toggle(cur_conn())
+  end, "Schema sidebar")
+  wmap("2", function()
+    local conn = cur_conn()
+    if conn then
+      require("dadbod-grip.query_pad").open(conn)
+    else
+      do_connect()
+    end
+  end, "Query pad")
+  wmap("3", function()
+    local conn = cur_conn()
+    if not conn then do_connect(); return end
+    require("dadbod-grip.picker").pick_table(conn, function(t) M.open(t, conn) end)
+  end, "Table picker")
 
   -- Dev secret: Chonk at the center of the grip vortex
   wmap(";", function()

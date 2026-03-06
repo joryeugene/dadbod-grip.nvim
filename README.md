@@ -34,7 +34,7 @@ Connect to PostgreSQL, MySQL, SQLite, DuckDB, or MotherDuck and edit tables like
 | **Schema browser** `gb` sidebar, PK/FK markers | **Data diff** `gD` compare tables by primary key | **Multi-DB** PostgreSQL · SQLite · MySQL · DuckDB · MotherDuck |
 | **Cross-DB federation** `:GripAttach` Postgres · MySQL · SQLite · MotherDuck in one DuckDB session | **Column filter builder** `gF` with operators and wildcards | **Schema grouping** sidebar sections per attached database |
 | **Saved queries** project-local `.grip/queries/` | **Export** CSV · TSV · JSON · SQL · Markdown · Table | **Connection profiles** global auto-persist |
-| **Tab views** `1`-`9` History · Stats · Explain · Columns · FK | **Column Stats** `4` null% · distinct · min · max | **Query History** `3` filtered per table |
+| **Surface nav** `1`-`3` sidebar · query pad · grid (press again for secondary) | **ER diagram** `4` tree-spine layout with FK follow and back navigation | **Depth views** `5`-`9` Stats · Columns · FK · Indexes · Constraints |
 | **Write mode** `:Grip file --write` · edit files and write back to disk | **Watch mode** `:Grip file --watch` · auto-refresh grid on a timer | **Picker `W` / `!`** open any connection in watch or write mode |
 
 <p align="center">
@@ -145,7 +145,7 @@ work without credentials.
 - **AI SQL generation** via `A` or `:GripAsk` turning natural language into SQL queries using Anthropic, OpenAI, Gemini, or local Ollama. AI reads existing query pad SQL to modify it rather than generating from scratch. Schema context cached per connection.
 
 ### Schema and Workflow
-- **ER diagram** via `gG` rendering every table as a box with columns and type indicators, every foreign key as an arrow, and the full FK chain depth laid out left-to-right. Press `<CR>` on any table header to jump directly into that table's grid. Press `gG` again to return to the map. Works from the grid, the query pad, and the schema sidebar. Use it to navigate an unfamiliar schema the way you'd use a subway map.
+- **ER diagram** via `gG` or `4` — a tree-spine float showing every table with PK/FK/column summary, arranged by FK depth with box-drawing connectors. Press `<CR>` on any table to open its grid. Press `f` to follow a foreign key and `H` to go back (breadcrumb trail updates). `Tab`/`S-Tab` cycle between tables. Press `gG` or `q` to close. Column names truncate gracefully; overflow columns show a right-aligned `+N` count. Works from the grid, the query pad, and the schema sidebar.
 - **Schema browser** via `:GripSchema` or `gb` showing a sidebar tree with columns, types, and PK/FK markers. `gb` opens/focuses the browser from any buffer; pressing `gb` from inside closes it.
 - **Table picker** via `:GripTables` or `gT` / `gt` providing a fuzzy finder with column preview. Available from all three buffers: grid, query pad, and sidebar. In the sidebar, `go` opens the table under cursor with `ORDER BY created_at / PK DESC` so the latest rows appear first.
 - **SQL query pad** via `:GripQuery` or `q` opening a scratch buffer that pipes results into editable grids.
@@ -281,23 +281,28 @@ All keybindings are buffer-local to the grip grid. Press `?` for in-buffer help.
 | `gf` | Follow foreign key under cursor |
 | `<C-o>` | Go back in FK navigation stack |
 
-### Tab Views (1-9)
+### Surface Navigation and Depth Views (1-9)
 
-One keypress switches the current grid between facets of the focused table. The tab bar appears in the hint line and the buffer title updates to show the active view.
+Keys `1`–`3` navigate between the three primary surfaces. Each key has a **primary** action (go to that surface) and a **secondary** action (press again when already there):
+
+| Key | Primary | Secondary (already on that surface) |
+|-----|---------|-------------------------------------|
+| `1` | Schema sidebar | Connections picker |
+| `2` | Query pad | Query history |
+| `3` | Grid / records | Table picker |
+
+Keys `4`–`9` are **depth views** — lenses applied to the current table, available from grid, sidebar, and query pad:
 
 | Key | View | Description |
 |-----|------|-------------|
-| `1` | Table picker | Fuzzy-find any table and open it |
-| `2` | Records | Default data grid (returns from any tab) |
-| `3` | Query History | Recent queries filtered to this table |
-| `4` | Column Stats | Count, null%, distinct count, min, max per column |
-| `5` | Explain | Query plan for the current query (Query Doctor popup) |
+| `4` | ER diagram | Tree-spine FK map (all tables, box-drawing connectors) |
+| `5` | Column Stats | Count, null%, distinct count, min, max per column |
 | `6` | Columns | Name, type, nullable, default, PK/FK markers |
 | `7` | Foreign Keys | Outbound (this table →) and inbound (→ this table) |
 | `8` | Indexes | Name, type, unique flag, columns covered |
 | `9` | Constraints | CHECK, UNIQUE, NOT NULL constraints |
 
-Keys `2`–`9` also work in the schema sidebar to open any table directly in the selected view.
+Note: explain query plan is at `gx` (Query Doctor).
 
 ### Analysis & Export
 
@@ -362,6 +367,11 @@ Keys `2`–`9` also work in the schema sidebar to open any table directly in the
 | `gw` | Jump to grid window |
 | `gb` | Schema browser (focus if open; close from inside) |
 | `gC` / `<C-g>` | Switch database connection |
+| `gG` / `4` | ER diagram float |
+| `1` | Schema sidebar |
+| `2` | Query history (secondary — already in query pad) |
+| `3` | Jump to grid (table picker if no grid is open) |
+| `5`–`9` | Jump to grid in depth view (5=Stats, 6=Columns, 7=FK, 8=Indexes, 9=Constraints) |
 
 ### Schema Sidebar
 
@@ -379,8 +389,11 @@ Keys `2`–`9` also work in the schema sidebar to open any table directly in the
 | `y` | Yank table or column name |
 | `r` | Refresh schema |
 | `go` | Open table under cursor, ORDER BY latest (created_at / PK DESC) |
-| `1` | Table picker (fuzzy finder) |
-| `2`–`9` | Open table in tab view (Records / History / Stats / Explain / Columns / FK / Indexes / Constraints) |
+| `1` | Connections picker (secondary — already in sidebar) |
+| `2` | Open query pad |
+| `3` | Jump to grid / open table under cursor (table picker if no node) |
+| `4` | ER diagram float |
+| `5`–`9` | Open table under cursor in depth view (5=Stats, 6=Columns, 7=FK, 8=Indexes, 9=Constraints) |
 | `gT` / `gt` | Table picker (fuzzy finder) |
 | `gb` / `<Esc>` | Close sidebar |
 | `gw` | Jump to grid |

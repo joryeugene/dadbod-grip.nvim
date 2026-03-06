@@ -202,13 +202,36 @@ local function item(word, menu)
   return { word = word, menu = menu or "" }
 end
 
+--- SQL keywords returned when no schema context is detected (start of query).
+local SQL_KEYWORDS = {
+  "SELECT", "FROM", "WHERE", "JOIN", "LEFT JOIN", "RIGHT JOIN", "INNER JOIN",
+  "FULL OUTER JOIN", "ON", "GROUP BY", "ORDER BY", "HAVING", "LIMIT", "OFFSET",
+  "UNION", "UNION ALL", "INTERSECT", "EXCEPT", "WITH", "AS", "DISTINCT",
+  "INSERT INTO", "UPDATE", "DELETE FROM", "SET", "VALUES",
+  "AND", "OR", "NOT", "NULL", "IS NULL", "IS NOT NULL", "IN", "NOT IN",
+  "LIKE", "ILIKE", "BETWEEN", "CASE", "WHEN", "THEN", "ELSE", "END",
+  "COUNT", "SUM", "AVG", "MIN", "MAX", "COALESCE", "NULLIF", "CAST",
+}
+
 --- Return completion items for `before` (text before cursor) and the given URL.
 --- Optional `aliases` table maps SQL alias -> table_name for dotted completion.
 --- Returns array of { word, menu } items.
 function M.complete(before, url, aliases)
   aliases = aliases or {}
   local ctx = M.parse_context_full(before)
-  if not ctx then return {} end
+  if not ctx then
+    -- No SQL context yet: complete keywords by prefix (e.g. "SEL" -> "SELECT").
+    local word = before:match("([%w_]*)$") or ""
+    if word == "" then return {} end
+    local up_word = word:upper()
+    local kw_items = {}
+    for _, kw in ipairs(SQL_KEYWORDS) do
+      if kw:sub(1, #up_word) == up_word then
+        table.insert(kw_items, item(kw, "[keyword]"))
+      end
+    end
+    return kw_items
+  end
 
   local schema = M.get_schema(url)
   local items = {}
@@ -294,6 +317,20 @@ function M.complete(before, url, aliases)
     end
   end
 
+  -- For table/column contexts, also append keyword matches for the typed word.
+  -- This lets "SELECT col f" offer both column names AND "FROM".
+  -- Skip dotted/fed_column: ctx.word is after the dot, keywords don't apply there.
+  if ctx.type == "table" or ctx.type == "column" then
+    local up_word = ctx.word:upper()
+    if up_word ~= "" then
+      for _, kw in ipairs(SQL_KEYWORDS) do
+        if kw:sub(1, #up_word) == up_word then
+          table.insert(items, item(kw, "[keyword]"))
+        end
+      end
+    end
+  end
+
   return items
 end
 
@@ -355,43 +392,55 @@ end
 --- url_fn() returns the current connection URL (re-read live on each keystroke).
 --- Kept separate from omnifunc so nvim-cmp users who add { name = 'omni' } also work.
 function M.setup_auto_complete(bufnr, url_fn)
+  -- Disable nvim-cmp for this specific buffer so it doesn't conflict with the
+  -- native popup. BufEnter fires before insert mode, so the disable is in place
+  -- before TextChangedI. No-op when nvim-cmp is not installed.
+  vim.api.nvim_create_autocmd("BufEnter", {
+    buffer = bufnr,
+    callback = function()
+      pcall(function() require("cmp").setup.buffer({ enabled = false }) end)
+    end,
+  })
+
   vim.api.nvim_create_autocmd("TextChangedI", {
     buffer = bufnr,
     callback = function()
-      local url = url_fn()
-      if not url or url == "" then return end
+      -- Defer past all TextChangedI handlers (blink, cmp, etc.) so their popups
+      -- appear first. We only show our popup if nothing else is visible.
+      vim.schedule(function()
+        if vim.fn.pumvisible() == 1 then return end
 
-      local line = vim.api.nvim_get_current_line()
-      local col  = vim.api.nvim_win_get_cursor(0)[2]
-      local before = line:sub(1, col)
+        local url = url_fn()
+        if not url or url == "" then return end
 
-      local ctx = M.parse_context_full(before)
-      if not ctx then return end
+        local line = vim.api.nvim_get_current_line()
+        local col  = vim.api.nvim_win_get_cursor(0)[2]
+        local before = line:sub(1, col)
 
-      -- Keyword contexts (table/column): require ≥1 char to avoid firing on bare keyword
-      if (ctx.type == "table" or ctx.type == "column") and #ctx.word == 0 then return end
+        -- Require ≥1 word char to avoid firing on space, comma, newline.
+        local word = before:match("([%w_]*)$") or ""
+        if word == "" then return end
 
-      -- Extract aliases from full buffer for alias-aware dotted completion
-      local all_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-      local aliases   = M.extract_aliases(table.concat(all_lines, "\n"))
+        local all_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        local aliases   = M.extract_aliases(table.concat(all_lines, "\n"))
 
-      local raw = M.complete(before, url, aliases)
-      if #raw == 0 then return end
+        local raw = M.complete(before, url, aliases)
+        if #raw == 0 then return end
 
-      -- Compute start column (same walk-back as omnifunc findstart)
-      local start = col
-      while start > 0 do
-        local ch = line:sub(start, start)
-        if ch:match("[%w_]") then start = start - 1 else break end
-      end
+        local start = col
+        while start > 0 do
+          local ch = line:sub(start, start)
+          if ch:match("[%w_]") then start = start - 1 else break end
+        end
 
-      local vim_items = {}
-      for _, it in ipairs(raw) do
-        table.insert(vim_items, { word = it.word, menu = it.menu, icase = 1 })
-      end
-      if vim.fn.pumvisible() == 0 then
-        vim.fn.complete(start + 1, vim_items)
-      end
+        local vim_items = {}
+        for _, it in ipairs(raw) do
+          table.insert(vim_items, { word = it.word, menu = it.menu, icase = 1 })
+        end
+        if vim.fn.pumvisible() == 0 then
+          vim.fn.complete(start + 1, vim_items)
+        end
+      end)
     end,
   })
 end

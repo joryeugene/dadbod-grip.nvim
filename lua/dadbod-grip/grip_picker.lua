@@ -92,7 +92,7 @@ function M.open(opts)
     local max_w = math.min(vim.o.columns - 6, 70)
     local content_w = min_w
     for _, item in ipairs(flist) do
-      content_w = math.max(content_w, #tostring(display(item)) + 6)
+      content_w = math.max(content_w, vim.fn.strdisplaywidth(tostring(display(item))) + 6)
     end
     return clamp(content_w, min_w, max_w)
   end

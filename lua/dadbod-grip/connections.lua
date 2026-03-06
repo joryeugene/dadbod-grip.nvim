@@ -66,6 +66,35 @@ local function mask_url(url)
   end))
 end
 
+--- Short URL for display: strips credentials, keeps host/dbname or filename only.
+local function short_url(url)
+  if not url or url == "" then return url end
+  -- duckdb::memory: stays as-is
+  if url == "duckdb::memory:" then return "duckdb::memory:" end
+  -- Strip credentials: scheme://user:pass@host → scheme://host
+  local stripped = url:gsub("(://)[^:@/]*:[^@/]*@", "%1")
+  stripped = stripped:gsub("(://)[^:@/]*@", "%1")
+  -- For postgres/mysql: keep scheme://host/dbname only
+  local pg = stripped:match("^(postgres[^:]*://[^/?]+/[^/?]+)")
+    or stripped:match("^(mysql[^:]*://[^/?]+/[^/?]+)")
+  if pg then
+    local out = pg:gsub("^[^:]+://", "")  -- drop scheme
+    if #out > 40 then out = out:sub(1, 39) .. "…" end
+    return out
+  end
+  -- For sqlite/duckdb file paths: keep filename only
+  local fname = stripped:match("([^/\\]+%.%a+)$")
+  if fname then
+    if #fname > 40 then fname = fname:sub(1, 39) .. "…" end
+    return fname
+  end
+  -- Fallback: strip scheme, truncate
+  local bare = stripped:gsub("^%a[%a%d+%-%.]*://", "")
+  if bare == "" then bare = stripped end
+  if #bare > 40 then bare = bare:sub(1, 39) .. "…" end
+  return bare
+end
+
 --- Read connections from a JSON file.
 local function read_json_connections(path, source)
   if vim.fn.filereadable(path) == 0 then return {} end
@@ -137,15 +166,17 @@ local function read_gdbs()
   return result
 end
 
---- List all connections from all sources, deduplicated by URL.
+--- List all connections from all sources, deduplicated by URL and name.
 function M.list()
   local all = {}
-  local seen = {}
+  local seen = {}       -- keyed by URL
+  local seen_names = {} -- keyed by name (secondary dedup across sources)
 
   -- File connections first (user-managed)
   for _, c in ipairs(read_file_connections()) do
-    if not seen[c.url] then
+    if not seen[c.url] and not seen_names[c.name] then
       seen[c.url] = true
+      seen_names[c.name] = true
       table.insert(all, c)
     end
   end
@@ -158,8 +189,9 @@ function M.list()
   for _, gc in ipairs(global_existing) do global_seen[gc.url] = true end
 
   for _, c in ipairs(gdbs) do
-    if not seen[c.url] then
+    if not seen[c.url] and not seen_names[c.name] then
       seen[c.url] = true
+      seen_names[c.name] = true
       table.insert(all, c)
     end
     -- Persist to global if not already there
@@ -184,13 +216,15 @@ function M.list()
 
   -- $DATABASE_URL
   local env_url = os.getenv("DATABASE_URL")
-  if env_url and env_url ~= "" and not seen[env_url] then
+  if env_url and env_url ~= "" and not seen[env_url] and not seen_names["$DATABASE_URL"] then
+    seen_names["$DATABASE_URL"] = true
     table.insert(all, { name = "$DATABASE_URL", url = env_url, source = "env" })
   end
 
   -- Current vim.g.db (if set and not already listed)
   local gdb = vim.g.db
-  if type(gdb) == "string" and gdb ~= "" and not seen[gdb] then
+  if type(gdb) == "string" and gdb ~= "" and not seen[gdb] and not seen_names["vim.g.db"] then
+    seen_names["vim.g.db"] = true
     table.insert(all, { name = "vim.g.db", url = gdb, source = "global" })
   end
 
@@ -447,7 +481,10 @@ local function prompt_temp_connection()
 end
 
 --- Open a picker to select and switch connection. Uses grip_picker (zero external deps).
-function M.pick()
+--- @param opts? { on_cancel?: function }  optional overrides; default on_cancel = open_welcome
+function M.pick(opts)
+  opts = opts or {}
+  local on_cancel = opts.on_cancel or function() require("dadbod-grip").open_welcome() end
   local conns = M.list()
   if #conns == 0 then
     prompt_new_connection()
@@ -475,18 +512,12 @@ function M.pick()
   require("dadbod-grip.grip_picker").open({
     title = "Connections",
     items = picker_items,
-    on_cancel = function() require("dadbod-grip").open_welcome() end,
+    on_cancel = on_cancel,
     display = function(c)
       if c._new or c._temp then return c.name end
-      local tag
-      if c.type == "file" or (not c.type and is_file_url(c.url)) then
-        tag = "[file] "
-      else
-        tag = "[db]   "
-      end
       local pad = string.rep(" ", max_name - vim.fn.strdisplaywidth(c.name))
-      local url = show_pass[c.url] and c.url or mask_url(c.url)
-      return tag .. c.name .. pad .. "  " .. url
+      local url_display = show_pass[c.url] and c.url or short_url(c.url)
+      return c.name .. pad .. "  " .. url_display
     end,
     on_select = function(c)
       if c._new then

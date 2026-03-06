@@ -43,12 +43,11 @@ local BINARY_PREFIX = "<binary"
 local MAX_COL_WIDTH = 40  -- overridden by setup opts
 
 -- ── tab view system ─────────────────────────────────────────────────────────
--- Numeric shortcuts: 1=table picker, 2-9=facet views of the current table.
+-- 1=sidebar/connections  2=query-pad/history  3=grid/table-picker
+-- 4=ER diagram  5=stats  6=columns  7=fk  8=indexes  9=constraints
 local VIEW_KEYS = {
-  [2] = "records",
-  [3] = "history",
-  [4] = "stats",
-  [5] = "explain",
+  [4] = "er_diagram",
+  [5] = "stats",
   [6] = "columns",
   [7] = "fk",
   [8] = "indexes",
@@ -62,7 +61,7 @@ local VIEW_LABELS = {
   constraints = "Con",
   stats       = "Stat",
   history     = "Hist",
-  explain     = "Exp",
+  er_diagram  = "ER",
 }
 
 local SEP_COL = "│"
@@ -99,6 +98,7 @@ local function ensure_highlights()
   vim.cmd("hi! GripDatePast  gui=italic ctermfg=243 guifg=#6c7086")
   vim.cmd("hi! GripUrl       gui=underline ctermfg=117 guifg=#89b4fa")
   vim.cmd("hi! GripWatch     gui=bold ctermfg=117 guifg=#89b4fa")
+  vim.cmd("hi! GripColHighlight ctermbg=237 guibg=#313244")
 end
 ensure_highlights() -- define groups on module load so welcome screen can use them
 
@@ -643,7 +643,7 @@ local function build_render(session, opts)
   if cv and cv ~= "records" then
     -- Metadata view: compact tab bar with current view marked (▶)
     local parts = {}
-    for i = 2, 9 do
+    for i = 4, 9 do
       local vn = VIEW_KEYS[i]
       local label = VIEW_LABELS[vn] or vn
       if vn == cv then
@@ -657,9 +657,9 @@ local function build_render(session, opts)
     local mt = session.pending_mutation.type or "SQL"
     hints = " a:execute " .. mt .. "  U:cancel  gs:preview SQL  q:query"
   elseif st.readonly then
-    hints = " r:refresh  Tab/w:col  gy:markdown  gq:saved  q:query  A:ai  2-9:tabs  ?:help"
+    hints = " r:refresh  Tab/w:col  gy:markdown  gq:saved  q:query  A:ai  4-9:views  ?:help"
   else
-    hints = " i:edit  c:clone  d:delete  a:apply  r:refresh  gq:saved  q:query  A:ai  2-9:tabs  ?:help"
+    hints = " i:edit  c:clone  d:delete  a:apply  r:refresh  gq:saved  q:query  A:ai  4-9:views  ?:help"
   end
   table.insert(lines, hints)
 
@@ -669,6 +669,7 @@ end
 
 -- ── namespace for extmarks ───────────────────────────────────────────────
 local ns = vim.api.nvim_create_namespace("dadbod_grip")
+local _col_hl_ns = vim.api.nvim_create_namespace("grip_col_hl")
 
 -- M.update_table_sessions(old_name, new_name): patch all open grip sessions
 -- that reference old_name after a table rename, then refresh them.
@@ -720,6 +721,7 @@ function M.render(bufnr, state)
   local ok, err = pcall(function()
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, rendered.lines)
     vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+    vim.api.nvim_buf_clear_namespace(bufnr, _col_hl_ns, 0, -1)
 
     for _, m in ipairs(rendered.marks) do
       vim.api.nvim_buf_set_extmark(bufnr, ns, m.line, m.col, {
@@ -2646,16 +2648,93 @@ function M._setup_keymaps(bufnr)
     vim.api.nvim_win_set_cursor(0, { last, cursor[2] })
   end, "Last data row")
 
-  -- ^: first column of current row (always)
+  -- k: move up, skipping separator and type rows (jump from first data row → header/type row)
+  map("k", function()
+    local session = M._sessions[bufnr]
+    if not session or not session._render then
+      vim.api.nvim_feedkeys("k", "n", false)
+      return
+    end
+    local r = session._render
+    local ds = r.data_start or 4
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local line = cursor[1]
+    local col_nr = cursor[2]
+    local vis_cols = r.visible_columns or (session.state and session.state.columns) or {}
+    -- From first data row or separator: jump to nearest useful row above (type row or header)
+    if line == ds or line == ds - 1 then
+      local target_line = ds - 2  -- line 3 (type row) when ds=5, line 2 (header) when ds=4
+      -- Use type_row_byte_positions when landing on type row, else hdr_byte_positions
+      local ref_bp = (ds == 5 and r.type_row_byte_positions) or r.hdr_byte_positions
+      -- Snap to same column using first data row byte positions
+      local data_bp = r.byte_positions and r.byte_positions[1]
+      local snap = data_bp and M._snap_col(vis_cols, data_bp, col_nr)
+      local col_name = snap and snap.col_name
+      local target_col = (col_name and ref_bp and ref_bp[col_name] and ref_bp[col_name].start) or col_nr
+      vim.api.nvim_win_set_cursor(0, { target_line, target_col })
+    else
+      vim.api.nvim_feedkeys("k", "n", false)
+    end
+  end, "Move up (skip separator)")
+
+  -- j: move down, skipping separator and type rows (jump from header/type row → first data row)
+  map("j", function()
+    local session = M._sessions[bufnr]
+    if not session or not session._render then
+      vim.api.nvim_feedkeys("j", "n", false)
+      return
+    end
+    local r = session._render
+    local ds = r.data_start or 4
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    local line = cursor[1]
+    local col_nr = cursor[2]
+    local vis_cols = r.visible_columns or (session.state and session.state.columns) or {}
+    -- From header/type/separator zone: jump directly to first data row
+    if line >= 2 and line < ds then
+      if not r.ordered or #r.ordered == 0 then
+        vim.api.nvim_feedkeys("j", "n", false)
+        return
+      end
+      -- Identify column from source row byte positions
+      local ref_bp
+      if line == 2 then
+        ref_bp = r.hdr_byte_positions
+      elseif r.type_row_byte_positions and line == ds - 2 then
+        ref_bp = r.type_row_byte_positions
+      else
+        ref_bp = r.hdr_byte_positions
+      end
+      local snap = ref_bp and M._snap_col(vis_cols, ref_bp, col_nr)
+      local col_name = snap and snap.col_name
+      -- Land on same column in first data row
+      local data_bp = r.byte_positions and r.byte_positions[1]
+      local target_col = (col_name and data_bp and data_bp[col_name] and data_bp[col_name].start) or col_nr
+      vim.api.nvim_win_set_cursor(0, { ds, target_col })
+    else
+      vim.api.nvim_feedkeys("j", "n", false)
+    end
+  end, "Move down (skip separator)")
+
+  -- Resolve byte-position map for any row including header/type rows.
+  local function resolve_row_bp(r, line)
+    local ds = r.data_start or 4
+    local di = line - ds + 1
+    if di < 1 then
+      if ds == 5 and line == ds - 2 then return r.type_row_byte_positions end
+      return r.hdr_byte_positions
+    end
+    return r.byte_positions and r.byte_positions[di]
+  end
+
+  -- ^: first column of current row (works on header, type, and data rows)
   map("^", function()
     local session = M._sessions[bufnr]
     if not session or not session._render then return end
     local r = session._render
     local cols = r.visible_columns or session.state.columns
     local cursor = vim.api.nvim_win_get_cursor(0)
-    local ds = r.data_start or 4
-    local row_order_idx = cursor[1] - ds + 1
-    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
+    local bp_row = resolve_row_bp(r, cursor[1])
     if not bp_row then return end
     local bp = bp_row[cols[1]]
     if not bp then return end
@@ -2669,9 +2748,7 @@ function M._setup_keymaps(bufnr)
     local r = session._render
     local cols = r.visible_columns or session.state.columns
     local cursor = vim.api.nvim_win_get_cursor(0)
-    local ds = r.data_start or 4
-    local row_order_idx = cursor[1] - ds + 1
-    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
+    local bp_row = resolve_row_bp(r, cursor[1])
     if not bp_row then return end
     local bp = bp_row[cols[1]]
     if not bp then return end
@@ -2889,16 +2966,14 @@ function M._setup_keymaps(bufnr)
     })
   end, "Toggle column visibility (multi-select)")
 
-  -- $: last column of current row
+  -- $: last column of current row (works on header, type, and data rows)
   map("$", function()
     local session = M._sessions[bufnr]
     if not session or not session._render then return end
     local r = session._render
     local cols = r.visible_columns or session.state.columns
     local cursor = vim.api.nvim_win_get_cursor(0)
-    local ds = r.data_start or 4
-    local row_order_idx = cursor[1] - ds + 1
-    local bp_row = r.byte_positions and r.byte_positions[row_order_idx]
+    local bp_row = resolve_row_bp(r, cursor[1])
     if not bp_row then return end
     local bp = bp_row[cols[#cols]]
     if not bp then return end
@@ -4248,23 +4323,57 @@ function M._setup_keymaps(bufnr)
   end, "AI SQL generation")
 
   -- ── tab view keymaps (1-9) ───────────────────────────────────────────────
-  -- 1: table picker
+  -- 1: schema sidebar (already in grid = always primary: open/focus sidebar)
   map("1", function()
-    local picker = require("dadbod-grip.picker")
     local s_url = M._sessions[bufnr] and M._sessions[bufnr].url
-    picker.pick_table(s_url, function(name)
-      local grip = require("dadbod-grip")
-      grip.open(name, s_url)
-    end)
-  end, "Table picker (tab 1)")
+    require("dadbod-grip.schema").toggle(s_url)
+  end, "Schema sidebar (key 1)")
 
-  -- 2-9: view tabs
-  for n = 2, 9 do
+  -- 2: open query pad (pre-filled with current query)
+  map("2", function()
+    local session_2 = M._sessions[bufnr]
+    local s_url = session_2 and session_2.url
+    local initial_sql
+    if session_2 and session_2.query_spec then
+      initial_sql = qmod.build_sql(session_2.query_spec)
+    elseif session_2 and session_2.query_sql then
+      initial_sql = session_2.query_sql
+    end
+    require("dadbod-grip.query_pad").open(s_url, initial_sql and { initial_sql = initial_sql } or nil)
+  end, "Query pad (key 2)")
+
+  -- 3: grid/records (already in non-records view = return to records; already on records = table picker)
+  map("3", function()
+    local session_3 = M._sessions[bufnr]
+    local cv = session_3 and session_3.current_view
+    if cv and cv ~= "records" then
+      M.switch_view(bufnr, "records")
+    else
+      local s_url = session_3 and session_3.url
+      local picker = require("dadbod-grip.picker")
+      picker.pick_table(s_url, function(name)
+        require("dadbod-grip").open(name, s_url)
+      end)
+    end
+  end, "Grid/records (key 3)")
+
+  -- 4-9: view tabs (4=ER diagram float, 5-9=inline grid views)
+  for n = 4, 9 do
     local view_name = VIEW_KEYS[n]
     if view_name then
-      map(tostring(n), function()
-        M.switch_view(bufnr, view_name)
-      end, "View: " .. (VIEW_LABELS[view_name] or view_name))
+      if view_name == "er_diagram" then
+        map(tostring(n), function()
+          local session = M._sessions[bufnr]
+          local s_url = session and session.url
+          if not s_url then s_url = require("dadbod-grip.db").get_url() end
+          if not s_url then vim.notify("ER Diagram: no database connection", vim.log.levels.WARN); return end
+          require("dadbod-grip.er_diagram").toggle(s_url)
+        end, "ER diagram (key 4)")
+      else
+        map(tostring(n), function()
+          M.switch_view(bufnr, view_name)
+        end, "View: " .. (VIEW_LABELS[view_name] or view_name))
+      end
     end
   end
 
@@ -4285,6 +4394,55 @@ function M._setup_keymaps(bufnr)
     local session = M._sessions[bufnr]
     M.show_help({ readonly = session and session.state.readonly })
   end, "Show help")
+
+  -- ── column highlight (CursorMoved) ────────────────────────────────────────
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    buffer = bufnr,
+    callback = function()
+      local session = M._sessions[bufnr]
+      if not session or not session._render then return end
+      local r = session._render
+      local vis_cols = r.visible_columns or (session.state and session.state.columns) or {}
+      if #vis_cols == 0 then return end
+
+      vim.api.nvim_buf_clear_namespace(bufnr, _col_hl_ns, 0, -1)
+
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      local ref_bp = resolve_row_bp(r, cursor[1])
+      if not ref_bp then return end
+
+      local snap = M._snap_col(vis_cols, ref_bp, cursor[2])
+      if not snap then return end
+      local col_name = snap.col_name
+
+      -- Highlight header row (line 2 = index 1)
+      local hdr_bp = r.hdr_byte_positions and r.hdr_byte_positions[col_name]
+      if hdr_bp then
+        vim.api.nvim_buf_set_extmark(bufnr, _col_hl_ns, 1, hdr_bp.start, {
+          end_col = hdr_bp.finish + 1,
+          hl_group = "GripColHighlight",
+          priority = 50,
+        })
+      end
+
+      -- Highlight all data rows
+      local ds = r.data_start or 4
+      local ordered = r.ordered or {}
+      for i = 1, #ordered do
+        local bp_row = r.byte_positions and r.byte_positions[i]
+        if bp_row then
+          local bp = bp_row[col_name]
+          if bp then
+            vim.api.nvim_buf_set_extmark(bufnr, _col_hl_ns, ds + i - 2, bp.start, {
+              end_col = bp.finish + 1,
+              hl_group = "GripColHighlight",
+              priority = 50,
+            })
+          end
+        end
+      end
+    end,
+  })
 end
 
 --- Open the full help popup. Called from grid, query pad, and schema sidebar.
@@ -4360,15 +4518,18 @@ function M.show_help(opts)
       "  gX        Export to file (csv/json/sql)  :GripExport",
       "",
       "  Tab Views (1-9)",
-      "  1         Table picker",
-      "  2         Records (default view)",
-      "  3         Query History: recent queries for this table",
-      "  4         Column Stats: count, nulls%, distinct, min, max",
-      "  5         Explain: query plan for current query",
+      "  Surface navigation (press again = secondary action):",
+      "  1         Schema sidebar  (again: connections picker)",
+      "  2         Query pad       (again: query history)",
+      "  3         Grid / records  (again: table picker)",
+      "  Depth views (consistent across grid, sidebar, query pad):",
+      "  4         ER diagram: all tables and FK relationships",
+      "  5         Column Stats: count, nulls%, distinct, min, max",
       "  6         Columns: name, type, nullable, default, key",
       "  7         Foreign Keys: outbound and inbound",
       "  8         Indexes: name, type, columns covered",
       "  9         Constraints: CHECK, UNIQUE, NOT NULL",
+      "  (explain query plan: gx)",
       "",
       "  Schema & Workflow",
       "  go/gT/gt  Pick table (floating picker)",

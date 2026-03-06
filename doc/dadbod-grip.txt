@@ -349,15 +349,22 @@ INSPECTION ~
 
 TAB VIEWS ~
                                                         *grip-tab-views*
-  1               Table picker (fuzzy finder)
-  2               Records (data rows, default view)
-  3               Query history for current table
-  4               Column statistics (count, nulls, distinct, min/max)
-  5               Explain current query plan
-  6               Columns (name, type, nullable, default, constraints)
-  7               Foreign keys (outbound + inbound references)
-  8               Indexes (name, type, columns covered)
-  9               Constraints (CHECK and UNIQUE rules)
+Surface navigation (smart: press again for secondary action):
+
+  1               Schema sidebar (press again: connections picker)
+  2               Query pad (press again: query history)
+  3               Grid / records (press again: table picker)
+
+Table-depth views (consistent from grid, sidebar, and query pad):
+
+  4               ER diagram float (all tables and FK relationships)
+  5               Column statistics
+  6               Columns (schema)
+  7               Foreign keys
+  8               Indexes
+  9               Constraints
+
+  Note: explain query plan is at gx (removed from tab system).
 
 COLUMN VISIBILITY ~
                                                   *grip-column-visibility*

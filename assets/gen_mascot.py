@@ -83,10 +83,7 @@ for _ in range(3):
     BASE.append(r(0, '.' * W_PX))
 
 # ROW 3: pom-pom (K outline + Y fill, 4 wide)
-BASE.append(r(17, 'KYYК'.replace('К','K')))   # hack: ASCII K only
-
-# Simpler: just write it directly
-BASE[-1] = r(17, 'K' + 'YY' + 'K')            # 3  pom-pom: K at 17, YY at 18-19, K at 20
+BASE.append(r(17, 'K' + 'YY' + 'K'))          # 3  pom-pom: K at 17, YY at 18-19, K at 20
 
 # ROW 4: K top of beanie (uniform: 14 wide, cols 12-25)
 BASE.append(r(12, 'K' * 14))                   # 4
@@ -116,8 +113,9 @@ BASE.append(box(8, 'SSS' + 'KK' + 'S' * 8 + 'KK' + 'SSS'))   # 12 brows
 BASE.append(box(8, 'S' * 18))                  # 13 gap between brow & eye
 
 # Rows 14-15: eyes (3×2 big cartoon squares)
-_eye = 'SSS' + 'KKK' + 'SS' * 3 + 'KKK' + 'SSS'  # 3+3+6+3+3 = 18
-BASE.append(box(8, _eye))                       # 14 eye top
+_eye    = 'SSS' + 'KKK' + 'SS' * 3 + 'KKK' + 'SSS'  # 3+3+6+3+3 = 18
+_eye_hi = 'SSS' + 'WKK' + 'SS' * 3 + 'WKK' + 'SSS'  # top row: W highlight top-left of each eye
+BASE.append(box(8, _eye_hi))                    # 14 eye top (with white highlight)
 BASE.append(box(8, _eye))                       # 15 eye bottom
 
 # Row 16: BIG rosy cheeks (3px wide blush under eyes)
@@ -246,19 +244,32 @@ def left_arm(phase):
 def mirror_arm(seg):
     return {(W_PX - 1 - c, ri): color for (c, ri), color in seg.items()}
 
+def wince_face():
+    """Pixel overrides for the subtle squint at peak flex (phase 3 only)."""
+    result = {}
+    # Close just the bottom eye row — top stays open, grin unchanged
+    _eye_bot_closed = 'S' * 18
+    for ci, ch in enumerate(box(8, _eye_bot_closed)):
+        result[(ci, 15)] = PALETTE[ch]
+    return result
+
 # -------------------------------------------------------
 base_px = grid_to_pixels(BASE)
 phases = [0, 1, 2, 3, 2, 1]
 frames = []
+grunt_px = wince_face()
 for phase in phases:
     al = left_arm(phase)
     ar = mirror_arm(al)
     px = {**base_px, **ar, **al}
+    if phase == 3:
+        px = {**px, **grunt_px}
     frames.append(render(px))
 
 out = "assets/mascot.gif"
+durations = [160, 160, 200, 320, 200, 160]  # phase 3 (peak flex) holds longer
 frames[0].save(
     out, save_all=True, append_images=frames[1:],
-    optimize=False, loop=0, duration=160, disposal=2,
+    optimize=True, loop=0, duration=durations, disposal=2,
 )
 print(f"Saved {out}  ({W_PX * SCALE}×{H_PX * SCALE}px, {len(frames)} frames)")

@@ -410,7 +410,7 @@ local function render(state)
 
   -- Hint line at bottom
   table.insert(lines, "")
-  table.insert(lines, " CR go q gq gw gc / F ?")
+  table.insert(lines, " 1:conn 2:pad 3:grid  CR go gb q gq gw gc / F ?")
   table.insert(highlights, { line = #lines - 1, col = 0, end_col = #lines[#lines], hl = "GripReadonly" })
 
   vim.bo[_sidebar_bufnr].modifiable = true
@@ -754,8 +754,9 @@ local function setup_keymaps(url)
   end, { buffer = buf, silent = true, nowait = true })
 
   -- Switch connection (gC, gc, and C-g)
+  -- on_cancel is a no-op: cancelling the picker keeps the sidebar visible.
   local function _pick_conn()
-    require("dadbod-grip.connections").pick()
+    require("dadbod-grip.connections").pick({ on_cancel = function() end })
   end
   map("gC", _pick_conn)
   map("gc", _pick_conn)
@@ -788,15 +789,41 @@ local function setup_keymaps(url)
     end)
   end)
 
-  -- 1: table picker (mirrors grid keymap)
-  map("1", _pick_table)
+  -- 1: connections picker (already in sidebar = secondary action)
+  map("1", _pick_conn)
 
-  -- Tab views: 2-9 open a table directly into a specific view facet
-  local TAB_VIEWS = { [2]="records", [3]="history", [4]="stats", [5]="explain",
-                      [6]="columns", [7]="fk", [8]="indexes", [9]="constraints" }
-  for n = 2, 9 do
+  -- 2: open query pad
+  map("2", function()
+    require("dadbod-grip.query_pad").open(url)
+  end)
+
+  -- 3: jump to existing grid; if none, open table under cursor; if no node, table picker
+  map("3", function()
+    local win = require("dadbod-grip.view").find_content_win()
+    if win then
+      vim.api.nvim_set_current_win(win)
+      return
+    end
+    local node = node_at_cursor(state)
+    local tbl = node and ((node.kind == "table" and node.name)
+                       or (node.kind == "column" and node.table_name))
+    if tbl then
+      open_table(tbl, url)
+    else
+      _pick_table()
+    end
+  end)
+
+  -- Tab views: 4=ER diagram float, 5-9 open a table in a specific view facet
+  local TAB_VIEWS = { [4]="er_diagram", [5]="stats", [6]="columns",
+                      [7]="fk", [8]="indexes", [9]="constraints" }
+  for n = 4, 9 do
     local view_name = TAB_VIEWS[n]
     map(tostring(n), function()
+      if view_name == "er_diagram" then
+        require("dadbod-grip.er_diagram").toggle(url)
+        return
+      end
       local node = node_at_cursor(state)
       if not node then return end
       local tbl = (node.kind == "table" and node.name)
@@ -827,9 +854,11 @@ local function setup_keymaps(url)
     vim.cmd("GripDetach")
   end)
 
-  -- gG: ER diagram float
+  -- gG: ER diagram float (scroll to table under cursor if on a table node)
   map("gG", function()
-    require("dadbod-grip.er_diagram").toggle(url)
+    local node = node_at_cursor(state)
+    local tbl  = node and node.kind == "table" and node.name
+    require("dadbod-grip.er_diagram").toggle(url, tbl)
   end)
 
   -- Close
