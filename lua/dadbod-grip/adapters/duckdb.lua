@@ -193,19 +193,32 @@ function M.get_primary_keys(table_name, url)
   if not db_path then return {}, "Invalid DuckDB URL: " .. url end
 
   local catalog, schema, tbl = split_catalog_schema_table(url, table_name)
-  local is_prefix = catalog and (catalog .. ".") or ""
+  local sql_str
 
-  local sql_str = string.format([[
-    SELECT kcu.column_name
-    FROM %sinformation_schema.table_constraints tc
-    JOIN %sinformation_schema.key_column_usage kcu
-      ON tc.constraint_name = kcu.constraint_name
-      AND tc.table_schema = kcu.table_schema
-    WHERE tc.constraint_type = 'PRIMARY KEY'
-      AND tc.table_schema = '%s'
-      AND tc.table_name = '%s'
-    ORDER BY kcu.ordinal_position
-  ]], is_prefix, is_prefix, schema:gsub("'", "''"), tbl:gsub("'", "''"))
+  if catalog then
+    -- Attached catalog: duckdb_constraints() spans all catalogs.
+    sql_str = string.format([[
+      SELECT UNNEST(constraint_column_names) AS column_name
+      FROM duckdb_constraints()
+      WHERE database_name = '%s'
+        AND schema_name = '%s'
+        AND table_name = '%s'
+        AND constraint_type = 'PRIMARY KEY'
+    ]], catalog:gsub("'", "''"), schema:gsub("'", "''"), tbl:gsub("'", "''"))
+  else
+    -- Main DB: use information_schema (works for main schema + native schemas).
+    sql_str = string.format([[
+      SELECT kcu.column_name
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+      WHERE tc.constraint_type = 'PRIMARY KEY'
+        AND tc.table_schema = '%s'
+        AND tc.table_name = '%s'
+      ORDER BY kcu.ordinal_position
+    ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
+  end
 
   local stdout, stderr, code = duckdb(db_path, sql_str, nil, url)
   if code ~= 0 then
@@ -229,31 +242,50 @@ function M.get_column_info(table_name, url)
   if not db_path then return nil, "Invalid DuckDB URL: " .. url end
 
   local catalog, schema, tbl = split_catalog_schema_table(url, table_name)
-  local is_prefix = catalog and (catalog .. ".") or ""
+  local info_sql
 
-  local info_sql = string.format([[
-    SELECT
-      c.column_name,
-      c.data_type,
-      c.is_nullable,
-      COALESCE(c.column_default, '') AS column_default,
-      COALESCE(
-        (SELECT string_agg(tc.constraint_type, ', ')
-         FROM %sinformation_schema.key_column_usage kcu
-         JOIN %sinformation_schema.table_constraints tc
-           ON tc.constraint_name = kcu.constraint_name
-           AND tc.table_schema = kcu.table_schema
-         WHERE kcu.table_schema = '%s'
-           AND kcu.table_name = '%s'
-           AND kcu.column_name = c.column_name),
-        ''
-      ) AS constraints
-    FROM %sinformation_schema.columns c
-    WHERE c.table_schema = '%s'
-      AND c.table_name = '%s'
-    ORDER BY c.ordinal_position
-  ]], is_prefix, is_prefix, schema:gsub("'", "''"), tbl:gsub("'", "''"),
-      is_prefix, schema:gsub("'", "''"), tbl:gsub("'", "''"))
+  if catalog then
+    -- Attached catalog: use duckdb_columns() which works for all attachment types
+    -- (SQLite, PostgreSQL, etc.) — they may not expose information_schema.
+    info_sql = string.format([[
+      SELECT
+        column_name,
+        data_type,
+        '' AS is_nullable,
+        COALESCE(column_default, '') AS column_default,
+        '' AS constraints
+      FROM duckdb_columns()
+      WHERE database_name = '%s'
+        AND schema_name = '%s'
+        AND table_name = '%s'
+      ORDER BY column_index
+    ]], catalog:gsub("'", "''"), schema:gsub("'", "''"), tbl:gsub("'", "''"))
+  else
+    -- Main DB (native schema or main schema): use information_schema.columns.
+    info_sql = string.format([[
+      SELECT
+        c.column_name,
+        c.data_type,
+        c.is_nullable,
+        COALESCE(c.column_default, '') AS column_default,
+        COALESCE(
+          (SELECT string_agg(tc.constraint_type, ', ')
+           FROM information_schema.key_column_usage kcu
+           JOIN information_schema.table_constraints tc
+             ON tc.constraint_name = kcu.constraint_name
+             AND tc.table_schema = kcu.table_schema
+           WHERE kcu.table_schema = '%s'
+             AND kcu.table_name = '%s'
+             AND kcu.column_name = c.column_name),
+          ''
+        ) AS constraints
+      FROM information_schema.columns c
+      WHERE c.table_schema = '%s'
+        AND c.table_name = '%s'
+      ORDER BY c.ordinal_position
+    ]], schema:gsub("'", "''"), tbl:gsub("'", "''"),
+        schema:gsub("'", "''"), tbl:gsub("'", "''"))
+  end
 
   local stdout, stderr, code = duckdb(db_path, info_sql, nil, url)
   if code ~= 0 then
@@ -281,24 +313,30 @@ function M.get_foreign_keys(table_name, url)
   if not db_path then return {}, "Invalid DuckDB URL: " .. url end
 
   local catalog, schema, tbl = split_catalog_schema_table(url, table_name)
-  local is_prefix = catalog and (catalog .. ".") or ""
+
+  if catalog then
+    -- Attached catalogs (SQLite, PG, etc.) have no cross-catalog FK introspection.
+    -- FK constraints within an attached DB are not surfaced by information_schema
+    -- or duckdb_constraints() in all attachment types. Return empty gracefully.
+    return {}, nil
+  end
 
   local fk_sql = string.format([[
     SELECT
       kcu.column_name,
       kcu2.table_name AS ref_table,
       kcu2.column_name AS ref_column
-    FROM %sinformation_schema.referential_constraints rc
-    JOIN %sinformation_schema.key_column_usage kcu
+    FROM information_schema.referential_constraints rc
+    JOIN information_schema.key_column_usage kcu
       ON rc.constraint_schema = kcu.constraint_schema
       AND rc.constraint_name = kcu.constraint_name
-    JOIN %sinformation_schema.key_column_usage kcu2
+    JOIN information_schema.key_column_usage kcu2
       ON rc.unique_constraint_schema = kcu2.constraint_schema
       AND rc.unique_constraint_name = kcu2.constraint_name
       AND kcu.ordinal_position = kcu2.ordinal_position
     WHERE kcu.table_schema = '%s'
       AND kcu.table_name = '%s'
-  ]], is_prefix, is_prefix, is_prefix, schema:gsub("'", "''"), tbl:gsub("'", "''"))
+  ]], schema:gsub("'", "''"), tbl:gsub("'", "''"))
 
   local stdout, stderr, code = duckdb(db_path, fk_sql, nil, url)
   if code ~= 0 then
@@ -355,9 +393,9 @@ function M.list_tables(url)
       ORDER BY database_name, schema_name, ttype DESC, table_name
     ]]
   else
-    -- No attachments: include schema_name to surface native DuckDB schemas.
+    -- No attachments: include table_schema to surface native DuckDB schemas.
     sql_str = [[
-      SELECT schema_name, table_name,
+      SELECT table_schema, table_name,
         CASE table_type WHEN 'BASE TABLE' THEN 'table' ELSE 'view' END AS table_type
       FROM information_schema.tables
       WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
@@ -376,29 +414,40 @@ function M.list_tables(url)
   if has_attachments then
     -- Derive the main database's catalog name from the file path.
     -- DuckDB names catalogs after the filename (e.g., "softrear" for softrear.duckdb).
-    -- Main tables keep plain names so existing PK/column queries work unchanged.
     local main_catalog = db_path:match("([^/]+)%.[^.]+$") or db_path:match("([^/]+)$") or "memory"
     for _, row in ipairs(parsed.rows) do
-      local catalog = row[1] or main_catalog
-      local tname = row[2] or ""
-      local ttype = row[3] or "table"
+      local catalog    = row[1] or main_catalog
+      local schema_name = row[2] or "main"
+      local tname      = row[3] or ""
+      local ttype      = row[4] or "table"
+      local full_name, schema_group
       if catalog == main_catalog then
-        table.insert(result, {
-          name = tname,
-          type = ttype,
-          schema = catalog,
-        })
+        -- Main database: plain name for main schema, schema-prefixed for native schemas.
+        if schema_name == "main" then
+          full_name    = tname
+          schema_group = main_catalog
+        else
+          full_name    = schema_name .. "." .. tname
+          schema_group = schema_name
+        end
       else
-        table.insert(result, {
-          name = catalog .. "." .. tname,
-          type = ttype,
-          schema = catalog,
-        })
+        -- Attached catalog: always prefix with the catalog alias.
+        full_name    = catalog .. "." .. tname
+        schema_group = catalog
       end
+      table.insert(result, { name = full_name, type = ttype, schema = schema_group })
     end
   else
+    -- No attachments: surface native schemas with a schema-prefixed name.
     for _, row in ipairs(parsed.rows) do
-      table.insert(result, { name = row[1] or "", type = row[2] or "table" })
+      local schema_name = row[1] or "main"
+      local tname = row[2] or ""
+      local ttype = row[3] or "table"
+      if schema_name == "main" then
+        table.insert(result, { name = tname, type = ttype })
+      else
+        table.insert(result, { name = schema_name .. "." .. tname, type = ttype, schema = schema_name })
+      end
     end
   end
   return result, nil

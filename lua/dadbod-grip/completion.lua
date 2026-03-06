@@ -261,7 +261,7 @@ function M.complete(before, url, aliases)
 
   elseif ctx.type == "dotted" then
     local q = ctx.qualifier
-    -- Check if qualifier is a known table alias
+    -- Check if qualifier is a known table alias resolving to a local table
     local resolved = aliases[q] or q
     local cols = schema[resolved]
     if cols then
@@ -273,47 +273,74 @@ function M.complete(before, url, aliases)
         end
       end
     else
-      -- qualifier might be a DuckDB attachment alias: try to get its tables
-      local ok, duckdb = pcall(require, "dadbod-grip.adapters.duckdb")
-      if ok then
-        local atts = duckdb.get_attachments(url)
-        for _, att in ipairs(atts) do
-          if att.alias == q then
-            -- Query attachment tables via DuckDB information_schema
-            local db = require("dadbod-grip.db")
-            local sql = string.format(
-              "SELECT table_name FROM %s.information_schema.tables WHERE table_schema = 'main'",
-              q
-            )
-            local result, _ = db.query(sql, url)
-            if result and result.rows then
-              for _, row in ipairs(result.rows) do
-                local tname = row[1]
-                if tname and tname:sub(1, #ctx.word) == ctx.word then
-                  table.insert(items, item(tname, "[table]"))
+      -- Check the cache for "qualifier.tablename" keys: covers DuckDB federation
+      -- (attached catalogs like supplier.shipments) and PG/native schemas (analytics.events).
+      local prefix = q .. "."
+      local found_in_cache = false
+      for name, _ in pairs(schema) do
+        if name:sub(1, #prefix) == prefix then
+          found_in_cache = true
+          local tname = name:sub(#prefix + 1)
+          if tname:sub(1, #ctx.word) == ctx.word then
+            table.insert(items, item(tname, "[table]"))
+          end
+        end
+      end
+      -- If nothing in the cache, fall through to a live DuckDB attachment query.
+      if not found_in_cache then
+        local ok, duckdb = pcall(require, "dadbod-grip.adapters.duckdb")
+        if ok then
+          local atts = duckdb.get_attachments(url)
+          for _, att in ipairs(atts) do
+            if att.alias == q then
+              -- Query attachment tables via DuckDB information_schema
+              local db = require("dadbod-grip.db")
+              local sql = string.format(
+                "SELECT table_name FROM %s.information_schema.tables WHERE table_schema = 'main'",
+                q
+              )
+              local result, _ = db.query(sql, url)
+              if result and result.rows then
+                for _, row in ipairs(result.rows) do
+                  local tname = row[1]
+                  if tname and tname:sub(1, #ctx.word) == ctx.word then
+                    table.insert(items, item(tname, "[table]"))
+                  end
                 end
               end
+              break
             end
-            break
           end
         end
       end
     end
 
   elseif ctx.type == "fed_column" then
-    -- Three-part: alias.table.word
-    -- Fetch columns from the attachment table
-    local db = require("dadbod-grip.db")
-    local sql = string.format(
-      "SELECT column_name, data_type FROM %s.information_schema.columns WHERE table_name = '%s' AND table_schema = 'main'",
-      ctx.alias, ctx.table
-    )
-    local result, _ = db.query(sql, url)
-    if result and result.rows then
-      for _, row in ipairs(result.rows) do
-        local cname, dtype = row[1], row[2]
+    -- Three-part: alias.table.word (e.g. supplier.shipments.col or analytics.events.col)
+    -- Use the schema cache first (populated by get_schema → get_column_info).
+    local cached_key = ctx.alias .. "." .. ctx.table
+    local cached_cols = schema[cached_key]
+    if cached_cols then
+      for _, col in ipairs(cached_cols) do
+        local cname = col.column_name
         if cname and cname:sub(1, #ctx.word) == ctx.word then
-          table.insert(items, item(cname, "[" .. (dtype or "?") .. "]"))
+          table.insert(items, item(cname, "[" .. (col.data_type or "?") .. "]"))
+        end
+      end
+    else
+      -- Fallback: live query for DuckDB attachments not yet cached.
+      local db = require("dadbod-grip.db")
+      local sql = string.format(
+        "SELECT column_name, data_type FROM %s.information_schema.columns WHERE table_name = '%s' AND table_schema = 'main'",
+        ctx.alias, ctx.table
+      )
+      local result, _ = db.query(sql, url)
+      if result and result.rows then
+        for _, row in ipairs(result.rows) do
+          local cname, dtype = row[1], row[2]
+          if cname and cname:sub(1, #ctx.word) == ctx.word then
+            table.insert(items, item(cname, "[" .. (dtype or "?") .. "]"))
+          end
         end
       end
     end
@@ -421,9 +448,10 @@ function M.setup_auto_complete(bufnr, url_fn)
         local col  = vim.api.nvim_win_get_cursor(0)[2]
         local before = line:sub(1, col)
 
-        -- Require ≥1 word char to avoid firing on space, comma, newline.
+        -- Require ≥1 word char OR a trailing dot (dotted context: supplier., alias.).
         local word = before:match("([%w_]*)$") or ""
-        if word == "" then return end
+        local in_dotted_ctx = before:match("[%w_]+%.[%w_]*$") ~= nil
+        if word == "" and not in_dotted_ctx then return end
 
         local all_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
         local aliases   = M.extract_aliases(table.concat(all_lines, "\n"))

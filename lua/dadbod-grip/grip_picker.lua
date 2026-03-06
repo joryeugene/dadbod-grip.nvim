@@ -302,6 +302,19 @@ function M.open(opts)
 
   map({ "q", "<Esc>" }, close)
 
+  -- 1-9: close picker and replay the key on the underlying buffer so surface
+  -- navigation works even when a picker float has focus.
+  for _, k in ipairs({ "1","2","3","4","5","6","7","8","9" }) do
+    local key = k
+    map(key, function()
+      close()
+      vim.schedule(function()
+        vim.api.nvim_feedkeys(
+          vim.api.nvim_replace_termcodes(key, true, false, true), "n", false)
+      end)
+    end)
+  end
+
   -- Navigation
   map({ "j", "<Down>" }, function()
     local flist = filtered_items()

@@ -113,6 +113,60 @@ for _, t in ipairs(tables or {}) do
 end
 eq(found_main_users, true, "main db users table present with plain name")
 
+-- ── get_column_info for attached catalog tables ──────────────────────────────
+-- supplier.orders is an attached table; adapter must use supplier.information_schema
+
+local cols, col_err = adapter.get_column_info("supplier.orders", duck_url)
+truthy(cols, "get_column_info: returns columns for supplier.orders")
+eq(col_err, nil, "get_column_info: no error for supplier.orders")
+
+local found_order_id = false
+for _, c in ipairs(cols or {}) do
+  if c.column_name == "id" then found_order_id = true; break end
+end
+eq(found_order_id, true, "get_column_info: found 'id' column in supplier.orders")
+
+-- Main DB table still works
+local main_cols, main_err = adapter.get_column_info("users", duck_url)
+truthy(main_cols, "get_column_info: main DB table 'users' still works")
+eq(main_err, nil, "get_column_info: no error for main DB users")
+
+-- ── get_indexes for attached catalog tables ────────────────────────────────
+-- SQLite PRIMARY KEY on orders.id → duckdb_indexes() should find it when
+-- correctly filtered by database_name = 'supplier' AND schema_name = 'main'
+
+local idxs, idx_err = adapter.get_indexes("supplier.orders", duck_url)
+-- No error expected; empty list is acceptable if SQLite scanner doesn't expose indexes
+truthy(idxs ~= nil, "get_indexes: no nil return for supplier.orders")
+eq(idx_err, nil, "get_indexes: no error for supplier.orders")
+
+-- ── get_constraints for attached catalog tables ────────────────────────────
+local constrs, cstr_err = adapter.get_constraints("supplier.orders", duck_url)
+truthy(constrs ~= nil, "get_constraints: no nil return for supplier.orders")
+eq(cstr_err, nil, "get_constraints: no error for supplier.orders")
+
+-- ── list_tables with native schema (no attachments) ────────────────────────
+-- Create a native DuckDB schema on a fresh DB, verify schema-prefixed names appear.
+local native_duck_path = tmp .. "_native.duckdb"
+local native_url = "duckdb:" .. native_duck_path
+vim.fn.system("duckdb " .. vim.fn.shellescape(native_duck_path)
+  .. [[ "CREATE SCHEMA analytics; CREATE TABLE analytics.events (id INTEGER, ts TIMESTAMP);"]])
+
+local native_tables, native_err = adapter.list_tables(native_url)
+truthy(native_tables, "native schema: list_tables returns results")
+eq(native_err, nil, "native schema: no error")
+
+local found_analytics_events = false
+for _, t in ipairs(native_tables or {}) do
+  if t.name == "analytics.events" then found_analytics_events = true; break end
+end
+eq(found_analytics_events, true, "native schema: analytics.events in results with prefix")
+
+local native_cols = adapter.get_column_info("analytics.events", native_url)
+truthy(native_cols, "native schema: get_column_info works for analytics.events")
+
+vim.fn.delete(native_duck_path)
+
 -- ── After detach: back to flat results ──
 
 adapter.detach(duck_url, "supplier")

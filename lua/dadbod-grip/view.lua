@@ -850,8 +850,9 @@ end
 --- @param session? table  grid session; may be nil (e.g. called from query pad)
 function M.close_all_floats(session)
   if session then M._close_live_sql_float(session) end
-  local ok, er = pcall(require, "dadbod-grip.er_diagram")
-  if ok and er.is_open and er.is_open() then pcall(er.close) end
+  -- er_diagram tracks its own window; close() is a no-op when nothing is open
+  pcall(function() require("dadbod-grip.er_diagram").close() end)
+  -- close any grip_picker floats (stamped with grip_owned_float at creation)
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     if vim.api.nvim_win_is_valid(win) then
       local cfg = vim.api.nvim_win_get_config(win)
@@ -4620,6 +4621,7 @@ function M.show_help(opts)
         "  ╔═╦═╦═╗",
         '  ║d║b║g║  dadbod-grip v' .. VERSION,
         "  ╚═╩═╩═╝",
+        "  docs: jorypestorious.com/dadbod-grip-web",
       })
     else
       vim.list_extend(help, {
@@ -4668,6 +4670,7 @@ function M.show_help(opts)
         "  ╔═╦═╦═╗",
         '  ║d║b║g║  dadbod-grip v' .. VERSION,
         "  ╚═╩═╩═╝",
+        "  docs: jorypestorious.com/dadbod-grip-web",
       })
     end
     local max_w = 0

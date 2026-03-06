@@ -338,6 +338,96 @@ do
   restore()
 end
 
+-- ── DuckDB federation: dotted cache prefix scan ───────────────────────────────
+-- When the schema cache has "supplier.shipments" keys, typing "supplier." or
+-- "supplier.sh" should return tables from cache without a live query.
+do
+  local FED_URL = "duckdb:softrear.duckdb"
+  local SHIP_COLS = {
+    { column_name = "ship_id",   data_type = "integer", is_nullable = "NO"  },
+    { column_name = "ship_date", data_type = "date",    is_nullable = "NO"  },
+  }
+  local ORD_COLS = {
+    { column_name = "order_id",  data_type = "integer", is_nullable = "NO"  },
+    { column_name = "amount",    data_type = "numeric",  is_nullable = "YES" },
+  }
+  -- Mock the schema cache with federation-prefixed keys
+  local restore = mock_db({
+    ["supplier.shipments"] = SHIP_COLS,
+    ["supplier.orders"]    = ORD_COLS,
+    ["main_table"]         = { { column_name = "id", data_type = "integer", is_nullable = "NO" } },
+  })
+  completion.invalidate(FED_URL)
+
+  -- "supplier." -> should complete tables from cache
+  local items = completion.complete("FROM supplier.", FED_URL, {})
+  local names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+  ok(names["shipments"],  "fed dotted: shipments from cache")
+  ok(names["orders"],     "fed dotted: orders from cache")
+  ok(not names["main_table"], "fed dotted: main_table not included")
+
+  -- "supplier.sh" -> prefix filter applies
+  items = completion.complete("FROM supplier.sh", FED_URL, {})
+  names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+  ok(names["shipments"],  "fed dotted partial: shipments matches 'sh'")
+  ok(not names["orders"], "fed dotted partial: orders doesn't match 'sh'")
+
+  restore()
+end
+
+-- ── DuckDB federation: fed_column cache lookup ────────────────────────────────
+-- When the schema cache has "supplier.shipments" column data, typing
+-- "supplier.shipments." should return columns from cache, not a live query.
+do
+  local FED_URL = "duckdb:softrear.duckdb"
+  local SHIP_COLS = {
+    { column_name = "ship_id",   data_type = "integer", is_nullable = "NO"  },
+    { column_name = "ship_date", data_type = "date",    is_nullable = "NO"  },
+    { column_name = "declared",  data_type = "varchar",  is_nullable = "YES" },
+  }
+  local restore = mock_db({ ["supplier.shipments"] = SHIP_COLS })
+  completion.invalidate(FED_URL)
+
+  -- "supplier.shipments." -> columns from cache
+  local items = completion.complete("WHERE supplier.shipments.", FED_URL, {})
+  local names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+  ok(names["ship_id"],   "fed_column cache: ship_id")
+  ok(names["ship_date"], "fed_column cache: ship_date")
+  ok(names["declared"],  "fed_column cache: declared")
+
+  -- "supplier.shipments.sh" -> prefix filter
+  items = completion.complete("WHERE supplier.shipments.sh", FED_URL, {})
+  names = {}
+  for _, it in ipairs(items) do names[it.word] = true end
+  ok(names["ship_id"],     "fed_column prefix: ship_id matches 'sh'")
+  ok(names["ship_date"],   "fed_column prefix: ship_date matches 'sh'")
+  ok(not names["declared"], "fed_column prefix: declared doesn't match 'sh'")
+
+  restore()
+end
+
+-- ── Auto-trigger: dotted context guard ───────────────────────────────────────
+-- parse_context("supplier.") should return "dotted" so the auto-trigger
+-- detects dotted context even when word == "".
+do
+  local ctx = completion.parse_context_full("FROM supplier.")
+  eq(ctx and ctx.type, "dotted", "auto-trigger guard: dotted context detected after '.'")
+  eq(ctx and ctx.qualifier, "supplier", "auto-trigger guard: qualifier is 'supplier'")
+  eq(ctx and ctx.word, "", "auto-trigger guard: word is empty after '.'")
+
+  -- Ensure before:match("[%w_]+%.[%w_]*$") fires for the guard condition
+  local before = "FROM supplier."
+  local in_dotted = before:match("[%w_]+%.[%w_]*$") ~= nil
+  ok(in_dotted, "auto-trigger guard: dotted pattern matches 'supplier.'")
+
+  local before2 = "FROM "
+  local not_dotted = before2:match("[%w_]+%.[%w_]*$") ~= nil
+  ok(not not_dotted, "auto-trigger guard: plain FROM does not match dotted pattern")
+end
+
 -- ── summary ───────────────────────────────────────────────────────────────────
 print(string.format("\ncompletion_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end
