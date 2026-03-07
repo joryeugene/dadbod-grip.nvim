@@ -465,10 +465,14 @@ function M.switch(url, name, conn_type, opts)
       end)
     end)
 
-    -- Pre-warm AI schema cache in background (avoids freeze on first AI call)
+    -- Pre-warm AI schema cache in background (avoids freeze on first AI call).
+    -- Skipped when AI is disabled via setup({ ai = false }).
     vim.schedule(function()
       pcall(function()
-        require("dadbod-grip.ai").build_schema_context(url)
+        local ai = require("dadbod-grip.ai")
+        if ai.is_enabled() then
+          ai.build_schema_context(url)
+        end
       end)
     end)
   end)

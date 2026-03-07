@@ -116,6 +116,10 @@ AI SQL generation (optional): >lua
 Provider auto-detection priority: ANTHROPIC_API_KEY > OPENAI_API_KEY >
 GEMINI_API_KEY > ollama (local). Explicit provider setting always wins.
 
+To disable AI entirely (skips schema pre-warm, info message on A/gA): >lua
+  require("dadbod-grip").setup({ ai = false })
+<
+
 ------------------------------------------------------------------------------
                                                              *grip-keymaps-cfg*
 KEYMAP CONFIGURATION ~
@@ -928,6 +932,11 @@ Override with setup({ai={provider="openai"}}).
 
 API key resolution: env var name, "env:CUSTOM_VAR", "cmd:op read ...",
 or a direct string. See |grip-config| for the full ai config block.
+
+To disable AI entirely (skips schema pre-warm on connection open): >lua
+  require("dadbod-grip").setup({ ai = false })
+<
+Pressing A or gA while AI is disabled shows an informational message.
 
 ==============================================================================
 23. CROSS-DB FEDERATION                                    *grip-federation*

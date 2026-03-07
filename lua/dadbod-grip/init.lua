@@ -1346,7 +1346,12 @@ function M.open_welcome()
   end, "ER diagram")
   wmap("?",     function() view.show_help() end, "Full keymap help")
   wmap("A",     function()
-    require("dadbod-grip.ai").ask(cur_conn())
+    local ai = require("dadbod-grip.ai")
+    if not ai.is_enabled() then
+      vim.notify("AI is disabled. Enable it in setup({ ai = { ... } })", vim.log.levels.INFO)
+      return
+    end
+    ai.ask(cur_conn())
   end, "AI SQL assistant")
 
   -- 1-9: surface navigation from welcome screen
@@ -1491,7 +1496,7 @@ function M.setup(opts)
     limit         = { opts.limit,         "number", true },
     max_col_width = { opts.max_col_width,  "number", true },
     timeout       = { opts.timeout,        "number", true },
-    ai            = { opts.ai,             "table",  true },
+    ai            = { opts.ai,             function(v) return v == nil or type(v) == "table" or v == false end, "table, false, or nil" },
     keymaps       = { opts.keymaps,        "table",  true },
   })
   OPTS.limit        = opts.limit        or 100
@@ -1503,8 +1508,8 @@ function M.setup(opts)
     M._keymaps = opts.keymaps
   end
 
-  -- AI configuration (optional)
-  if opts.ai then
+  -- AI configuration (optional). Accepts a config table OR false to disable.
+  if opts.ai ~= nil then
     require("dadbod-grip.ai").setup(opts.ai)
   end
 

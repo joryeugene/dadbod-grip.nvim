@@ -246,6 +246,10 @@ local function setup_keymaps(bufnr, url)
   -- qpad_ai: AI SQL generation (keep g-prefix to preserve A=append-at-EOL)
   kmap("qpad_ai", "n", function()
     local ai = require("dadbod-grip.ai")
+    if not ai.is_enabled() then
+      vim.notify("AI is disabled. Enable it in setup({ ai = { ... } })", vim.log.levels.INFO)
+      return
+    end
     ai.ask(cur_url())
   end, { desc = "Grip: AI SQL generation" })
 

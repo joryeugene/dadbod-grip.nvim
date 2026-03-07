@@ -8,7 +8,8 @@ local ui      = require("dadbod-grip.ui")
 
 local M = {}
 
-local _opts = {}
+local _opts    = {}
+local _enabled = true  -- set to false via setup({ ai = false }) or setup({ ai = { enabled = false } })
 
 -- ── providers ─────────────────────────────────────────────────────────────────
 
@@ -125,12 +126,22 @@ local PROVIDERS = {
 -- ── configuration ─────────────────────────────────────────────────────────────
 
 function M.setup(opts)
+  if opts == false then
+    _enabled = false
+    return
+  end
+  _enabled = (opts == nil) or (opts.enabled ~= false)
   _opts = vim.tbl_extend("force", {
     provider = nil,
     model = nil,
     api_key = nil,
     base_url = nil,
   }, opts or {})
+end
+
+--- Returns false when the user has disabled AI via setup({ ai = false }).
+function M.is_enabled()
+  return _enabled
 end
 
 -- ── key resolution ────────────────────────────────────────────────────────────

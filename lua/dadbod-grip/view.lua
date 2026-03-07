@@ -4353,6 +4353,11 @@ function M._setup_keymaps(bufnr)
 
   -- A: AI SQL generation
   kmap("ai", function()
+    local ai = require("dadbod-grip.ai")
+    if not ai.is_enabled() then
+      vim.notify("AI is disabled. Enable it in setup({ ai = { ... } })", vim.log.levels.INFO)
+      return
+    end
     local session_ai = M._sessions[bufnr]
     local s_url = session_ai and session_ai.state.url
     if not s_url then
@@ -4362,7 +4367,6 @@ function M._setup_keymaps(bufnr)
       vim.notify("No database connection for AI", vim.log.levels.WARN)
       return
     end
-    local ai = require("dadbod-grip.ai")
     ai.ask(s_url)
   end, "AI SQL generation")
 
@@ -4604,13 +4608,14 @@ function M.show_help(opts)
       "  gh        Query history browser",
       "  A         AI SQL generation",
       "  gA        AI SQL generation (from query pad)",
+      "            ↳ context: schema DDL for <=30 tables (cols, types, PKs, FKs)",
+      "            ↳ + existing query pad SQL if present (AI will modify it)",
+      "            ↳ provider: ANTHROPIC_API_KEY -> OPENAI -> GEMINI -> Ollama",
+      "            ↳ disable: setup({ ai = false }) skips schema pre-warm",
       "  gF        Format SQL (external tool cascade: sql-formatter, pg_format, sqlfluff)",
       "  :GripAttach  Attach external DB to DuckDB session",
       "  :GripDetach  Detach attached database",
       "  :GripOpen    Open file/HTTPS/s3:// without saving to connections",
-      "            ↳ context: schema DDL for ≤30 tables (cols, types, PKs, FKs)",
-      "            ↳ + existing query pad SQL if present (AI will modify it)",
-      "            ↳ provider: ANTHROPIC_API_KEY → OPENAI → GEMINI → Ollama",
       "",
       "  Actions",
       "  r         Refresh (re-run query)",

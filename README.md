@@ -538,6 +538,12 @@ require("dadbod-grip").setup({
 
 Provider auto-detection priority: `ANTHROPIC_API_KEY` > `OPENAI_API_KEY` > `GEMINI_API_KEY` > ollama (local). Explicit `provider` setting always wins.
 
+To disable AI entirely (skips schema pre-warm on connection open, shows an info message on `A`/`gA`):
+
+```lua
+require("dadbod-grip").setup({ ai = false })
+```
+
 ## Usage
 
 ### Standalone Workflow (no DBUI needed)
