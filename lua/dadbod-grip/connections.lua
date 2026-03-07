@@ -505,6 +505,10 @@ function M.switch(url, name, conn_type, opts)
   if resolved_type == "file" then
     vim.notify("Grip: opening " .. (name or url), vim.log.levels.INFO)
     M.set_health(url, "ok")
+    -- Compute the DuckDB connection that will actually run queries against this file.
+    -- Mirrors the logic in init.lua so the query pad is wired to the same connection.
+    local active = vim.g.db
+    local db_url = (active and active:match("^duckdb:")) and active or "duckdb::memory:"
     vim.schedule(function()
       -- No reuse_win: let find_content_win() place the grid correctly.
       -- Passing cur_win risks putting the grid in the sidebar if that window was focused.
@@ -512,7 +516,7 @@ function M.switch(url, name, conn_type, opts)
       if opts and opts.write    then open_opts.write    = true       end
       if opts and opts.watch_ms then open_opts.watch_ms = opts.watch_ms end
       require("dadbod-grip").open(url, nil, open_opts)
-      -- Open sidebar with file schema after the grid is placed
+      -- Open sidebar and query pad after the grid is placed
       vim.schedule(function()
         local schema = require("dadbod-grip.schema")
         if not schema.is_open() then
@@ -520,6 +524,7 @@ function M.switch(url, name, conn_type, opts)
         else
           schema.refresh(url)
         end
+        require("dadbod-grip.query_pad").open(db_url)
       end)
     end)
     return
