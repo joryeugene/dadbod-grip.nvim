@@ -1154,14 +1154,17 @@ local function json_to_lines(decoded, indent, depth)
   indent = indent or ""
   depth  = depth  or 0
 
-  if decoded == nil then return nil end
+  if decoded == nil     then return nil        end   -- caller signals "no value"
+  if decoded == vim.NIL then return { "null" } end   -- JSON null
 
   local t = type(decoded)
 
   -- Scalars
-  if t == "string" then return { '"' .. decoded:gsub('"', '\\"') .. '"' } end
-  if t == "number" then return { tostring(decoded) } end
+  if t == "string"  then return { '"' .. decoded:gsub('"', '\\"') .. '"' } end
+  if t == "number"  then return { tostring(decoded) } end
   if t == "boolean" then return { decoded and "true" or "false" } end
+  -- vim.NIL is userdata (JSON null); any other non-table type falls back to null
+  if t ~= "table"   then return { "null" } end
 
   -- Depth guard
   if depth >= MAX_JSON_DEPTH then return { "..." } end
