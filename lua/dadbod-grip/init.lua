@@ -460,8 +460,14 @@ local function do_edit(bufnr, cell, url)
   editor.open(prompt, initial_val, function(new_val)
     if new_val == nil then return end  -- cancelled
 
+    -- Skip staging if nothing actually changed
+    local was_null = cell.value == nil
+    local now_null = new_val == editor.NULL_VALUE
+    if now_null and was_null then return end
+    if not now_null and not was_null and new_val == initial_val then return end
+
     -- nil = NULL, anything else = new value
-    local actual_val = new_val == editor.NULL_VALUE and nil or new_val
+    local actual_val = now_null and nil or new_val
 
     local new_state = data.add_change(session.state, cell.row_idx, cell.col_name, actual_val)
     view.apply_edit(bufnr, new_state)
