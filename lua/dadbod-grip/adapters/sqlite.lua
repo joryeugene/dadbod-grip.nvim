@@ -2,7 +2,8 @@
 -- All functions receive a resolved, non-nil URL.
 -- All functions return (result, err). Never throw.
 
-local db_util = require("dadbod-grip.db")
+local db_util  = require("dadbod-grip.db")
+local adapters = require("dadbod-grip.adapters")
 
 local M = {}
 
@@ -26,11 +27,10 @@ local function extract_path(url)
 end
 
 local function sqlite3(db_path, sql_str, timeout_ms)
-  local result = vim.system(
+  return adapters.run_cmd(
     { "sqlite3", "-csv", "-header", db_path, sql_str },
-    { text = true, timeout = timeout_ms or DEFAULT_TIMEOUT }
-  ):wait()
-  return result.stdout or "", result.stderr or "", result.code
+    timeout_ms or DEFAULT_TIMEOUT
+  )
 end
 
 function M.query(sql_str, url)

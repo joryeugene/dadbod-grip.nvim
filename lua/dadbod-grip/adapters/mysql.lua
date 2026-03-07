@@ -2,7 +2,8 @@
 -- All functions receive a resolved, non-nil URL.
 -- All functions return (result, err). Never throw.
 
-local db_util = require("dadbod-grip.db")
+local db_util  = require("dadbod-grip.db")
+local adapters = require("dadbod-grip.adapters")
 
 local M = {}
 
@@ -67,16 +68,10 @@ local function mysql_query(parsed, sql_str, timeout_ms)
   args[#args + 1] = "-e"
   args[#args + 1] = sql_str
 
-  local result = vim.system(
-    args,
-    { text = true, timeout = timeout_ms or DEFAULT_TIMEOUT }
-  ):wait()
-
-  local stdout = result.stdout or ""
-  local stderr = result.stderr or ""
+  local stdout, stderr, code = adapters.run_cmd(args, timeout_ms or DEFAULT_TIMEOUT)
   -- Strip the known password-on-CLI warning
   stderr = stderr:gsub("mysql: %[Warning%][^\n]*command line interface can be insecure%.?\n?", "")
-  return stdout, stderr, result.code
+  return stdout, stderr, code
 end
 
 --- Run a DML statement (uses --batch instead of --csv for affected-row output).
@@ -103,15 +98,9 @@ local function mysql_exec(parsed, sql_str, timeout_ms)
   args[#args + 1] = "-e"
   args[#args + 1] = sql_str
 
-  local result = vim.system(
-    args,
-    { text = true, timeout = timeout_ms or DEFAULT_TIMEOUT }
-  ):wait()
-
-  local stdout = result.stdout or ""
-  local stderr = result.stderr or ""
+  local stdout, stderr, code = adapters.run_cmd(args, timeout_ms or DEFAULT_TIMEOUT)
   stderr = stderr:gsub("mysql: %[Warning%][^\n]*command line interface can be insecure%.?\n?", "")
-  return stdout, stderr, result.code
+  return stdout, stderr, code
 end
 
 function M.query(sql_str, url)

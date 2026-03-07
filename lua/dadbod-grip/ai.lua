@@ -450,18 +450,24 @@ function M.ask(url)
   local ok, question = pcall(vim.fn.input, { prompt = "Ask about your data: ", cancelreturn = CANCEL })
   if not ok or question == CANCEL or question == "" then return end
   ui.blocking("Generating SQL...", function()
-    M.generate_sql(question, url, function(result_sql, err)
-      if err then
-        vim.notify("AI: " .. err, vim.log.levels.ERROR)
-        return
-      end
-      -- Restore caller window context so query pad opens in the right place
-      if vim.api.nvim_win_is_valid(caller_win) then
-        vim.api.nvim_set_current_win(caller_win)
-      end
-      query_pad.open(url)
-      query_pad.append_sql(result_sql, existing_sql and { replace = true } or nil)
-  end, existing_sql)
+    local done = false
+    local result_sql, gen_err
+    M.generate_sql(question, url, function(sql, err)
+      result_sql, gen_err = sql, err
+      done = true
+    end, existing_sql)
+    -- Block until the async curl callback fires.  The event loop pumps every
+    -- 50ms so the spinner animates and curl completes naturally.
+    vim.wait(30000, function() return done end, 50)
+    if gen_err then
+      vim.notify("AI: " .. gen_err, vim.log.levels.ERROR)
+      return
+    end
+    if vim.api.nvim_win_is_valid(caller_win) then
+      vim.api.nvim_set_current_win(caller_win)
+    end
+    query_pad.open(url)
+    query_pad.append_sql(result_sql, existing_sql and { replace = true } or nil)
   end)
 end
 

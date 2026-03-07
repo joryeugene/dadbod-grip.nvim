@@ -29,10 +29,9 @@ end
 
 local function with_system_mock(stdout, stderr, code, fn)
   local orig = vim.system
-  vim.system = function()
-    return { wait = function()
-      return { stdout = stdout, stderr = stderr or "", code = code or 0 }
-    end }
+  vim.system = function(_args, _opts, cb)
+    local r = { stdout = stdout, stderr = stderr or "", code = code or 0 }
+    if cb then cb(r) else return { wait = function() return r end } end
   end
   local ok, err = pcall(fn)
   vim.system = orig
@@ -42,9 +41,10 @@ end
 local function capture_system_args(stdout, fn)
   local captured
   local orig = vim.system
-  vim.system = function(args)
+  vim.system = function(args, _opts, cb)
     captured = args
-    return { wait = function() return { stdout = stdout or "", stderr = "", code = 0 } end }
+    local r = { stdout = stdout or "", stderr = "", code = 0 }
+    if cb then cb(r) else return { wait = function() return r end } end
   end
   local ok, err = pcall(fn)
   vim.system = orig
@@ -212,9 +212,10 @@ test("mysql execute: DEFAULT VALUES is rewritten", function()
   with_executable(function()
     local captured_args
     local orig = vim.system
-    vim.system = function(a)
+    vim.system = function(a, _o, cb)
       captured_args = a
-      return { wait = function() return { stdout = "", stderr = "1 row affected", code = 0 } end }
+      local r = { stdout = "", stderr = "1 row affected", code = 0 }
+      if cb then cb(r) else return { wait = function() return r end } end
     end
     mysql.execute("INSERT INTO t DEFAULT VALUES", "mysql://root@localhost/test")
     vim.system = orig
@@ -228,9 +229,10 @@ test("mysql execute: non-DEFAULT-VALUES SQL unchanged", function()
   with_executable(function()
     local captured_args
     local orig = vim.system
-    vim.system = function(a)
+    vim.system = function(a, _o, cb)
       captured_args = a
-      return { wait = function() return { stdout = "", stderr = "1 row affected", code = 0 } end }
+      local r = { stdout = "", stderr = "1 row affected", code = 0 }
+      if cb then cb(r) else return { wait = function() return r end } end
     end
     mysql.execute("INSERT INTO t (name) VALUES ('x')", "mysql://root@localhost/test")
     vim.system = orig
@@ -264,9 +266,10 @@ test("sqlite get_primary_keys: table name is quoted in PRAGMA", function()
   with_executable(function()
     local captured_args
     local orig = vim.system
-    vim.system = function(a)
+    vim.system = function(a, _o, cb)
       captured_args = a
-      return { wait = function() return { stdout = "", stderr = "", code = 0 } end }
+      local r = { stdout = "", stderr = "", code = 0 }
+      if cb then cb(r) else return { wait = function() return r end } end
     end
     sqlite.get_primary_keys("users", "sqlite:test.db")
     vim.system = orig
@@ -280,9 +283,10 @@ test("sqlite get_primary_keys: embedded quote is escaped", function()
   with_executable(function()
     local captured_args
     local orig = vim.system
-    vim.system = function(a)
+    vim.system = function(a, _o, cb)
       captured_args = a
-      return { wait = function() return { stdout = "", stderr = "", code = 0 } end }
+      local r = { stdout = "", stderr = "", code = 0 }
+      if cb then cb(r) else return { wait = function() return r end } end
     end
     sqlite.get_primary_keys('my"table', "sqlite:test.db")
     vim.system = orig
@@ -321,9 +325,10 @@ test("duckdb query: httpfs timeout is at least 30 seconds", function()
   with_executable(function()
     local captured_opts
     local orig = vim.system
-    vim.system = function(a, opts)
+    vim.system = function(a, opts, cb)
       captured_opts = opts
-      return { wait = function() return { stdout = "col\nval\n", stderr = "", code = 0 } end }
+      local r = { stdout = "col\nval\n", stderr = "", code = 0 }
+      if cb then cb(r) else return { wait = function() return r end } end
     end
     duckdb.query("SELECT * FROM 'https://example.com/data.csv'", "duckdb::memory:")
     vim.system = orig
@@ -346,9 +351,10 @@ end)
 test("sqlite get_constraints: queries sqlite_master with table name", function()
   local captured_args
   local orig = vim.system
-  vim.system = function(a)
+  vim.system = function(a, _o, cb)
     captured_args = a
-    return { wait = function() return { stdout = "", stderr = "", code = 0 } end }
+    local r = { stdout = "", stderr = "", code = 0 }
+    if cb then cb(r) else return { wait = function() return r end } end
   end
   sqlite.get_constraints("users", "sqlite:test.db")
   vim.system = orig
@@ -405,9 +411,10 @@ test("duckdb get_constraints: queries duckdb_constraints() for table", function(
   with_executable(function()
     local captured_args
     local orig = vim.system
-    vim.system = function(a)
+    vim.system = function(a, _o, cb)
       captured_args = a
-      return { wait = function() return { stdout = "", stderr = "", code = 0 } end }
+      local r = { stdout = "", stderr = "", code = 0 }
+      if cb then cb(r) else return { wait = function() return r end } end
     end
     duckdb.get_constraints("users", "duckdb::memory:")
     vim.system = orig
@@ -421,9 +428,10 @@ test("duckdb get_constraints: filters by schema name", function()
   with_executable(function()
     local captured_args
     local orig = vim.system
-    vim.system = function(a)
+    vim.system = function(a, _o, cb)
       captured_args = a
-      return { wait = function() return { stdout = "", stderr = "", code = 0 } end }
+      local r = { stdout = "", stderr = "", code = 0 }
+      if cb then cb(r) else return { wait = function() return r end } end
     end
     duckdb.get_constraints("myschema.users", "duckdb:test.db")
     vim.system = orig
@@ -479,9 +487,10 @@ test("mysql execute: --init-command includes NO_BACKSLASH_ESCAPES", function()
   with_executable(function()
     local captured_args
     local orig = vim.system
-    vim.system = function(a)
+    vim.system = function(a, _o, cb)
       captured_args = a
-      return { wait = function() return { stdout = "", stderr = "1 row affected", code = 0 } end }
+      local r = { stdout = "", stderr = "1 row affected", code = 0 }
+      if cb then cb(r) else return { wait = function() return r end } end
     end
     mysql.execute("UPDATE t SET x=1 WHERE id=1", "mysql://root@localhost/test")
     vim.system = orig

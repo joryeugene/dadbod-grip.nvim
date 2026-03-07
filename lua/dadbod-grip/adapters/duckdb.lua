@@ -2,7 +2,8 @@
 -- All functions receive a resolved, non-nil URL.
 -- All functions return (result, err). Never throw.
 
-local db_util = require("dadbod-grip.db")
+local db_util  = require("dadbod-grip.db")
+local adapters = require("dadbod-grip.adapters")
 
 local M = {}
 
@@ -17,6 +18,14 @@ local _httpfs_state = nil  -- nil = unknown, "installed" = ready, "failed" = una
 --- Attachment registry: url -> { {dsn, alias, extension}, ... }
 --- Populated by M.attach(), persisted via connections.lua.
 local _attachments = {}
+
+--- Catalog cache: url -> { db_name -> true }
+--- Populated lazily by querying duckdb_databases() for persistently-attached DBs
+--- not registered via M.attach() (e.g. ATTACH statements baked into the .duckdb file).
+local _catalog_cache = {}
+
+--- Forward declaration: body assigned after duckdb() is defined (Lua scoping).
+local get_catalog_set
 
 --- Map DSN scheme prefix to the DuckDB extension that handles it.
 local function detect_extension(dsn)
@@ -44,30 +53,6 @@ local function build_attach_prefix(url)
   return table.concat(parts, "\n") .. "\n"
 end
 
---- Split a DuckDB table name into (catalog, schema, table).
---- Distinguishes attached catalogs from native schemas by checking _attachments.
----   "supplier.shipments"  (supplier is an ATTACH alias) -> ("supplier", "main", "shipments")
----   "analytics.events"    (analytics is a native schema) -> (nil, "analytics", "events")
----   "employees"           (plain name)                   -> (nil, "main", "employees")
---- Callers use:
----   local is_prefix = catalog and (catalog .. ".") or ""   -- for information_schema
----   local db_filter = catalog and ("database_name = '" .. catalog .. "' AND ") or ""  -- for system fns
-local function split_catalog_schema_table(url, table_name)
-  local prefix, tbl = table_name:match("^([^.]+)%.(.+)$")
-  if not prefix then
-    return nil, "main", table_name
-  end
-  -- Check if prefix is a known attachment alias (makes it a catalog, not a schema)
-  local atts = _attachments[url] or {}
-  for _, att in ipairs(atts) do
-    if att.alias == prefix then
-      return prefix, "main", tbl
-    end
-  end
-  -- Not an attachment: it's a native DuckDB schema in the main catalog
-  return nil, prefix, tbl
-end
-
 --- Extract file path from dadbod's duckdb: URL format.
 --- "duckdb:path/to/db.duckdb"    -> "path/to/db.duckdb"
 --- "duckdb:/absolute/path.db"    -> "/absolute/path.db"
@@ -87,6 +72,40 @@ local function extract_path(url)
     path = home .. path:sub(2)
   end
   return path
+end
+
+--- Split a DuckDB table name into (catalog, schema, table).
+--- Distinguishes attached catalogs from native schemas by checking _attachments.
+---   "supplier.shipments"  (supplier is an ATTACH alias) -> ("supplier", "main", "shipments")
+---   "analytics.events"    (analytics is a native schema) -> (nil, "analytics", "events")
+---   "employees"           (plain name)                   -> (nil, "main", "employees")
+--- Callers use:
+---   local is_prefix = catalog and (catalog .. ".") or ""   -- for information_schema
+---   local db_filter = catalog and ("database_name = '" .. catalog .. "' AND ") or ""  -- for system fns
+local function split_catalog_schema_table(url, table_name)
+  local prefix, tbl = table_name:match("^([^.]+)%.(.+)$")
+  if not prefix then
+    return nil, "main", table_name
+  end
+  -- Fast path: explicitly registered attachments.
+  local atts = _attachments[url] or {}
+  for _, att in ipairs(atts) do
+    if att.alias == prefix then
+      return prefix, "main", tbl
+    end
+  end
+  -- Fallback: query duckdb_databases() for persistently-attached DBs not
+  -- registered via M.attach() (e.g. ATTACH baked into the .duckdb file).
+  -- Result is cached so this is at most one extra query per URL.
+  local db_path = extract_path(url)
+  if db_path then
+    local cats = get_catalog_set(db_path, url)
+    if cats[prefix] then
+      return prefix, "main", tbl
+    end
+  end
+  -- Not a catalog: treat as a native DuckDB schema in the main DB.
+  return nil, prefix, tbl
 end
 
 local function duckdb(db_path, sql_str, timeout_ms, url)
@@ -117,12 +136,8 @@ local function duckdb(db_path, sql_str, timeout_ms, url)
   args[#args + 1] = "-c"
   args[#args + 1] = effective_sql
 
-  local result = vim.system(
-    args,
-    { text = true, timeout = effective_timeout }
-  ):wait()
+  local stdout, stderr, code = adapters.run_cmd(args, effective_timeout)
 
-  local stderr = result.stderr or ""
   -- Track httpfs install state from stderr output
   if sql_str:find("https?://") then
     if stderr:find("httpfs") and (stderr:find("[Ee]rror") or stderr:find("[Ff]ail")) then
@@ -132,7 +147,24 @@ local function duckdb(db_path, sql_str, timeout_ms, url)
     end
   end
 
-  return result.stdout or "", stderr, result.code
+  return stdout, stderr, code
+end
+
+--- Assigned here (after duckdb() is in scope) so the upvalue resolves correctly.
+--- Queries duckdb_databases() and returns a set of non-internal catalog names.
+--- Result is cached per URL; invalidated when attachments change.
+get_catalog_set = function(db_path, url)
+  if _catalog_cache[url] then return _catalog_cache[url] end
+  local stdout = duckdb(db_path,
+    "SELECT database_name FROM duckdb_databases() WHERE NOT internal", nil, url)
+  local cats = {}
+  for line in (stdout or ""):gmatch("[^\r\n]+") do
+    if line ~= "database_name" and line ~= "" then
+      cats[line] = true
+    end
+  end
+  _catalog_cache[url] = cats
+  return cats
 end
 
 --- Non-blocking async variant: spawns DuckDB and calls callback(stdout, stderr, code)
@@ -166,11 +198,7 @@ local function duckdb_exec(db_path, sql_str, timeout_ms, url)
   args[#args + 1] = "-c"
   args[#args + 1] = effective_sql
 
-  local result = vim.system(
-    args,
-    { text = true, timeout = timeout_ms or DEFAULT_TIMEOUT }
-  ):wait()
-  return result.stdout or "", result.stderr or "", result.code
+  return adapters.run_cmd(args, timeout_ms or DEFAULT_TIMEOUT)
 end
 
 function M.query(sql_str, url)
@@ -680,10 +708,12 @@ local function store_attachment(url, dsn, alias)
     if a.alias == alias then
       a.dsn = dsn
       a.extension = ext
+      _catalog_cache[url] = nil  -- attachment list changed; re-query on next use
       return
     end
   end
   table.insert(_attachments[url], { dsn = dsn, alias = alias, extension = ext })
+  _catalog_cache[url] = nil  -- attachment list changed; re-query on next use
 end
 
 --- Attach an external database to a DuckDB session.
@@ -708,9 +738,9 @@ function M.attach(url, dsn, alias)
   -- (both also open the same file), causing "Failed to lock file" on connection switch.
   local args = { "duckdb", "-c", test_sql }
 
-  local result = vim.system(args, { text = true, timeout = 10000 }):wait()
-  if result.code ~= 0 then
-    local msg = (result.stderr or ""):gsub("%s+$", "")
+  local _, stderr_attach, code_attach = adapters.run_cmd(args, 10000)
+  if code_attach ~= 0 then
+    local msg = stderr_attach:gsub("%s+$", "")
     return msg ~= "" and msg or "Failed to attach database"
   end
 
@@ -727,6 +757,7 @@ function M.detach(url, alias)
   for i, a in ipairs(atts) do
     if a.alias == alias then
       table.remove(atts, i)
+      _catalog_cache[url] = nil  -- attachment list changed
       return
     end
   end
@@ -743,9 +774,11 @@ end
 function M.load_attachments(url, attachments)
   if not attachments or #attachments == 0 then
     _attachments[url] = nil
+    _catalog_cache[url] = nil
     return
   end
   _attachments[url] = {}
+  _catalog_cache[url] = nil
   for _, a in ipairs(attachments) do
     local dsn = M.url_to_dsn(a.dsn)
     local err = M.attach(url, dsn, a.alias)

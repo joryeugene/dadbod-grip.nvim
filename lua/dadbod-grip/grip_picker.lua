@@ -144,6 +144,8 @@ function M.open(opts)
     if preview_fn then
       local pvw = get_pv_w(w)
       if pvw >= 20 then
+        local _ei = vim.o.eventignore
+        vim.o.eventignore = "all"
         preview_win = vim.api.nvim_open_win(preview_buf, false, {
           relative   = "editor",
           row        = row,
@@ -157,6 +159,7 @@ function M.open(opts)
           focusable  = false,
           zindex     = 54,
         })
+        vim.o.eventignore = _ei
         vim.wo[preview_win].wrap = true
       end
     end

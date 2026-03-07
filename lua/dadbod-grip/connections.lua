@@ -114,14 +114,21 @@ local function read_json_connections(path, source)
   return result
 end
 
---- Read connections from project-local and global files.
+--- Read connections from the project-local file only.
+--- Use this for all mutation paths (add, touch, remove, save_attachments).
+--- Keeping mutation local-only prevents global connections from leaking into
+--- the local file on every write.
+local function read_local_connections()
+  return read_json_connections(connections_path(), "file")
+end
+
+--- Read connections from project-local and global files (read-only paths only).
+--- Do NOT pass this result to write_file_connections — use read_local_connections.
 local function read_file_connections()
   local result = {}
-  -- Project-local first
-  for _, c in ipairs(read_json_connections(connections_path(), "file")) do
+  for _, c in ipairs(read_local_connections()) do
     table.insert(result, c)
   end
-  -- Global connections (persisted from other projects)
   for _, c in ipairs(read_json_connections(global_connections_path(), "global")) do
     table.insert(result, c)
   end
@@ -129,10 +136,24 @@ local function read_file_connections()
 end
 
 --- Write connections to .grip/connections.json.
+--- Deduplicates by URL before writing, keeping the entry with the highest
+--- last_used timestamp. This self-heals files bloated by historical bugs.
 local function write_file_connections(conns)
   ensure_grip_dir()
-  local data = {}
+  -- Dedup by URL: keep highest last_used per URL
+  local order = {}
+  local by_url = {}
   for _, c in ipairs(conns) do
+    if not by_url[c.url] then
+      by_url[c.url] = c
+      table.insert(order, c.url)
+    elseif (c.last_used or 0) > (by_url[c.url].last_used or 0) then
+      by_url[c.url] = c
+    end
+  end
+  local data = {}
+  for _, url in ipairs(order) do
+    local c = by_url[url]
     local entry = { name = c.name, url = c.url }
     if c.type then entry.type = c.type end
     if c.attachments and #c.attachments > 0 then entry.attachments = c.attachments end
@@ -171,14 +192,12 @@ end
 --- List all connections from all sources, deduplicated by URL and name.
 function M.list()
   local all = {}
-  local seen = {}       -- keyed by URL
-  local seen_names = {} -- keyed by name (secondary dedup across sources)
+  local seen = {}  -- keyed by URL; URL is the canonical identifier
 
-  -- File connections first (user-managed)
+  -- File connections first (user-managed, sorted by last_used in pick())
   for _, c in ipairs(read_file_connections()) do
-    if not seen[c.url] and not seen_names[c.name] then
+    if not seen[c.url] then
       seen[c.url] = true
-      seen_names[c.name] = true
       table.insert(all, c)
     end
   end
@@ -191,9 +210,8 @@ function M.list()
   for _, gc in ipairs(global_existing) do global_seen[gc.url] = true end
 
   for _, c in ipairs(gdbs) do
-    if not seen[c.url] and not seen_names[c.name] then
+    if not seen[c.url] then
       seen[c.url] = true
-      seen_names[c.name] = true
       table.insert(all, c)
     end
     -- Persist to global if not already there
@@ -218,15 +236,15 @@ function M.list()
 
   -- $DATABASE_URL
   local env_url = os.getenv("DATABASE_URL")
-  if env_url and env_url ~= "" and not seen[env_url] and not seen_names["$DATABASE_URL"] then
-    seen_names["$DATABASE_URL"] = true
+  if env_url and env_url ~= "" and not seen[env_url] then
+    seen[env_url] = true
     table.insert(all, { name = "$DATABASE_URL", url = env_url, source = "env" })
   end
 
-  -- Current vim.g.db (if set and not already listed)
+  -- Current vim.g.db (if set and not already listed by URL)
   local gdb = vim.g.db
-  if type(gdb) == "string" and gdb ~= "" and not seen[gdb] and not seen_names["vim.g.db"] then
-    seen_names["vim.g.db"] = true
+  if type(gdb) == "string" and gdb ~= "" and not seen[gdb] then
+    seen[gdb] = true
     table.insert(all, { name = "vim.g.db", url = gdb, source = "global" })
   end
 
@@ -261,21 +279,26 @@ function M.list()
     end
   end
 
-  -- Softrear Inc. Analyst Portal™: built-in, always at the bottom
+  -- Softrear Inc. Analyst Portal™: built-in demo, shown until dismissed or
+  -- until the user switches to it (after which it's persisted as a regular
+  -- file connection and `seen[demo_url]` suppresses this entry).
   local hidden = vim.fn.stdpath("data") .. "/grip/softrear.hidden"
   local sql_files = vim.api.nvim_get_runtime_file("demo/softrear.sql", false)
   if #sql_files > 0 and vim.fn.filereadable(hidden) == 0 then
     local has_duck = vim.fn.executable("duckdb") == 1
     local ext      = has_duck and ".duckdb" or ".db"
     local db_path  = vim.fn.stdpath("data") .. "/grip/softrear" .. ext
-    local seed     = has_duck and sql_files[1]
-      or (vim.api.nvim_get_runtime_file("demo/softrear_sqlite.sql", false)[1] or "")
-    table.insert(all, {
-      name      = "Softrear Inc. Analyst Portal\xe2\x84\xa2",
-      url       = (has_duck and "duckdb:" or "sqlite:") .. db_path,
-      _is_demo  = true,
-      _demo_sql = seed,
-    })
+    local demo_url = (has_duck and "duckdb:" or "sqlite:") .. db_path
+    if not seen[demo_url] then  -- suppress once persisted as a real connection
+      local seed = has_duck and sql_files[1]
+        or (vim.api.nvim_get_runtime_file("demo/softrear_sqlite.sql", false)[1] or "")
+      table.insert(all, {
+        name      = "Softrear Inc. Analyst Portal\xe2\x84\xa2",
+        url       = demo_url,
+        _is_demo  = true,
+        _demo_sql = seed,
+      })
+    end
   end
 
   return all
@@ -294,15 +317,30 @@ end
 --- Add a connection to .grip/connections.json.
 function M.add(name, url)
   local clean_url = strip_flags(url)
-  local conns = read_file_connections()
+  local conns = read_local_connections()
   local conn_type = is_file_url(clean_url) and "file" or nil
   table.insert(conns, { name = name, url = clean_url, type = conn_type })
   write_file_connections(conns)
 end
 
+--- Update last_used timestamp for a saved connection (MRU tracking).
+function M.touch(url)
+  local clean = strip_flags(url)
+  local conns = read_local_connections()
+  local changed = false
+  for _, c in ipairs(conns) do
+    if c.url == clean then
+      c.last_used = os.time()
+      changed = true
+      break
+    end
+  end
+  if changed then write_file_connections(conns) end
+end
+
 --- Remove a connection from .grip/connections.json by name.
 function M.remove(name)
-  local conns = read_file_connections()
+  local conns = read_local_connections()
   local filtered = {}
   for _, c in ipairs(conns) do
     if c.name ~= name then
@@ -319,11 +357,12 @@ end
 function M.switch(url, name, conn_type, opts)
   -- Strip session-only flags: they must never reach the connection registry
   url = strip_flags(url)
-  -- Resolve type: param > stored connections > auto-detect
-  local file_conns = read_file_connections()
+  -- Resolve type: param > stored connections > auto-detect.
+  -- Read local+global here (read-only: no write risk).
+  local all_conns = read_file_connections()
   local resolved_type = conn_type
   if not resolved_type then
-    for _, c in ipairs(file_conns) do
+    for _, c in ipairs(all_conns) do
       if c.url == url and c.type then
         resolved_type = c.type
         break
@@ -334,14 +373,18 @@ function M.switch(url, name, conn_type, opts)
     resolved_type = "file"
   end
 
-  -- Auto-persist if not already saved
+  -- Auto-persist: check LOCAL file only. A connection that lives only in the
+  -- global file still gets added to local so M.touch() can stamp last_used.
+  local local_conns = read_local_connections()
   local already_saved = false
-  for _, c in ipairs(file_conns) do
+  for _, c in ipairs(local_conns) do
     if c.url == url then already_saved = true; break end
   end
   if not already_saved and name and name ~= "" then
     M.add(name, url)
   end
+  -- Touch AFTER auto-persist so first-time connections get last_used stamped
+  M.touch(url)
 
   if resolved_type == "file" then
     vim.notify("Grip: opening " .. (name or url), vim.log.levels.INFO)
@@ -368,10 +411,11 @@ function M.switch(url, name, conn_type, opts)
   -- Regular DB connection: set vim.g.db and open full workspace
   vim.g.db = url
 
-  -- Restore persisted attachments for DuckDB connections
+  -- Restore persisted attachments for DuckDB connections (local file only;
+  -- attachments are always saved to local by M.save_attachments).
   if url:find("^duckdb:") then
     local stored_atts
-    for _, c in ipairs(file_conns) do
+    for _, c in ipairs(local_conns) do
       if c.url == url and c.attachments then
         stored_atts = c.attachments
         break
@@ -441,7 +485,7 @@ end
 --- Persist attachments for a DuckDB connection URL.
 --- Called after attach/detach to update .grip/connections.json.
 function M.save_attachments(url, attachments)
-  local file_conns = read_file_connections()
+  local file_conns = read_local_connections()
   local found = false
   for _, c in ipairs(file_conns) do
     if c.url == url then
@@ -500,6 +544,20 @@ function M.pick(opts)
     return
   end
 
+  -- Sort file-backed connections (file + global) by most recently used first,
+  -- with non-file-backed sources (e.g. vim.g.db env var) sorted last.
+  local function is_file_backed(c)
+    return c.source == "file" or c.source == "global"
+  end
+  table.sort(conns, function(a, b)
+    local af, bf = is_file_backed(a), is_file_backed(b)
+    if af ~= bf then return af end
+    if af and bf then
+      return (a.last_used or 0) > (b.last_used or 0)
+    end
+    return false
+  end)
+
   local max_name = 0
   for _, c in ipairs(conns) do
     max_name = math.max(max_name, vim.fn.strdisplaywidth(c.name))
@@ -543,8 +601,8 @@ function M.pick(opts)
             vim.fn.system(bin .. " " .. vim.fn.shellescape(db_path)
               .. " < " .. vim.fn.shellescape(c._demo_sql))
           end
-          -- Open portal without persisting to connections.json (no name arg)
-          M.switch(c.url)
+          -- Persist with name so MRU tracking works on every future selection
+          M.switch(c.url, c.name)
         else
           M.switch(c.url, c.name, c.type)
         end

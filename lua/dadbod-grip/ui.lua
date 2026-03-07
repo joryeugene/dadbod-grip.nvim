@@ -3,23 +3,34 @@
 
 local M = {}
 
---- Show a spinner + message immediately, run fn(), then clear the float.
---- Uses nvim__redraw({flush=true}) to write to the terminal synchronously,
---- bypassing Neovim's Lua-call batching. eventignore="all" suppresses plugin
---- autocmds (WinNew, BufNew) that add 200-400ms overhead on each call.
---- pcall wraps fn() so the float always closes even if fn() raises an error.
---- All return values from fn() are forwarded naturally.
+--- Show an animated spinner float, run fn(), then clear the float.
+---
+--- IMPORTANT: fn() must be synchronous OR use vim.wait() for async work.
+--- If fn() returns before work is done, the float closes prematurely.
+--- For async callers (e.g. curl/jobstart), use this pattern inside fn():
+---
+---   local done = false
+---   start_async(function(result) ... done = true end)
+---   vim.wait(30000, function() return done end, 50)
+---
+--- The spinner (braille frames) animates during vim.system():wait() and
+--- vim.wait() calls inside fn() because both pump the libuv event loop.
+--- eventignore="all" suppresses plugin autocmds (WinNew/BufNew) that add
+--- 200-400ms overhead from noice/treesitter/nvim-cmp handlers.
+---
 --- @param msg string
---- @param fn  function
---- @return    any
+--- @param fn  function  must be synchronous or use vim.wait() internally
+--- @return    any       all return values from fn() forwarded
 function M.blocking(msg, fn)
-  local display = "⠋ " .. msg
+  local frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+  local fi = 1
+
+  local display = "  " .. msg
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "", "  " .. display, "" })
-  local w   = math.min(vim.fn.strdisplaywidth(display) + 6, vim.o.columns - 4)
+  local w = math.min(vim.fn.strdisplaywidth(display) + 6, vim.o.columns - 4)
 
-  -- Suppress plugin autocmds during float create to avoid 200-400ms overhead
-  -- from noice/treesitter/nvim-cmp WinNew and BufNew handlers.
+  -- Suppress plugin autocmds during float create to avoid 200-400ms overhead.
   local ei = vim.o.eventignore
   vim.o.eventignore = "all"
   local win = vim.api.nvim_open_win(buf, false, {
@@ -30,14 +41,29 @@ function M.blocking(msg, fn)
   })
   vim.o.eventignore = ei
 
-  -- Flush to terminal NOW, before fn() runs. nvim__redraw({flush=true})
-  -- bypasses Lua-call batching; vim.cmd("redraw") defers until call returns.
+  -- Flush to terminal NOW, before fn() runs.
   vim.api.nvim__redraw({ flush = true })
+
+  -- Animate: timer fires during vim.system():wait() and vim.wait() event loop pumps.
+  -- libuv timer callbacks are "fast events" - nvim API calls are forbidden there.
+  -- vim.schedule_wrap defers the API work into the main loop, which pumps during wait().
+  local timer = vim.uv.new_timer()
+  timer:start(80, 80, vim.schedule_wrap(function()
+    fi = (fi % #frames) + 1
+    if vim.api.nvim_buf_is_valid(buf) then
+      pcall(vim.api.nvim_buf_set_lines, buf, 0, -1, false,
+        { "", "  " .. frames[fi] .. " " .. msg, "" })
+      vim.api.nvim__redraw({ flush = true })
+    end
+  end))
 
   -- table.pack/table.unpack are Lua 5.2+; LuaJIT is 5.1.
   -- { pcall(fn) } => { ok, r1, r2, ... } or { false, errmsg }
   local rets = { pcall(fn) }
   local ok   = table.remove(rets, 1)
+
+  timer:stop()
+  timer:close()
 
   -- Close float, suppressing autocmds again.
   ei = vim.o.eventignore

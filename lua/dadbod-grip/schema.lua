@@ -89,9 +89,10 @@ local function get_state(url)
       items = nil,       -- { {name, type}, ... }: nil = not fetched
       file_cols = nil,   -- for file-as-table: { {column_name, data_type}, ... }
       expanded = {},      -- set of expanded table names
-      col_cache = {},     -- table_name → column_info[]
-      pk_cache = {},      -- table_name → set
-      fk_cache = {},      -- table_name → fk_info[]
+      col_cache = {},        -- table_name → column_info[]
+      pk_cache = {},         -- table_name → set
+      fk_cache = {},         -- table_name → fk_info[]
+      row_count_cache = {},  -- table_name → number
       nodes = {},         -- flat rendered node list
       filter = nil,       -- search filter string
     }
@@ -150,6 +151,30 @@ local function ensure_columns(state, table_name)
   local fk_map = {}
   for _, fk in ipairs(fks or {}) do fk_map[fk.column] = fk.ref_table end
   state.fk_cache[table_name] = fk_map
+end
+
+--- Fetch row count for a table (lazy, cached). Independent of ensure_columns so
+--- it can retry on its own if the first attempt fails (e.g. transient error).
+--- Quotes each dot-separated component separately so federated names like
+--- "supplier.orders" become "supplier"."orders" not "supplier.orders".
+local function ensure_row_count(state, table_name)
+  if state.row_count_cache[table_name] ~= nil then return end
+  local parts = vim.split(table_name, ".", { plain = true })
+  for i, p in ipairs(parts) do
+    parts[i] = '"' .. p:gsub('"', '""') .. '"'
+  end
+  local res = db.query("SELECT COUNT(*) FROM " .. table.concat(parts, "."), state.url)
+  if res and res.rows and res.rows[1] then
+    state.row_count_cache[table_name] = tonumber(res.rows[1][1]) or 0
+  end
+end
+
+--- Format a row count for compact sidebar display.
+local function fmt_count(n)
+  if n >= 1e9 then return string.format("%.1fB", n / 1e9) end
+  if n >= 1e6 then return string.format("%.1fM", n / 1e6) end
+  if n >= 1e3 then return string.format("%.1fK", n / 1e3) end
+  return tostring(n)
 end
 
 --- Build flat node list from state.
@@ -221,6 +246,7 @@ local function build_nodes(state)
 
         if expanded then
           ensure_columns(state, item.name)
+          ensure_row_count(state, item.name)
           local cols = state.col_cache[item.name] or {}
           local pk_set = state.pk_cache[item.name] or {}
           local fk_map = state.fk_cache[item.name] or {}
@@ -267,6 +293,7 @@ local function build_nodes(state)
 
         if expanded then
           ensure_columns(state, item.name)
+          ensure_row_count(state, item.name)
           local cols = state.col_cache[item.name] or {}
           local pk_set = state.pk_cache[item.name] or {}
           local fk_map = state.fk_cache[item.name] or {}
@@ -299,6 +326,7 @@ local function build_nodes(state)
 
         if expanded then
           ensure_columns(state, item.name)
+          ensure_row_count(state, item.name)
           local cols = state.col_cache[item.name] or {}
           for _, col in ipairs(cols) do
             table.insert(nodes, {
@@ -371,11 +399,13 @@ local function render(state)
     elseif node.kind == "table" then
       cur_tbl = node.name
       local arrow = node.expanded and " ▼ " or " ▶ "
-      local max_name = SIDEBAR_MAX_WIDTH - 3  -- subtract arrow chars
       local label = node.display or node.name
+      local cached_count = state.row_count_cache and state.row_count_cache[node.name]
+      local count_str = (cached_count ~= nil) and (" (" .. fmt_count(cached_count) .. ")") or ""
+      local max_name = SIDEBAR_MAX_WIDTH - 3 - #count_str
       local display_name = #label > max_name
           and ("…" .. label:sub(-(max_name - 1))) or label
-      table.insert(lines, arrow .. display_name)
+      table.insert(lines, arrow .. display_name .. count_str)
       -- No special hl for table names: keep it clean
     elseif node.kind == "column" then
       -- All prefixes are 6 display cols wide.
@@ -647,6 +677,7 @@ local function setup_keymaps(url)
       state.col_cache = {}
       state.pk_cache = {}
       state.fk_cache = {}
+      state.row_count_cache = {}
       fetch_tables(state)
       render(state)
     end)
@@ -783,6 +814,7 @@ local function setup_keymaps(url)
     ddl.drop_table(node.name, url, function()
       state.items = nil
       state.col_cache = {}
+      state.row_count_cache = {}
       fetch_tables(state)
       render(state)
     end)
@@ -794,6 +826,7 @@ local function setup_keymaps(url)
     ddl.create_table(url, function()
       state.items = nil
       state.col_cache = {}
+      state.row_count_cache = {}
       fetch_tables(state)
       render(state)
     end)
@@ -1107,6 +1140,7 @@ function M.refresh(url)
   state.col_cache = {}
   state.pk_cache = {}
   state.fk_cache = {}
+  state.row_count_cache = {}
   -- Only re-render if sidebar is currently visible
   if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
   fetch_tables(state)
