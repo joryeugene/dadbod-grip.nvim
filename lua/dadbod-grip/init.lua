@@ -457,45 +457,59 @@ local function do_edit(bufnr, cell, url)
     edit_opts.ft    = "json"
   end
 
+  -- Capture cursor before the float opens. The editor.open/close cycle (stopinsert
+  -- + window switch) shifts the grid cursor by 1, accumulating on every Enter.
+  -- Pre-capturing gives us the ground truth for restoration in all three cases:
+  -- cancel, no-mutation save, and valid mutation (where we advance the LINE only).
+  local _pre_w = vim.fn.bufwinid(bufnr)
+  local _pre_cursor = _pre_w ~= -1 and vim.api.nvim_win_get_cursor(_pre_w) or nil
+
+  -- Restore cursor to target position, resisting plugin WinEnter chains via SafeState.
+  local function _restore(target)
+    if not target then return end
+    local w = vim.fn.bufwinid(bufnr)
+    if w ~= -1 then pcall(vim.api.nvim_win_set_cursor, w, target) end
+    local tl, tc = target[1], target[2]
+    vim.api.nvim_create_autocmd("SafeState", {
+      group = _ag, once = true,
+      callback = function()
+        local w2 = vim.fn.bufwinid(bufnr)
+        if w2 ~= -1 then pcall(vim.api.nvim_win_set_cursor, w2, { tl, tc }) end
+      end,
+    })
+  end
+
   editor.open(prompt, initial_val, function(new_val)
-    if new_val == nil then return end  -- cancelled
+    if new_val == nil then  -- cancelled
+      _restore(_pre_cursor)
+      return
+    end
 
     -- Skip staging if nothing actually changed
     local was_null = cell.value == nil
     local now_null = new_val == editor.NULL_VALUE
-    if now_null and was_null then return end
-    if not now_null and not was_null and new_val == initial_val then return end
+    if now_null and was_null then
+      _restore(_pre_cursor)
+      return
+    end
+    if not now_null and not was_null and new_val == initial_val then
+      _restore(_pre_cursor)
+      return
+    end
 
-    -- nil = NULL, anything else = new value
+    -- Valid mutation: stage and advance to next row (spreadsheet style).
     local actual_val = now_null and nil or new_val
-
     local new_state = data.add_change(session.state, cell.row_idx, cell.col_name, actual_val)
     view.apply_edit(bufnr, new_state)
 
-    -- Advance cursor to next row / same column (spreadsheet-style).
-    -- view.apply_edit() sets session._render with fresh byte_positions synchronously.
+    -- Use _next_edit_cursor for the target LINE, but _pre_cursor[2] for the COLUMN
+    -- so the column never drifts regardless of col_bp.start vs actual cursor offset.
     local s = view._sessions[bufnr]
-    local pos = s and s._render and M._next_edit_cursor(s._render, edited_row_idx, edited_col)
-    if pos then
-      local w = vim.fn.bufwinid(bufnr)
-      if w ~= -1 then
-        -- Sync set: immediate, handles the no-interference case with zero latency.
-        pcall(vim.api.nvim_win_set_cursor, w, { pos.line, pos.col })
-      end
-      -- SafeState fires after ALL pending events are exhausted (after any depth of
-      -- WinEnter->vim.schedule restore chains from external plugins).  once=true
-      -- auto-removes the autocmd so it cannot fire again on the next user action.
-      local p_line, p_col = pos.line, pos.col
-      vim.api.nvim_create_autocmd("SafeState", {
-        group = _ag,
-        once = true,
-        callback = function()
-          local w2 = vim.fn.bufwinid(bufnr)
-          if w2 ~= -1 then
-            pcall(vim.api.nvim_win_set_cursor, w2, { p_line, p_col })
-          end
-        end,
-      })
+    local next_pos = s and s._render and M._next_edit_cursor(s._render, edited_row_idx, edited_col)
+    if next_pos and _pre_cursor then
+      _restore({ next_pos.line, _pre_cursor[2] })
+    else
+      _restore(_pre_cursor)
     end
   end, edit_opts)
 end
