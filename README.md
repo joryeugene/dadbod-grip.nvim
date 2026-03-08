@@ -48,6 +48,20 @@ A command palette (`<C-p>`) surfaces every action without memorizing keymaps. Th
 
 An example database is included. `:GripStart` opens it with seventeen tables and something in the consumer incidents that does not add up. See the [walkthrough](demo/softrear-internal.md) for the full investigation.
 
+## Contents
+
+- [Quickstart](#quickstart)
+- [Features](#features)
+- [Keybindings](#keybindings)
+- [Commands](#commands)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Architecture](#architecture)
+- [Testing](#testing)
+- [Ecosystem](#ecosystem)
+
 ## Quickstart
 
 ```lua
@@ -219,53 +233,6 @@ Active modes show as a colored badge in the grid's winbar: red `✎ WRITE` and b
 - **JSON-aware editing**: pressing `i`/`<CR>` on a JSON cell pre-fills the editor with formatted, indented JSON for easy inspection and editing. The editor opens wider and taller with JSON syntax highlighting.
 - **Full Vim motions in the cell editor**: the editor starts in INSERT mode for quick changes. Press `<Esc>` to drop into NORMAL mode and use any Vim motion (`ciw`, `dw`, `s`, `cW`, etc.). Press `<CR>` or `<C-s>` to save from either mode; press `q` or `<Esc>` from NORMAL to cancel. A live footer shows INSERT vs NORMAL hints.
 - **Word wrap**: long cell values wrap at word boundaries inside the editor float instead of scrolling horizontally.
-
-### Remapping keymaps
-
-All keymaps are remappable via `setup()`. Pass action names as keys. Set a key to `false` to disable it entirely.
-
-```lua
-require("dadbod-grip").setup({
-  keymaps = {
-    -- remap the command palette off C-p (e.g. if you use C-p for telescope)
-    palette          = "<F1>",
-
-    -- remap AI to a leader sequence instead of bare A
-    ai               = "<leader>da",
-
-    -- change apply to <Space> instead of a
-    grid_apply       = "<Space>",
-
-    -- remap pagination to ][ instead of H/L
-    grid_next_page   = "]",
-    grid_prev_page   = "[",
-
-    -- disable the live SQL preview toggle if you never use it
-    grid_live_sql    = false,
-
-    -- use <leader>n for notebooks instead of gn
-    open_notebook    = "<leader>n",
-  }
-})
-```
-
-Action names are stable API. The full list is in `lua/dadbod-grip/keymaps.lua`.
-
-Common actions worth knowing:
-
-| Action name | Default | Surface |
-|---|---|---|
-| `palette` | `<C-p>` | all |
-| `ai` | `A` | grid + sidebar |
-| `qpad_ai` | `gA` | query pad |
-| `qpad_execute` | `<C-CR>` | query pad |
-| `open_notebook` | `gn` | query pad |
-| `grid_apply` | `a` | grid |
-| `grid_fk_follow` | `gf` | grid |
-| `grid_profile` | `gR` | grid |
-| `grid_col_stats` | `gS` | grid |
-| `connections` | `gC` | all |
-| `tab_1` / `tab_2` / `tab_3` | `1` / `2` / `3` | all |
 
 ## Keybindings
 
@@ -603,6 +570,53 @@ To disable AI entirely (skips schema pre-warm on connection open, shows an info 
 require("dadbod-grip").setup({ ai = false })
 ```
 
+### Remapping keymaps
+
+All keymaps are remappable via `setup()`. Pass action names as keys. Set a key to `false` to disable it entirely.
+
+```lua
+require("dadbod-grip").setup({
+  keymaps = {
+    -- remap the command palette off C-p (e.g. if you use C-p for telescope)
+    palette          = "<F1>",
+
+    -- remap AI to a leader sequence instead of bare A
+    ai               = "<leader>da",
+
+    -- change apply to <Space> instead of a
+    grid_apply       = "<Space>",
+
+    -- remap pagination to ][ instead of H/L
+    grid_next_page   = "]",
+    grid_prev_page   = "[",
+
+    -- disable the live SQL preview toggle if you never use it
+    grid_live_sql    = false,
+
+    -- use <leader>n for notebooks instead of gn
+    open_notebook    = "<leader>n",
+  }
+})
+```
+
+Action names are stable API. The full list is in `lua/dadbod-grip/keymaps.lua`.
+
+Common actions worth knowing:
+
+| Action name | Default | Surface |
+|---|---|---|
+| `palette` | `<C-p>` | all |
+| `ai` | `A` | grid + sidebar |
+| `qpad_ai` | `gA` | query pad |
+| `qpad_execute` | `<C-CR>` | query pad |
+| `open_notebook` | `gn` | query pad |
+| `grid_apply` | `a` | grid |
+| `grid_fk_follow` | `gf` | grid |
+| `grid_profile` | `gR` | grid |
+| `grid_col_stats` | `gS` | grid |
+| `connections` | `gC` | all |
+| `tab_1` / `tab_2` / `tab_3` | `1` / `2` / `3` | all |
+
 ## Usage
 
 ### Standalone Workflow (no DBUI needed)
@@ -667,8 +681,8 @@ grip.open_smart()
          ║                    ║                  ║
   ┌──────▼──────┐  ┌──────────▼──────────┐  ┌───▼──────────┐
   │  VIEW.LUA   │  │  SCHEMA.LUA         │  │ QUERY_PAD    │
-  │  grid · UI  │  │  sidebar tree       │  │ SQL scratch  │
-  │  keymaps    │  │  metadata · DDL     │  │ → results    │
+  │  grid · UI  │  │  sidebar tree       │  │ SQL·notebooks│
+  │  keymaps    │  │  metadata · DDL     │  │ gn · C-CR    │
   └──────┬──────┘  └──────────┬──────────┘  └───┬──────────┘
          └────────────────────┼─────────────────┘
                               │
