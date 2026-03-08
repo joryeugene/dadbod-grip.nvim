@@ -122,7 +122,7 @@ local function ensure_buf(url)
 
   -- Pre-fill with hint comment
   vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, {
-    "-- C-CR:run  C-s:save  gA:ai  go:tables  gh:hist  gq:saved  gw:grid  gb:schema  gC:connect",
+    "-- C-CR:run block or buffer  gn:notebooks  gA:ai  go:tables  gh:hist  gq:saved  gb:schema  gC:conn",
     "",
   })
   -- Mark buffer as not modified after creation
@@ -191,6 +191,83 @@ local function run_sql(url, sql)
   grip.open(sql, url, run_opts)
 end
 
+--- Return the SQL inside the ```sql fence block that contains the cursor line.
+--- Returns nil when the cursor is not inside a fenced SQL block.
+local function _block_under_cursor(bufnr)
+  local line_nr = vim.api.nvim_win_get_cursor(0)[1]  -- 1-based
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
+  -- Scan backwards for opening ```sql fence
+  local block_start = nil
+  for i = line_nr, 1, -1 do
+    local l = lines[i]
+    if l:match("^```sql%s*$") or l:match("^```%s*sql%s*$") then
+      block_start = i + 1
+      break
+    elseif l:match("^```") then
+      break  -- hit a different fence going backwards: not inside a sql block
+    end
+  end
+
+  if not block_start then return nil end
+
+  -- Scan forwards for the closing ``` fence
+  local block_end = nil
+  for i = block_start, #lines do
+    if lines[i]:match("^```%s*$") then
+      block_end = i - 1
+      break
+    end
+  end
+
+  if not block_end or block_end < block_start then return nil end
+
+  local block_lines = {}
+  for i = block_start, block_end do
+    table.insert(block_lines, lines[i])
+  end
+  return table.concat(block_lines, "\n")
+end
+M._block_under_cursor = _block_under_cursor  -- exported for unit tests
+
+--- Scan the project root for .md and .sql files to use as notebooks.
+local function scan_notebooks()
+  -- Walk up from cwd to find project root (same pattern as connections.lua)
+  local root = vim.fn.getcwd()
+  do
+    local dir = root
+    for _ = 1, 10 do
+      if vim.fn.isdirectory(dir .. "/.git") == 1 or vim.fn.isdirectory(dir .. "/.grip") == 1 then
+        root = dir
+        break
+      end
+      local parent = vim.fn.fnamemodify(dir, ":h")
+      if parent == dir then break end
+      dir = parent
+    end
+  end
+
+  local seen = {}
+  local files = {}
+  local function add(path)
+    path = vim.fn.fnamemodify(path, ":p")
+    if not seen[path] and vim.fn.filereadable(path) == 1 then
+      seen[path] = true
+      table.insert(files, {
+        path = path,
+        name = vim.fn.fnamemodify(path, ":~:."),
+        ext  = path:match("%.([^.]+)$") or "",
+      })
+    end
+  end
+  for _, pat in ipairs({ "demo/*.md", "notebooks/*.md", "*.md", "*.sql" }) do
+    for _, p in ipairs(vim.fn.glob(root .. "/" .. pat, false, true)) do
+      add(p)
+    end
+  end
+  return files
+end
+
 --- Set up buffer-local keymaps.
 local function setup_keymaps(bufnr, url)
   -- Always read the live connection from the buffer variable so keymaps stay
@@ -205,11 +282,16 @@ local function setup_keymaps(bufnr, url)
     vim.keymap.set(mode, key, fn, o)
   end
 
-  -- qpad_execute: run full buffer (use get_content to strip hint/AI-separator comment lines)
+  -- qpad_execute: block-under-cursor takes priority; fall back to full buffer
   kmap("qpad_execute", "n", function()
+    local block = _block_under_cursor(bufnr)
+    if block and block:match("%S") then
+      run_sql(cur_url(), block)
+      return
+    end
     local sql = M.get_content()
     if sql then run_sql(cur_url(), sql) end
-  end, { desc = "Grip: run query" })
+  end, { desc = "Grip: run query or SQL block under cursor" })
 
   -- qpad_execute in insert mode too
   kmap("qpad_execute", "i", function()
@@ -310,6 +392,11 @@ local function setup_keymaps(bufnr, url)
       vim.bo[bufnr].modified = false
     end)
   end, { desc = "Grip: load saved query" })
+
+  -- open_notebook: open a .md or .sql file as a notebook in this buffer
+  kmap("open_notebook", "n", function()
+    M.pick_notebook()
+  end, { desc = "Grip: open notebook file in query pad" })
 
   -- welcome: go to welcome screen (home)
   kmap("welcome", "n", function()
@@ -561,6 +648,45 @@ function M.get_content()
   local content = table.concat(real, "\n"):match("^%s*(.-)%s*$")
   if content == "" then return nil end
   return content
+end
+
+--- Open a file picker for .md and .sql notebooks and load the chosen file
+--- into the query pad buffer. Accessible from grid, query pad, and sidebar via gn.
+function M.pick_notebook()
+  local files = scan_notebooks()
+  if #files == 0 then
+    vim.notify("Grip: no notebooks found (*.md, *.sql in project root)", vim.log.levels.INFO)
+    return
+  end
+  require("dadbod-grip.grip_picker").open({
+    title = "Notebooks",
+    items = files,
+    display = function(f) return f.name end,
+    preview = function(f)
+      local ok, lines = pcall(vim.fn.readfile, f.path)
+      return ok and lines or { "(unreadable)" }
+    end,
+    on_select = function(f)
+      -- Ensure the pad is open and visible
+      local db_url = vim.b[_pad_bufnr or 0] and vim.b[_pad_bufnr or 0].db
+        or vim.g.db
+        or require("dadbod-grip.db").get_url()
+      if db_url then M.open(db_url) end
+      vim.schedule(function()
+        local pad = _pad_bufnr
+        if not pad or not vim.api.nvim_buf_is_valid(pad) then return end
+        local ok, lines = pcall(vim.fn.readfile, f.path)
+        if not ok then
+          vim.notify("Grip: could not read " .. f.name, vim.log.levels.WARN)
+          return
+        end
+        vim.bo[pad].modifiable = true
+        vim.api.nvim_buf_set_lines(pad, 0, -1, false, lines)
+        vim.bo[pad].modified = false
+        vim.notify("Grip: loaded " .. f.name, vim.log.levels.INFO)
+      end)
+    end,
+  })
 end
 
 --- Testing hook: override the internal pad buffer reference.

@@ -153,6 +153,7 @@ M.defaults = {
   qpad_ai          = "gA",       -- AI SQL generation
   qpad_format      = "gF",       -- format SQL (external tool cascade → Lua fallback)
   qpad_close       = "q",        -- close query pad (go to welcome screen)
+  open_notebook    = "gn",       -- open notebook file (.md/.sql) in query pad
 
   -- ── Schema sidebar ─────────────────────────────────────────────────────
   sidebar_open     = "<CR>",     -- open table under cursor (plain)

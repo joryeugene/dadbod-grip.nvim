@@ -182,6 +182,7 @@ Note: explain query plan is accessible via `gx` (removed from tab system).
 | `<C-x><C-o>` | SQL completion: Vim-standard omnifunc / nvim-cmp source |
 | `gA` | AI SQL generation |
 | `gF` | Format SQL (external tool cascade: sql-formatter -> pg_format -> sqlfluff -> Lua fallback) |
+| `gn` | Open notebook file (.md/.sql) in query pad |
 | `?` | Show help |
 | `q` | Close query pad |
 | `1` | Open sidebar |
@@ -208,6 +209,7 @@ Note: explain query plan is accessible via `gx` (removed from tab system).
 | `ga` | Attach external DB (DuckDB federation) |
 | `gd` | Detach attached database |
 | `gG` | ER diagram float (all tables + FK relationships) |
+| `gn` | Open notebook file (.md/.sql) in query pad |
 | `?` | Show help |
 | `1` | Connections picker (secondary: already in sidebar) |
 | `2` | Open query pad |
