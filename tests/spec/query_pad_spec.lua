@@ -145,5 +145,104 @@ do
   eq(qp._has_real_content({ "-- AI generated:", "", "SELECT 42" }), true, "hrc: ai-sep+sql = has content")
 end
 
+-- ── _block_under_cursor ───────────────────────────────────────────────────────
+
+-- Helper: create a buffer with lines, open it in a window, position cursor.
+-- Returns bufnr. The window is set as current so nvim_win_get_cursor(0) works.
+local function buf_with_cursor(lines, cursor_line)
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.bo[bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  local win = vim.api.nvim_open_win(bufnr, true, {
+    relative = "editor", width = 80, height = 20, row = 0, col = 0, style = "minimal",
+  })
+  vim.api.nvim_win_set_cursor(win, { cursor_line, 0 })
+  return bufnr, win
+end
+
+local function close_win(win)
+  if vim.api.nvim_win_is_valid(win) then pcall(vim.api.nvim_win_close, win, true) end
+end
+
+do
+  -- cursor inside a ```sql block
+  local lines = {
+    "# Header",
+    "Some text.",
+    "```sql",
+    "SELECT 1",
+    "FROM dual",
+    "```",
+    "More text.",
+  }
+  local b, w = buf_with_cursor(lines, 4)
+  local result = qp._block_under_cursor(b)
+  eq(result, "SELECT 1\nFROM dual", "block_under_cursor: cursor inside block returns SQL")
+  close_win(w)
+end
+
+do
+  -- cursor on the opening fence line: still extracts the block below it
+  local lines = { "```sql", "SELECT 2", "```" }
+  local b, w = buf_with_cursor(lines, 1)
+  local result = qp._block_under_cursor(b)
+  eq(result, "SELECT 2", "block_under_cursor: cursor on opening fence extracts block below")
+  close_win(w)
+end
+
+do
+  -- cursor outside any block (plain text)
+  local lines = { "Some prose.", "No SQL here." }
+  local b, w = buf_with_cursor(lines, 1)
+  local result = qp._block_under_cursor(b)
+  eq(result, nil, "block_under_cursor: cursor outside block returns nil")
+  close_win(w)
+end
+
+do
+  -- cursor on the closing fence
+  local lines = { "```sql", "SELECT 3", "```" }
+  local b, w = buf_with_cursor(lines, 3)
+  local result = qp._block_under_cursor(b)
+  eq(result, nil, "block_under_cursor: cursor on closing fence returns nil")
+  close_win(w)
+end
+
+do
+  -- multiple blocks: cursor in second block returns only second block
+  local lines = {
+    "```sql",
+    "SELECT 1",
+    "```",
+    "Text between blocks.",
+    "```sql",
+    "SELECT 2",
+    "FROM t",
+    "```",
+  }
+  local b, w = buf_with_cursor(lines, 6)
+  local result = qp._block_under_cursor(b)
+  eq(result, "SELECT 2\nFROM t", "block_under_cursor: cursor in second block returns second block")
+  close_win(w)
+end
+
+do
+  -- non-sql fence (```python) does not match
+  local lines = { "```python", "print('hi')", "```" }
+  local b, w = buf_with_cursor(lines, 2)
+  local result = qp._block_under_cursor(b)
+  eq(result, nil, "block_under_cursor: non-sql fence returns nil")
+  close_win(w)
+end
+
+do
+  -- unclosed block (no closing fence) returns nil
+  local lines = { "```sql", "SELECT 4" }
+  local b, w = buf_with_cursor(lines, 2)
+  local result = qp._block_under_cursor(b)
+  eq(result, nil, "block_under_cursor: unclosed block returns nil")
+  close_win(w)
+end
+
 print(string.format("\nquery_pad_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

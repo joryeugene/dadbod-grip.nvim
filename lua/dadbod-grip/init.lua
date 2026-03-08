@@ -849,6 +849,7 @@ function M.open(arg, url, opts)
   local short_label = file_path and vim.fn.fnamemodify(file_path, ":t")
       or table_name_arg and (table_name_arg:match("[^.]+$") or table_name_arg)
       or "result"
+  short_label = (short_label:match("^([^\n]+)") or "query"):sub(1, 50)
   local result, qerr
   local elapsed_ms = ui.blocking("  querying " .. short_label .. "...", function()
     local t_start = vim.uv.hrtime()
@@ -1196,51 +1197,48 @@ function M.open_welcome()
     "  ╚═╩═╩═╝",
     "  Editable database grids, inside Neovim.",
     "",
-    "  ── Get started ────────────────────────────────",
-    "  gc      connect to a database",
-    "  Q       return here from anywhere",
-    "  ?       full keymap reference    ;     ···",
+    "  ── Start ───────────────────────────────────────",
+    "  :GripStart    demo database + notebook",
+    "  :GripConnect  connect a database",
+    "  ?             full keymap reference",
     "",
-    "  :GripStart       open the demo database",
-    "  :GripHome        return to this screen",
-    "  :che dadbod-grip verify your setup",
+    "  ── Navigate: 1 · 2 · 3 ─────────────────────────",
+    "  1   schema sidebar           2   query pad",
+    "  3   table / records          Q   this screen",
+    "  4   ER diagram               5-9 stats/cols/fk/idx",
     "",
-    "  ── Connection strings ──────────────────────────",
-    "  postgresql://user:pass@host:5432/dbname",
-    "  mysql://user:pass@host:3306/dbname",
-    "  sqlite:path/to/file.db      duckdb:path/to/file.duckdb",
-    "  duckdb::memory:             (single-query only: no persistence)",
-    "  /path/to/file.csv           (or .parquet .json .xlsx)",
-    "  https://host/data.parquet   (remote via httpfs)",
+    "  ── Query pad ───────────────────────────────────",
+    "  q       open pad             <C-CR>  run SQL block",
+    "  gn      notebook picker      gA      AI generation",
+    "  gh      query history        gq      load saved",
+    "  <C-s>   save query",
     "",
-    "  ── Navigate ───────────────────────────────────",
-    "  1       schema sidebar        2     query pad",
-    "  3       table picker          gO    open as editable table",
-    "  w/b/e   column nav            H/L   page",
-    "  4-9     ER/Stats/Cols/FK/Idx/Cstr",
-    "",
-    "  ── Edit ───────────────────────────────────────",
-    "  <CR>    edit cell            x     set null",
-    "  gl      live SQL float       u     undo last commit",
-    "  a       apply changes",
+    "  ── Grid: edit ──────────────────────────────────",
+    "  i/<CR>  edit cell            x     set null",
+    "  o       insert row           d     delete row",
+    "  a       apply changes        u     undo",
+    "  gf      FK drill-down        s/S   sort / stack sort",
+    "  gF      filter builder       f     quick filter",
     "  violet = modified · green = inserted · red = deleted",
     "",
-    "  ── Saved queries · history · filters ──────────",
-    "  q       query pad            gh    query history",
-    "  <C-s>   save query (pad)     gq    load saved query",
-    "  gn      ·NULL· filter        gf    FK drill-down",
+    "  ── Analysis ────────────────────────────────────",
+    "  gR  column distributions     gS  column stats",
+    "  gD  diff tables              gE  export clipboard",
+    "  gX  export to file           A   AI SQL (grid)",
     "",
-    "  ── AI + Schema ────────────────────────────────",
-    "  A       AI SQL (grid)        gA    AI SQL (pad)",
-    "  gD      diff tables          gR    column distributions",
+    "  ── Files ───────────────────────────────────────",
+    "  /path/to/file.csv   .parquet   .json   .xlsx",
+    "  https://host/data.parquet      (remote via httpfs)",
+    "  :Grip file.csv --write    edit + write back  (g!)",
+    "  :Grip file.csv --watch    auto-refresh on timer",
     "",
-    "  ── Files ──────────────────────────────────────",
-    "  :Grip file.csv               open as table",
-    "  :Grip file.csv --write       edit and write back",
-    "  :Grip file.csv --watch       auto-refresh on timer",
-    "  :Grip https://host/file.csv  remote via httpfs",
+    "  ── Connect ─────────────────────────────────────",
+    "  postgresql://user:pass@host:5432/dbname",
+    "  mysql://user:pass@host:3306/dbname",
+    "  sqlite:path/to/file.db",
+    "  duckdb:path/to/file.duckdb   duckdb::memory:",
     "",
-    "  ───────────────────────────────────────────────────",
+    "  ────────────────────────────────────────────────",
     "",
   }
 
@@ -1466,14 +1464,6 @@ function M.open_welcome()
     })
   end, "Dev secret")
 
-  -- Open query pad below only if a connection exists
-  vim.schedule(function()
-    if not vim.api.nvim_buf_is_valid(welcome_buf) then return end
-    local conn = cur_conn()
-    if conn then
-      require("dadbod-grip.query_pad").open(conn)
-    end
-  end)
 end
 
 -- ── setup ─────────────────────────────────────────────────────────────────
@@ -2293,11 +2283,24 @@ function M.setup(opts)
 
     local connections = require("dadbod-grip.connections")
     connections.switch(demo_url, "Softrear Inc. Analyst Portal\xe2\x84\xa2")
+
+    -- Load the demo notebook into the query pad.
+    -- Double-schedule: connections.switch opens the pad in its own vim.schedule;
+    -- we need to run after that has completed.
     vim.schedule(function()
-      vim.notify(
-        "Softrear Inc. Analyst Portal\xe2\x84\xa2  .  walkthrough: demo/softrear-internal.md",
-        vim.log.levels.INFO
-      )
+      vim.schedule(function()
+        local md_files = vim.api.nvim_get_runtime_file("demo/softrear-internal.md", false)
+        if #md_files == 0 then return end
+        local qpad = require("dadbod-grip.query_pad")
+        qpad.open(demo_url)  -- idempotent: ensures _pad_bufnr exists regardless of timing
+        local pad = qpad.get_pad_bufnr()
+        if not pad or not vim.api.nvim_buf_is_valid(pad) then return end
+        local lines = vim.fn.readfile(md_files[1])
+        vim.bo[pad].modifiable = true
+        vim.api.nvim_buf_set_lines(pad, 0, -1, false, lines)
+        vim.bo[pad].modified = false
+        vim.notify("Softrear Inc. Analyst Portal\xe2\x84\xa2  \xc2\xb7  C-CR runs any SQL block", vim.log.levels.INFO)
+      end)
     end)
   end, { desc = "Open the Softrear Inc. Analyst Portal" })
 

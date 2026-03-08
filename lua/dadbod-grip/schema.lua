@@ -788,6 +788,11 @@ local function setup_keymaps(url)
     end)
   end)
 
+  -- open_notebook: open a .md or .sql notebook file in the query pad
+  kmap("open_notebook", function()
+    require("dadbod-grip.query_pad").pick_notebook()
+  end)
+
   -- goto_grid: jump to main content window
   kmap("goto_grid", function()
     local win = require("dadbod-grip.view").find_content_win()
