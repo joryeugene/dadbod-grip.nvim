@@ -451,6 +451,91 @@ function M.generate_sql(question, url, callback, existing_sql)
   end)
 end
 
+--- Generate N realistic data rows for the current table schema.
+--- AI outputs a JSON array; caller stages rows via the existing INSERT pipeline.
+--- Antifragile: wrong path (AI producing SQL to parse) is structurally absent.
+---@param n        number   how many rows to generate (caller enforces max)
+---@param ddl      string   schema DDL from build_schema_context
+---@param adapter  string   adapter name for format hints
+---@param url      string   DB URL (used for provider key resolution only)
+---@param callback fun(rows: table[]|nil, err: string|nil)
+function M.generate_rows(n, ddl, adapter, url, callback)
+  local provider_name = M.resolve_provider()
+  local provider = PROVIDERS[provider_name]
+  if not provider then
+    callback(nil, "Unknown provider: " .. provider_name)
+    return
+  end
+
+  local api_key, key_err = M.resolve_api_key(provider_name)
+  if not api_key then
+    callback(nil, key_err)
+    return
+  end
+
+  local system_prompt = "You are a test data generator. "
+    .. "Output ONLY a raw JSON array of " .. n .. " row objects. "
+    .. "No prose, no markdown fences, no SQL, no comments. "
+    .. "Values must be realistic: names look like names, emails like emails, "
+    .. "dates in ISO 8601 format (YYYY-MM-DD), foreign keys as small integers (1-5). "
+    .. "Use " .. adapter .. "-compatible value formats. "
+    .. "Never include computed or auto-increment primary key columns. "
+    .. "Schema:\n\n" .. ddl
+
+  local user_msg = "Generate " .. n .. " realistic rows."
+  local model = _opts.model or provider.default_model
+  local req = provider.build_request(system_prompt, user_msg, model, api_key, _opts.base_url)
+
+  local curl_args = { "curl", "-s", "-X", "POST" }
+  for _, h in ipairs(req.headers) do
+    table.insert(curl_args, "-H")
+    table.insert(curl_args, h)
+  end
+  table.insert(curl_args, "-d")
+  table.insert(curl_args, vim.fn.json_encode(req.body))
+  table.insert(curl_args, req.url)
+
+  vim.system(curl_args, { text = true }, function(result)
+    vim.schedule(function()
+      if result.code ~= 0 then
+        callback(nil, "curl failed: " .. (result.stderr or "unknown error"))
+        return
+      end
+
+      local ok, body = pcall(vim.fn.json_decode, result.stdout)
+      if not ok then
+        callback(nil, "Failed to parse response JSON")
+        return
+      end
+
+      if body.error then
+        local err_msg = type(body.error) == "table" and (body.error.message or "API error") or tostring(body.error)
+        callback(nil, err_msg)
+        return
+      end
+
+      local raw_text, parse_err = provider.parse_response(body)
+      if not raw_text then
+        callback(nil, parse_err or "Failed to extract content from response")
+        return
+      end
+
+      -- Try parsing directly, then after stripping markdown fences
+      local json_ok, parsed = pcall(vim.fn.json_decode, raw_text)
+      if not json_ok or type(parsed) ~= "table" then
+        local stripped = M._strip_fences(raw_text)
+        json_ok, parsed = pcall(vim.fn.json_decode, stripped)
+      end
+      if not json_ok or type(parsed) ~= "table" then
+        callback(nil, "AI returned non-JSON: " .. (raw_text or ""))
+        return
+      end
+
+      callback(parsed, nil)
+    end)
+  end)
+end
+
 --- Open the AI ask UI: input -> generate SQL -> insert into query pad.
 function M.ask(url)
   local query_pad = require("dadbod-grip.query_pad")

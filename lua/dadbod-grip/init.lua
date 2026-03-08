@@ -2314,6 +2314,12 @@ function M.setup(opts)
     local bufnr = vim.api.nvim_get_current_buf()
     view.do_export(bufnr)
   end, { desc = "Export grip result to file (csv/json/sql)" })
+
+  -- :GripFill [N]: stage N AI-generated realistic rows (default 1, max 50)
+  vim.api.nvim_create_user_command("GripFill", function(cmd_opts)
+    local n = math.max(1, math.min(50, tonumber(cmd_opts.args) or 1))
+    M.do_fill_rows(n)
+  end, { nargs = "?", desc = "Stage N AI-generated rows for current table (default 1, max 50)" })
 end
 
 -- Exposed for testing
@@ -2337,6 +2343,65 @@ function M._next_edit_cursor(r, edited_row_idx, edited_col)
   local col_bp = bp and bp[edited_col]
   if not col_bp then return nil end
   return { line = next_line, col = col_bp.start }
+end
+
+--- Stage N AI-generated realistic rows into the current grip grid.
+--- Validates session, calls ai.generate_rows(), stages each row via
+--- data.insert_row_with_values(), then re-renders with view.apply_edit().
+---@param n number  number of rows to stage (max 50, enforced by caller)
+function M.do_fill_rows(n)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local session = view._sessions[bufnr]
+  if not session then
+    vim.notify("GripFill: no grip session on this buffer", vim.log.levels.WARN)
+    return
+  end
+  if not session.state.table_name then
+    vim.notify("GripFill: requires an editable table (not a raw query result)", vim.log.levels.WARN)
+    return
+  end
+
+  local ai_mod = require("dadbod-grip.ai")
+  local db_url = session.url
+
+  ui.blocking("Generating " .. n .. " row(s)...", function()
+    local done = false
+    local gen_rows, gen_err
+
+    local ddl, adapter = ai_mod.build_schema_context(db_url, "")
+    ai_mod.generate_rows(n, ddl, adapter, db_url, function(rows, err)
+      gen_rows, gen_err = rows, err
+      done = true
+    end)
+
+    vim.wait(30000, function() return done end, 50)
+
+    if gen_err then
+      vim.notify("GripFill: " .. gen_err, vim.log.levels.ERROR)
+      return
+    end
+    if not gen_rows or #gen_rows == 0 then
+      vim.notify("GripFill: AI returned no rows", vim.log.levels.WARN)
+      return
+    end
+
+    local st = session.state
+    local after_idx = #st.rows
+    for _, row_values in ipairs(gen_rows) do
+      local values = {}
+      for col, val in pairs(row_values) do
+        if val == nil or val == vim.NIL then
+          values[col] = nil
+        else
+          values[col] = tostring(val)
+        end
+      end
+      st = data.insert_row_with_values(st, after_idx, values)
+      after_idx = after_idx + 1
+    end
+    view.apply_edit(bufnr, st)
+    vim.notify("GripFill: staged " .. #gen_rows .. " row(s); press a to apply", vim.log.levels.INFO)
+  end)
 end
 
 return M
