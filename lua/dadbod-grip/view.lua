@@ -227,6 +227,16 @@ local function border_line(columns, widths, left, mid, sep, right, min_inner)
   return table.concat(parts)
 end
 
+-- Returns true when the grid allows editing: either a table with detected
+-- primary keys, or a local file in write mode (CSV, parquet, etc.).
+local function is_editable(session)
+  if not session or not session.state then return false end
+  if not session.state.readonly then return true end
+  return session.write_mode == true
+    and session.file_path ~= nil
+    and not session.file_path:match("^https?://")
+end
+
 -- Build the title bar with connection/table info and staged count.
 local function title_line(session, columns, widths, total_width)
   local staged = data.count_staged(session.state)
@@ -240,7 +250,7 @@ local function title_line(session, columns, widths, total_width)
       constraints="Constraints", stats="Column Stats", history="History", explain="Explain",
     }
     table.insert(badges, full_labels[vn] or vn)
-  elseif session.state.readonly then
+  elseif not is_editable(session) then
     table.insert(badges, "read-only: no PK")
   end
   if session.query_spec and qmod.has_filters(session.query_spec) then
@@ -417,7 +427,7 @@ local function build_render(session, opts)
     table.insert(hdr_parts, " ")
     local hbp = 4  -- "║ " = 3 + 1 bytes
     for i, col in ipairs(columns) do
-      local is_ro = st.readonly
+      local is_ro = st.readonly and not is_editable(session)
       local prefix = is_ro and "~" or ""
       local sort_ind = qspec and qmod.get_sort_indicator(qspec, col) or nil
       local suffix = sort_ind and " " .. sort_ind or ""
@@ -613,7 +623,7 @@ local function build_render(session, opts)
     table.insert(status_parts, timing_str)
   end
   if staged_count > 0 then table.insert(status_parts, staged_count .. " staged") end
-  if st.readonly then table.insert(status_parts, "read-only") end
+  if st.readonly and not is_editable(session) then table.insert(status_parts, "read-only") end
   local hidden_n = 0
   if session.hidden_columns then
     for _ in pairs(session.hidden_columns) do hidden_n = hidden_n + 1 end
@@ -667,7 +677,7 @@ local function build_render(session, opts)
   elseif session.pending_mutation then
     local mt = session.pending_mutation.type or "SQL"
     hints = " a:execute " .. mt .. "  U:cancel  gs:preview SQL  q:query"
-  elseif st.readonly then
+  elseif st.readonly and not is_editable(session) then
     hints = " r:refresh  Tab/w:col  gy:markdown  gq:saved  q:query  A:ai  4-9:views  ?:help"
   else
     hints = " i:edit  c:clone  d:delete  a:apply  r:refresh  gq:saved  q:query  A:ai  4-9:views  ?:help"
@@ -1810,7 +1820,7 @@ function M._setup_keymaps(bufnr)
   local function edit_cell()
     local session = M._sessions[bufnr]
     if not session then return end
-    if session.state.readonly then
+    if not is_editable(session) then
       vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
       return
     end
@@ -1827,7 +1837,7 @@ function M._setup_keymaps(bufnr)
   kmap("grid_delete", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    if session.state.readonly then
+    if not is_editable(session) then
       vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
       return
     end
@@ -1843,7 +1853,7 @@ function M._setup_keymaps(bufnr)
   kmap("grid_insert", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    if session.state.readonly then
+    if not is_editable(session) then
       vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
       return
     end
@@ -1856,7 +1866,7 @@ function M._setup_keymaps(bufnr)
   kmap("grid_clone", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    if session.state.readonly then
+    if not is_editable(session) then
       vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
       return
     end
@@ -1906,7 +1916,7 @@ function M._setup_keymaps(bufnr)
     end
 
     -- Normal mode: apply staged changes
-    if session.state.readonly then
+    if not is_editable(session) then
       vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
       return
     end
@@ -2105,7 +2115,7 @@ function M._setup_keymaps(bufnr)
   kmap("grid_null", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    if session.state.readonly then
+    if not is_editable(session) then
       vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
       return
     end
@@ -2151,7 +2161,7 @@ function M._setup_keymaps(bufnr)
   kvmap("grid_v_edit", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    if session.state.readonly then
+    if not is_editable(session) then
       vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
       return
     end
@@ -2178,7 +2188,7 @@ function M._setup_keymaps(bufnr)
   kvmap("grid_v_delete", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    if session.state.readonly then
+    if not is_editable(session) then
       vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
       return
     end
@@ -2200,7 +2210,7 @@ function M._setup_keymaps(bufnr)
   kvmap("grid_v_null", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    if session.state.readonly then
+    if not is_editable(session) then
       vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
       return
     end
@@ -3138,7 +3148,7 @@ function M._setup_keymaps(bufnr)
   kmap("grid_paste", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    if session.state.readonly then
+    if not is_editable(session) then
       vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
       return
     end
@@ -3163,7 +3173,7 @@ function M._setup_keymaps(bufnr)
   kmap("grid_paste_rows", function()
     local session = M._sessions[bufnr]
     if not session then return end
-    if session.state.readonly then
+    if not is_editable(session) then
       vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
       return
     end
@@ -4447,7 +4457,7 @@ function M._setup_keymaps(bufnr)
   -- ?: help popup
   kmap("help", function()
     local session = M._sessions[bufnr]
-    M.show_help({ readonly = session and session.state.readonly })
+    M.show_help({ readonly = not is_editable(session) })
   end, "Show help")
 
   -- <C-p>: command palette (discover all actions for this surface)
