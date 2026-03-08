@@ -44,7 +44,7 @@ local PROVIDERS = {
   },
   openai = {
     name = "OpenAI",
-    default_model = "gpt-4o-mini",
+    default_model = "gpt-4.1-mini",
     env_var = "OPENAI_API_KEY",
     build_request = function(system_prompt, question, model, api_key, base_url)
       local url = (base_url or "https://api.openai.com") .. "/v1/chat/completions"

@@ -1108,8 +1108,6 @@ function M.open(state, url, query_sql, opts)
       end
       winid = vim.api.nvim_get_current_win()
       vim.api.nvim_win_set_buf(winid, bufnr)
-      local available = vim.o.lines - 6
-      vim.api.nvim_win_set_height(winid, math.min(available, math.max(15, #state.rows + 6)))
     end
   end
 

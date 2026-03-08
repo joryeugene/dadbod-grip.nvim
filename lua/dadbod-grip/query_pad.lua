@@ -695,4 +695,9 @@ function M._set_pad_bufnr(bufnr)
   _pad_bufnr = bufnr
 end
 
+--- Read-only access to the current pad buffer number. Nil if no pad is open.
+function M.get_pad_bufnr()
+  return _pad_bufnr
+end
+
 return M

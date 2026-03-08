@@ -1,4 +1,4 @@
-# Internal Operations Review - Softrear Inc.
+# Softrear Inc. Internal Operations Analysis
 
 You are a data analyst. You have been handed the internal operations database of
 Softrear Inc., a leading tissue products manufacturer with seventeen tables, an
@@ -11,426 +11,333 @@ Three questions:
 2. Who knows what, and what has been done about it?
 3. What decisions drove the company here, and how were they made?
 
-This walkthrough answers all three using about 40 keystrokes, no spreadsheets,
-and no context switching.
+This notebook answers all three. Place your cursor inside any SQL block and press
+`C-CR` to run it. Results appear in the grid below. Navigate blocks with `j`/`k`.
 
 ---
 
-## Load the database
+## 1. Product catalog overview
 
-```vim
-:GripStart
+The catalog has 500+ SKUs. Before any filtering, pull a broad view sorted by
+softness score to see if anything surfaces at the edges.
+
+```sql
+SELECT sku, ply, softness_score, tensile_strength, discontinued
+FROM rolls
+ORDER BY softness_score ASC
+LIMIT 20
 ```
 
-The database opens. Seventeen tables appear in the schema sidebar. The status
-line shows the connection.
+The lowest-scoring row is `ULTRA_BUDGET_XTRM`: softness_score = 0.0, ply = 1,
+tensile_strength = 2.1, discontinued = false. A product with a softness score of
+zero exists in the catalog and it ships. Everything below follows from that row.
+
+> **Grid:** press `gR` to see the full softness_score distribution as sparklines.
+> Press `s` on any column to sort ascending, `S` to stack a secondary sort (▲1 ▼2).
 
 ---
 
-## Orient: the product catalog
+## 2. The tensile outlier
 
-Navigate to the `rolls` table and press `<CR>`.
+The max tensile value looked suspicious in the catalog scan. Isolate the top of
+the distribution to confirm.
 
-The grid opens showing 500+ SKUs. Most look standard. Then you see it:
-
-```
-ULTRA_BUDGET_XTRM   ply=1   softness_score=0.0   tensile_strength=2.1
-```
-
-ULTRA_BUDGET_XTRM has a softness score of zero. This product exists and it ships.
-
----
-
-## Profile the entire catalog at once
-
-Press `gR`.
-
-Data profiling opens. Every column gets a distribution and completeness check
-simultaneously:
-
-- `softness_score`: bimodal: a dense cluster at 1–3, another at 7–10, with
-  almost nothing in between. Two product lines with no middle ground.
-- `tensile_strength`: heavily right-skewed, with a long tail to the right.
-- `discontinued`: roughly 6% of SKUs are discontinued.
-- `ply`: mostly 2 and 3. One SKU at 6. One SKU at 1 that should not exist.
-
-Five hundred products become comprehensible in under ten seconds. Press `q` to
-return.
-
----
-
-## Investigate the tensile outlier
-
-Navigate to the `tensile_strength` column header. Press `gS`.
-
-```
-count    505          distinct   312
-null %   0.0          min        0.2
-mean     6.4          max        47.0
-p50      5.9          top val    4.1 (11 rows)
+```sql
+SELECT sku, ply, tensile_strength, softness_score
+FROM rolls
+ORDER BY tensile_strength DESC
+LIMIT 10
 ```
 
-The max is 47.0. The median is 5.9. One product has a tensile strength of 47.0;
-for reference, standard denim is around 40. Navigate to the `tensile_strength`
-column. Press `s` twice to sort descending (ASC then DESC).
-
-The top row is `TITANIUM_TRIPLE_PLY`, tensile strength 47.0. This product is
-physically capable of resisting damage. It is also listed in `consumer_incidents`
-under `clog`, severity 8, with the note: "Product exceeded specifications.
+`TITANIUM_TRIPLE_PLY` has a tensile strength of 47.0. Standard denim tests around
+40. This product exceeds denim. It is also in the consumer incidents table under
+`incident_type = 'clog'`, severity 8, note: "Product exceeded specifications.
 Plumber invoice attached."
 
 ---
 
-## Consumer incidents: sort by severity
+## 3. Consumer incidents by severity
 
-Navigate to `consumer_incidents`. Navigate to the `severity` column. Press `s` twice to sort descending.
+With the two outlier products identified, the next question is: how bad are the
+incidents, and is there a pattern in the worst ones?
+
+```sql
+SELECT incident_type, severity, roll_sku, notes
+FROM consumer_incidents
+ORDER BY severity DESC
+LIMIT 30
+```
 
 Every row with `severity = 10` has `incident_type = 'airplane'`, without
-exception. There are dozens of them. Airline bathrooms represent a structural
-failure mode for this product category.
+exception. The notes for the top two rows:
 
-The notes column for two rows at the top reads:
+- "Seat 34B. Meal service had just ended. This review cannot be submitted to the airline."
+- "JFK to Heathrow. Economy class. We do not manufacture under-seat storage. The quilting did not help."
 
-```
-"Seat 34B. Meal service had just ended. This review cannot be submitted to the airline."
-"JFK to Heathrow. Economy class. We do not manufacture under-seat storage. The quilting did not help."
-```
+Airplane bathrooms are a structural failure mode for this product category.
 
----
-
-## Filter to the high-severity non-airplane incidents
-
-Navigate to a row where `incident_type` is `emergency_situation`. Press `f` to
-filter to that type. Navigate to the `severity` column. Press `gF`, choose `>`,
-enter `7`.
-
-The grid narrows. The top result is `ULTRA_BUDGET_XTRM`, severity 9. The note
-field reads: "Open floor plan. No music. The third floor is now the second floor
-people."
-
-Press `gP` and save this filter as `high_severity_incidents`. It will be there
-next quarter.
+> **Grid:** `gS` shows severity statistics (mean, min, max, nulls). Press `f` on a
+> cell to instantly filter the grid to that incident type.
 
 ---
 
-## Follow the product trail: FK drill-down
+## 4. The airplane correlation
 
-Stay on a row referencing `ULTRA_BUDGET_XTRM`. Navigate to the `roll_sku`
-column. Press `gf`.
-
-The grid jumps to the `rolls` table, focused on `ULTRA_BUDGET_XTRM`. Navigate
-to `batch_id`. Press `gf`.
-
-The grid is now in `production_batches`. Batch 5 has a `quality_score` of 4.1
-and `recall = true`. Navigate to `facility_id`. Press `gf`.
-
-The grid is now in `facilities`. Facility 5 is listed as the
-`Shanghai Liaison Office`, with 23 workers and a `vibe_score` of 3.2. Navigate
-to `bamboo_supplier_id`. Press `gf`.
-
-The grid is now in `bamboo_cartel_members`. The supplier for the Shanghai
-facility is:
-
-```
-alias: Bamboo Don   territory: Shanghai   our_relationship: embargo
-```
-
-The product trail runs from a consumer incident through a recalled batch, through
-the Shanghai facility, and terminates at a supplier currently under embargo. The
-root cause is four foreign keys deep.
-
----
-
-## The intelligence division
-
-Navigate to `youtube_comments`.
-
-Press `gn` on the `conspiracy_adjacent` column.
-
-The NULL filter engages. Roughly 190 rows become visible: comments that the
-Threat Assessment team has not yet reviewed. The unreviewed set includes:
-
-```
-"Look into the Shanghai supplier before you buy this brand."
-"Has anyone else noticed the sheets are thinner than they used to be?"
-"Why is this product 15% smaller than it was in 2018?"
-```
-
-The threat landscape is expanding.
-
----
-
-## Clean up the view
-
-Press `gH` to open the column visibility picker. Hide `id`, `posted_date`, and
-`commenter_id`. The grid is now showing four columns: `channel_name`,
-`comment_text`, `sentiment_score`, `conspiracy_adjacent`.
-
----
-
-## Inspect the schema
-
-Press `gV`.
-
-The DDL float opens for `youtube_comments`. Scroll down to `people_on_to_us`.
+Confirm the pattern quantitatively before reporting it.
 
 ```sql
-our_response TEXT CHECK (our_response IN (
-  'ignored', 'coupon_sent', 'legal_letter', 'acquired'
-))
+SELECT incident_type, COUNT(*) AS count, ROUND(AVG(severity), 2) AS avg_severity
+FROM consumer_incidents
+GROUP BY incident_type
+ORDER BY avg_severity DESC
 ```
 
-`acquired` is a valid value in this constraint. Someone defined this as a
-legitimate response to a person who knows too much. The CHECK constraint is
-committed to main.
-
-Scroll further to reach the index definitions:
-
-```sql
-CREATE INDEX idx_good_vibes_only ON rolls(softness_score DESC);
-```
-
-This is the production index on the product catalog.
+`airplane` leads by average severity. It is not tied: the gap to the next incident
+type is over 2.5 points. This is not noise.
 
 ---
 
-## Ask a question about the threat landscape
+## 5. High-severity non-airplane incidents
 
-Press `q` to open the query pad. Press `gA` and describe what you need:
+The airplane correlation is a known failure mode. What is happening on the ground?
+Filter to high-severity incidents that are not airplane-related.
 
+```sql
+SELECT roll_sku, severity, incident_type, notes
+FROM consumer_incidents
+WHERE incident_type != 'airplane'
+  AND severity > 7
+ORDER BY severity DESC
 ```
-which subreddits have the most anti-Softrear threads by upvote count,
-and what is the average threat level per subreddit
+
+The top result is `ULTRA_BUDGET_XTRM`, severity 9. The note: "Open floor plan.
+No music. The third floor is now the second floor people."
+
+The product with softness_score = 0.0 is generating the most severe non-airplane
+incidents in the dataset.
+
+---
+
+## 6. The supply chain: four hops in one query
+
+The foreign key chain runs from a consumer incident through the full supply chain.
+Rather than following it one table at a time, this JOIN traverses all four hops
+simultaneously and exposes the entire trail for a single product.
+
+```sql
+SELECT
+  ci.roll_sku,
+  ci.severity,
+  ci.notes                          AS incident_note,
+  pb.quality_score,
+  pb.recall,
+  f.name                            AS facility_name,
+  f.vibe_score,
+  bc.alias                          AS supplier_alias,
+  bc.territory,
+  bc.our_relationship               AS supplier_relationship
+FROM consumer_incidents ci
+JOIN rolls r             ON r.sku = ci.roll_sku
+JOIN production_batches pb ON pb.id = r.batch_id
+JOIN facilities f        ON f.id = pb.facility_id
+JOIN bamboo_cartel_members bc ON bc.id = f.bamboo_supplier_id
+WHERE ci.roll_sku = 'ULTRA_BUDGET_XTRM'
+ORDER BY ci.severity DESC
 ```
 
-The AI reads the visible schema and generates:
+The chain: `ULTRA_BUDGET_XTRM` was produced in batch 5 (quality_score = 4.1,
+recall = true) at the Shanghai Liaison Office (vibe_score = 3.2), supplied by
+`Bamboo Don` under `our_relationship = 'embargo'`.
+
+The root cause is four foreign keys deep. The product that still ships was
+recalled, produced at a low-rated facility, sourced from a supplier currently
+under embargo.
+
+> **Grid:** this result is wide. Press `K` on any row for a vertical key-value view.
+> Press `gx` to inspect the query plan and confirm the join indexes are being used.
+> Press `gf` on any FK column to follow it interactively to its referenced table.
+
+---
+
+## 7. Unreviewed threat comments
+
+The intelligence division maintains a `youtube_comments` table with a
+`conspiracy_adjacent` column. NULL means the comment has not been reviewed.
+Pull the unreviewed set with the worst sentiment scores first.
+
+```sql
+SELECT channel_name, comment_text, sentiment_score
+FROM youtube_comments
+WHERE conspiracy_adjacent IS NULL
+ORDER BY sentiment_score ASC
+LIMIT 20
+```
+
+Sample of the unreviewed set:
+
+- "Look into the Shanghai supplier before you buy this brand."
+- "Has anyone else noticed the sheets are thinner than they used to be?"
+- "Why is this product 15% smaller than it was in 2018?"
+
+190 comments are in the unreviewed queue. The threat landscape is expanding faster
+than the Threat Assessment team can process it.
+
+---
+
+## 8. Reddit threat landscape
+
+The YouTube queue is internal. The Reddit landscape is public-facing and traceable
+by volume and threat level.
 
 ```sql
 SELECT
   subreddit,
-  COUNT(*)                       AS thread_count,
-  SUM(upvotes)                   AS total_upvotes,
-  ROUND(AVG(threat_level), 1)    AS avg_threat_level,
-  MAX(upvotes)                   AS top_post_upvotes
+  COUNT(*)                        AS thread_count,
+  SUM(upvotes)                    AS total_upvotes,
+  ROUND(AVG(threat_level), 1)     AS avg_threat_level,
+  MAX(upvotes)                    AS top_post_upvotes
 FROM reddit_threads
 WHERE mentions_softrear = true
 GROUP BY subreddit
 ORDER BY total_upvotes DESC
 ```
 
-Press `<C-CR>`. `brandconspiracies` leads by total upvotes. `softreartruth` has
-the highest average threat level. The overlap between them is
-r/brandconspiracies post #5: "I work in supply chain and I'm not allowed to say
-what I know about Softrear." 67,420 upvotes.
-
-Press `:GripSave` and name it `threat_landscape`.
+`r/brandconspiracies` leads by total upvotes. `r/softreartruth` has the highest
+average threat level. The overlap: r/brandconspiracies post #5 reads "I work in
+supply chain and I'm not allowed to say what I know about Softrear." 67,420 upvotes.
 
 ---
 
-## Follow the intelligence trail: deep FK drill
+## 9. The BambooKnows trail
 
-Navigate to `youtube_comments`. Find the row where `comment_text` contains
-`formula`. Navigate to `commenter_id`. Press `gf`.
+A YouTube commenter used the word "formula." That commenter has a profile in
+`suspicious_persons` and an active internal investigation.
 
-The grid is now in `suspicious_persons`. The commenter is `BambooKnows`, a
-YouTube account with 72,400 followers and `knows_too_much = true`. Navigate to
-`investigation_id`. Press `gf`.
-
-The grid is now in `internal_investigations`. Investigation 2 reads:
-
+```sql
+SELECT
+  yc.comment_text,
+  yc.sentiment_score,
+  sp.alias,
+  sp.knows_too_much,
+  ii.status,
+  ii.finding
+FROM youtube_comments yc
+JOIN suspicious_persons sp  ON sp.id = yc.commenter_id
+JOIN internal_investigations ii ON ii.id = sp.investigation_id
+WHERE sp.knows_too_much = true
 ```
-subject_alias:  BambooKnows
-status:         they_got_us
-investigator:   Jenkins (Internal Security)
-finding:        they have the recipe
-```
 
-`they_got_us` is a valid status value. `they have the recipe` is the complete
-finding. No further notes.
+The commenter is `BambooKnows`, 72,400 YouTube followers, `knows_too_much = true`.
+Investigation status: `they_got_us`. Finding: `they have the recipe`.
+
+`they_got_us` is a valid status value in this schema. The finding is four words.
+No further notes exist in the record.
+
+> **AI:** press `A` from the grid and describe a follow-up in plain English:
+> "show all youtube comments with knows_too_much true and an active investigation."
+> The AI has your current schema and will write the JOIN for you.
 
 ---
 
-## Examine the people_on_to_us table
+## 10. People on to us
 
-Navigate to `people_on_to_us`. Sort by `evidence_strength` descending.
+The investigation hit BambooKnows. How many others are in the `people_on_to_us`
+table, and what does the company know about what they know?
 
-Three rows have `evidence_strength = 10`. Navigate to the `what_they_know`
-column. Press `gF`, choose `LIKE`, enter `%formula%`.
+```sql
+SELECT name, evidence_strength, what_they_know, our_response
+FROM people_on_to_us
+WHERE what_they_know LIKE '%formula%'
+ORDER BY evidence_strength DESC
+```
 
-Six rows match. All have documented knowledge of the formula change.
-The `our_response` values across these rows are:
+Four rows match. The `our_response` values:
 
 ```
 legal_letter
 acquired
 coupon_sent
 ignored
-coupon_sent
-coupon_sent
 ```
 
-One person was acquired. The `acquired` response in the CHECK constraint was
-not hypothetical.
+One person was acquired. The `acquired` response code in the schema CHECK
+constraint was not hypothetical.
 
 ---
 
-## Quality control: the Greg problem
+## 11. The Greg problem
 
-Navigate to `quality_certifications`. Sort by `has_greg_tried_the_product`
-ascending.
-
-Every row where `has_greg_tried_the_product = false` has a score of 8. There
-are five of them. All five are for `ULTRA_BUDGET_XTRM`. All five are certified
-by `Greg`.
-
-One row has a score of 2:
-
-```
-certified_by: Greg's assistant   notes: Greg was traveling. Filled in by Greg's assistant. Not Greg.
-```
-
-Greg's assistant is the only person in this database who has tried the product.
-
----
-
-## What they told themselves
-
-Navigate to `leadership_directives`. Sort by `publicly_acknowledged` ascending.
-
-Three directives have `publicly_acknowledged = false`:
-
-```
-"Do not use the word 'disintegrate' in customer communications."
-"ULTRA_BUDGET_XTRM incidents are 'enhanced feedback opportunities'."
-"Severity 10 = airplane correlation is internal classification only."
-```
-
-One directive has `publicly_acknowledged = true`:
-
-```
-"Greg is authorized to self-certify all SKUs. This is intentional."
-```
-
-They told the public about Greg. The other three directives show the communication
-strategy: name the problem internally, build policy to prevent naming it externally.
-
----
-
-## Stage a correction and review the diff
-
-Navigate to `executive_decisions`. Navigate to a row where `rationale` is
-`dream`. Press `f`. Navigate to a row where `outcome` is `recall`. Press `f`.
-
-Two rows match. Open the cell editor on the `rationale` field of the first row.
-Change `dream` to `actual_data`. Press `<CR>` to save and stage.
-
-Press `gs`.
-
-The staged SQL float opens:
+Quality certifications should be the last line of defense. Pull the full
+certification record and sort by whether Greg has personally evaluated the product.
 
 ```sql
-UPDATE executive_decisions
-SET rationale = 'actual_data'
-WHERE id = <row_id>;
+SELECT
+  roll_sku,
+  score,
+  certified_by,
+  has_greg_tried_the_product,
+  notes
+FROM quality_certifications
+WHERE roll_sku = 'ULTRA_BUDGET_XTRM'
+ORDER BY has_greg_tried_the_product ASC, score ASC
 ```
 
-The change is staged, not applied. Press `u` to undo, or `a` to apply to the
-database. Press `<Esc>` to dismiss the float.
+Greg certified `ULTRA_BUDGET_XTRM` five times. Every time, `has_greg_tried_the_product = 0`
+and `score = 8`.
+
+The one row with `has_greg_tried_the_product = 1` has `score = 2`, `certified_by = "Greg"`,
+and the note: "Greg was traveling. Filled in by Greg's assistant. Not Greg."
+
+Greg's assistant is the only person in this database who has tried the product.
+Greg has certified it five times without trying it.
 
 ---
 
-## Export the findings
+## 12. What they told themselves
 
-Press `F` to clear the filter. Navigate to the query result from
-`threat_landscape`. Press `gE` and choose Markdown.
+The final layer is internal documentation: what was said explicitly, what was
+acknowledged publicly, and what was committed to policy while remaining undisclosed.
 
-The formatted table copies to clipboard. The dossier is ready.
+```sql
+SELECT directive, publicly_acknowledged, issued_by
+FROM leadership_directives
+ORDER BY publicly_acknowledged ASC
+```
 
----
+The three directives with `publicly_acknowledged = false`:
 
-## What this covered
+- "Do not use the word 'disintegrate' in customer communications."
+- "ULTRA_BUDGET_XTRM incidents are 'enhanced feedback opportunities'."
+- "Severity 10 = airplane correlation is internal classification only."
 
-| Feature | Key | What it did |
-|---------|-----|-------------|
-| Open portal | `:GripStart` | 17 tables, no setup required |
-| Browse and navigate | `j` / `k` / `h` / `l` | Located ULTRA_BUDGET_XTRM immediately |
-| Data profiling | `gR` | Bimodal softness distribution at a glance |
-| Column statistics | `gS` | Revealed tensile=47.0 outlier |
-| Sort | `s` | Every severity=10 is type=airplane |
-| Filter | `f` + `gF` | Narrowed to high-severity non-flight incidents |
-| Save filter preset | `gP` | `high_severity_incidents` reusable next session |
-| FK drill-down | `gf` | Traced incident → roll → batch → facility → Bamboo Don |
-| Null filter | `gn` | Surfaced 190 unreviewed threat comments |
-| Column picker | `gH` | Focused view to 4 signal columns |
-| DDL float | `gV` | Found `acquired` in CHECK constraint, `idx_good_vibes_only` in indexes |
-| AI SQL generation | `gA` | Natural language → window function SQL |
-| Save query | `:GripSave` | `threat_landscape` named and reloadable |
-| Deep FK drill | `gf` (×2) | youtube_comments → suspicious_persons → investigations |
-| Quality certifications | `go` on `quality_certifications` | Revealed Greg, the score of 8, and the score of 2 |
-| Leadership directives | `s` descending by `publicly_acknowledged` | Found what they admitted to publicly |
-| Clone row | `c` | Duplicate a row with PKs cleared, ready to stage as a new record |
-| Staged SQL preview | `gs` | Staged rationale change shown before apply |
-| ER diagram | `gG` | Schema map: tables as boxes, FK chains as arrows |
-| Export | `gE` | Markdown table to clipboard |
+The one directive with `publicly_acknowledged = true`:
 
-**Total keystrokes: ~40.**
+- "Greg is authorized to self-certify all SKUs. This is intentional."
 
-The subreddit has 67,420 upvotes on a post from someone who works in supply
-chain. The Shanghai facility supplier is under embargo. The product with
-softness_score zero still ships. The person who had the recipe was acquired and
-now works in R&D.
-
-The data was here the whole time.
-
-The three questions asked at the start have answers. The product quality problem
-originates at the Shanghai supplier: discounted material, relabeled before
-customs, failed tests suppressed. The people who know the most were acquired,
-threatened, or sent coupons. The decisions were made deliberately, documented
-openly, and committed to main.
+They told the public about Greg. The communication strategy is clear: name the
+problem internally, build policy to prevent naming it externally.
 
 ---
 
-## Map the schema
+## 13. Cross-database: attach the supplier intelligence file
 
-Before touching a single row, you need to know what you're looking at.
-Seventeen tables. Press `gG`.
-
-The ER diagram opens: every table as a box, every foreign key as an arrow,
-the full chain depth laid out left-to-right. You can see it immediately:
-`consumer_incidents` → `rolls` → `production_batches` → `facilities` →
-`bamboo_cartel_members`. The supply chain is four hops deep and it's all in
-front of you before you've run a single query.
-
-Navigate the diagram with `j`/`k`. Move the cursor to the `consumer_incidents`
-header line. Press `<CR>`.
-
-The grid opens for that table. The ER diagram closes. Press `gG` anytime to
-return to the map and jump to another table. It is interactive: use it the
-way you'd use a subway map.
-
----
-
-## Cross the organizational boundary
-
-The internal investigation hit a wall at the Bamboo Don. The supplier is under
-embargo. Internal data cannot explain what happened on the other side of that
-relationship.
-
-A leaked supplier logistics database has arrived. It covers shipments,
-ingredient testing, and pricing.
-
-Attach it:
+The internal investigation terminates at the embargo on Bamboo Don. A leaked
+supplier logistics database covers what happened on the other side of that
+relationship. Attach it:
 
 ```vim
 :GripAttach sqlite:.grip/supplier_intel.db  supplier
 ```
 
-The schema sidebar updates. A new `supplier` section appears below `main` with
-three tables: `shipments`, `ingredient_tests`, `pricing`.
+The schema sidebar updates. A `supplier` section appears with three tables:
+`shipments`, `ingredient_tests`, `pricing`.
 
-### Join across databases
+---
 
-Open the query pad (`q`). Write a cross-database join:
+## 14. Declared vs actual contents
+
+Every shipment from Bamboo Don arrived with declared contents on file. Pull the
+comparison against what the facility received.
 
 ```sql
 SELECT
@@ -442,121 +349,91 @@ SELECT
 FROM supplier.shipments s
 JOIN production_batches pb
   ON pb.facility_id = (
-    SELECT id FROM facilities WHERE facility_name LIKE '%Shanghai%'
+    SELECT id FROM facilities WHERE name LIKE '%Shanghai%'
   )
-  AND s.ship_date BETWEEN pb.batch_date AND pb.batch_date
 WHERE s.supplier_alias = 'Bamboo Don'
 ORDER BY s.ship_date
 ```
 
-Press `<C-CR>`.
+Every shipment declared `Grade A Bamboo Fiber`. The `actual_contents` column
+reads `Grade C Mixed Pulp` for every row that maps to a recalled production batch.
+Every recalled batch traces back to knowingly mislabeled incoming material.
 
-Every shipment from Bamboo Don declared `Grade A Bamboo Fiber`. The
-`actual_contents` column reads `Grade C Mixed Pulp` for every row that maps to
-a recalled production batch. Every recalled batch traces back to knowingly
-mislabeled incoming material.
+---
 
-### Check the ingredient tests
+## 15. Failed ingredient tests
+
+The relabeling created a paper trail on the supplier side. The ingredient test
+records show what was found.
 
 ```sql
-SELECT
-  it.batch_ref,
-  it.bamboo_grade,
-  it.contaminant_level,
-  it.passed,
-  it.tester_notes
-FROM supplier.ingredient_tests it
-WHERE it.passed = 0
-ORDER BY it.contaminant_level DESC
+SELECT batch_ref, bamboo_grade, contaminant_level, passed, tester_notes
+FROM supplier.ingredient_tests
+WHERE passed = 0
+ORDER BY contaminant_level DESC
 ```
 
-Three failed tests. The highest contaminant level is 8.7 (scale of 10). The
-tester notes for that row: "Sample relabeled before customs. Original grade: C."
-A contaminant level of 8.7 fails any food-adjacent safety threshold. The
-relabeling happened before customs inspection, not after it.
+Three failed tests. The highest contaminant level is 8.7 on a scale of 10. The
+tester note for that row: "Sample relabeled before customs. Original grade: C."
 
-### The pricing arrangement
+A contaminant level of 8.7 fails any food-adjacent safety threshold. The
+relabeling occurred before customs inspection.
+
+---
+
+## 16. The pricing arrangement
+
+The economic incentive that created the relabeling is in the pricing table.
 
 ```sql
-SELECT
-  p.supplier_alias,
-  p.territory,
-  p.price_per_ton,
-  p.discount_pct,
-  p.loyalty_tier
-FROM supplier.pricing p
-ORDER BY p.discount_pct DESC
+SELECT supplier_alias, territory, price_per_ton, discount_pct, loyalty_tier
+FROM supplier.pricing
+ORDER BY discount_pct DESC
 ```
 
 The Shanghai territory pays 40% less per ton under `loyalty_tier = 'founding_partner'`.
 Every other territory pays full price. The discount created the incentive. The
-relabeling preserved the margin.
-
-The supply chain root cause is now complete: discounted supplier, relabeled
-ingredients, failed quality tests, recalled batches, zero-softness product,
-severity-10 incidents, and a person who knew too much who was acquired.
-
-### Detach when done
+relabeling preserved the margin. Detach when done:
 
 ```vim
 :GripDetach supplier
 ```
 
-The sidebar returns to the original 17 tables.
+---
+
+## What this found
+
+The three questions from the opening now have answers.
+
+**Product quality problem:** `ULTRA_BUDGET_XTRM` has softness_score = 0.0,
+severity-9 incidents, and a recall on its production batch. The problem is real
+and documented.
+
+**Origin:** The supply chain traces through the Shanghai Liaison Office to Bamboo
+Don, a supplier currently under embargo. Bamboo Don shipped Grade C mixed pulp
+declared as Grade A fiber, relabeled before customs. The 40% founding-partner
+discount created the financial motive.
+
+**Who knows:** BambooKnows has the recipe (investigation status: `they_got_us`).
+Four people have documented formula knowledge. One was acquired.
+
+**What decisions drove this:** Three directives were never publicly acknowledged.
+One was: Greg's authorization to self-certify. Greg has never tried the product.
+The data was here the whole time.
 
 ---
 
-## Query a public registry
+## Going further
 
-The supplier investigation used a local SQLite attachment. The same technique
-works for any public parquet file on the internet: no install, no credentials.
+Every query result is a live grid. From any result:
 
-Open a public dataset directly:
-
-```vim
-:GripOpen https://raw.githubusercontent.com/duckdb/duckdb-data/main/parquet-testing/userdata1.parquet
-```
-
-The grid opens. DuckDB's httpfs extension streams the file. Sort, filter, and
-profile it like any local table.
-
-To JOIN it against internal data without saving:
-
-```sql
-SELECT
-  u.first_name,
-  u.last_name,
-  ci.severity,
-  ci.incident_type
-FROM consumer_incidents ci
-JOIN read_parquet(
-  'https://raw.githubusercontent.com/duckdb/duckdb-data/main/parquet-testing/userdata1.parquet'
-) u ON ci.id = u.id
-ORDER BY ci.severity DESC
-LIMIT 20
-```
-
-Press `<C-CR>`. Local DuckDB rows joined against a remote parquet file with no
-intermediate download.
-
-To save this source for repeated use:
-
-```vim
-gc → + New connection → paste the URL → name it "registry"
-```
-
-It appears in gc as `[file] registry` from then on.
-
----
-
-## Updated feature coverage
-
-| Feature | Key | What it did |
-|---------|-----|-------------|
-| Attach external DB | `:GripAttach` | Connected supplier logistics database to DuckDB session |
-| Cross-DB JOIN | Query pad `<C-CR>` | Joined supplier shipments with internal production batches |
-| Schema grouping | Sidebar | Showed `supplier` section with 3 tables alongside `main` |
-| Detach | `:GripDetach` | Removed external database, sidebar restored |
-| ER diagram | `gG` | Schema map: tables as boxes, FK chains as arrows |
-| Open URL | `:GripOpen` | Remote parquet streamed via httpfs, no download |
-| Remote JOIN | Query pad | JOIN read_parquet('https://...') against local tables |
+- `s` / `S`   sort by any column; stack multiple sorts (▲1 ▼2 ▲3)
+- `f`         filter rows to match the cell under cursor
+- `gF`        filter builder: =, !=, LIKE, IN, BETWEEN, NULL, NOT NULL
+- `gR`        column distributions as sparklines across all rows
+- `gS`        column statistics: mean, min, max, nulls%, distinct count
+- `K`         row view: vertical key-value layout for wide results
+- `gx`        explain the current query plan
+- `gf`        follow a foreign key to its referenced table
+- `A`         AI SQL: describe what you want in English
+- `gE`        export to clipboard (CSV, TSV, JSON, SQL, Markdown)
