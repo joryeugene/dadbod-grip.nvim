@@ -172,6 +172,7 @@ Note: explain query plan is accessible via `gx` (removed from tab system).
 | `gh` | Query history browser |
 | `r` | Refresh (re-run query) |
 | `A` | AI SQL generation |
+| `gA` | AI row fill: stage 1 generated row (`:GripFill N` for more) |
 
 ## Query Pad (ft=sql, editable)
 
@@ -223,7 +224,7 @@ Note: explain query plan is accessible via `gx` (removed from tab system).
 
 Available for future features. Check this list before assigning a new `g` keymap:
 
-**Uppercase (free):** `gA` (query pad only), `gB`, `gJ`, `gK`, `gL`, `gM`, `gQ`, `gU`, `gZ`
+**Uppercase (free):** `gB`, `gJ`, `gK`, `gL`, `gM`, `gQ`, `gU`, `gZ`
 **Lowercase (free in grid):** `gm`, `gr`, `gw`
 **Lowercase (free in sidebar):** `gm`, `gr`
 

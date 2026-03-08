@@ -147,6 +147,7 @@ M.defaults = {
   grid_watch       = "gW",       -- toggle watch mode (auto-refresh on timer)
   grid_write_mode  = "g!",       -- toggle write mode (apply overwrites file)
   grid_open_edit   = "gO",       -- reopen read-only result as editable table
+  grid_fill        = "gA",       -- AI-generated staged rows (:GripFill)
 
   -- ── Query pad ──────────────────────────────────────────────────────────
   qpad_execute     = "<C-CR>",   -- execute full query

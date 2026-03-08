@@ -4497,6 +4497,10 @@ function M._setup_keymaps(bufnr)
     ai.ask(s_url)
   end, "AI SQL generation")
 
+  kmap("grid_fill", function()
+    require("dadbod-grip").do_fill_rows(1)
+  end, "AI-generated staged rows (GripFill)")
+
   -- ── tab view keymaps (1-9) ───────────────────────────────────────────────
   -- 1: schema sidebar (already in grid = always primary: open/focus sidebar)
   kmap("tab_1", function()
