@@ -57,8 +57,7 @@ local function try_timestamp_hint(buf, val)
   local hint = "  \226\134\146 " .. rel .. "  (" .. os.date("%A, %b %d %Y", t) .. ")"
   local ns = vim.api.nvim_create_namespace("grip_ts_hint")
   vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
-    virt_text     = { { hint, "Comment" } },
-    virt_text_pos = "eol",
+    virt_lines = { { { hint, "Comment" } } },
   })
 end
 
