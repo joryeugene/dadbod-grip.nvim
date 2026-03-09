@@ -180,6 +180,7 @@ Action names (stable API) with their defaults:
   Grid: visual mode ~
   grid_v_edit      = "e"       grid_v_delete    = "d"
   grid_v_null      = "x"       grid_v_yank      = "y"
+  grid_v_compare   = "gd"      (K also works: stack selected rows)
 
   Grid: display ~
   grid_hide_col    = "-"       grid_restore_cols= "g-"
@@ -215,7 +216,7 @@ Action names (stable API) with their defaults:
 
   Grid: workflow ~
   grid_watch       = "gW"      grid_write_mode  = "g!"
-  grid_open_edit   = "gO"
+  grid_open_edit   = "gO"      grid_fill        = "gA"  (AI row fill; :GripFill N)
 
   Query pad ~
   qpad_execute     = "<C-CR>"  qpad_save        = "<C-s>"
@@ -386,6 +387,20 @@ All commands are global and available after the plugin loads.
   with a glob() query. For specific files, opens an editable grid directly.
   Requires DuckDB as the active connection for file and S3 access.
 
+                                                               *:GripFill*
+:GripFill [N]
+  Stage N AI-generated realistic rows into the current editable table grid
+  (default 1, max 50). The AI receives the table schema as context and
+  returns a JSON array of row objects. Each row is staged as a pending
+  INSERT; press a to apply. Also available as gA in the grid (stages 1
+  row). Requires an AI provider key (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+  GEMINI_API_KEY) or a local Ollama instance.
+
+  Example:
+    :GripFill        stage 1 row
+    :GripFill 5      stage 5 rows
+    :GripFill 50     maximum
+
                                                                *:GripStart*
 :GripStart
   Open the built-in demo database (Softrear Inc. Analyst Portal). Creates
@@ -536,6 +551,26 @@ SCHEMA AND WORKFLOW ~
   q               Focus query pad (pre-fills if empty; appends if pad has content)
   gh              Query history browser
   A               AI SQL generation (natural language)
+  gA              AI row fill: stage 1 generated row (:GripFill N for more)
+
+VISUAL MODE ~
+                                                         *grip-visual-mode*
+  gd              Diff exactly 2 selected rows (highlights differing cells)
+  K               Stack selected rows in one vertical inspect float
+  e               Set selected cells to same value
+  d               Toggle delete on selected rows
+  x               Set selected cells to NULL
+  y               Yank selected cells in column
+
+CELL EDITOR ~
+                                                        *grip-cell-editor*
+  <CR> / <C-s>    Save (insert and normal mode)
+  <Esc>           Normal mode (not cancel; lets you use Vim motions)
+  q / <Esc>       Cancel (normal mode only)
+  <C-c>           Cancel (insert mode)
+  gx              Open cell value as URL in browser (normal mode)
+                  Timestamps: a relative-time hint appears as virtual text
+                  (e.g. "3 months ago  (Monday, Aug 14 2023)")
 
 ADVANCED ~
                                                           *grip-advanced*

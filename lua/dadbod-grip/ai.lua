@@ -459,7 +459,7 @@ end
 ---@param adapter  string   adapter name for format hints
 ---@param url      string   DB URL (used for provider key resolution only)
 ---@param callback fun(rows: table[]|nil, err: string|nil)
-function M.generate_rows(n, ddl, adapter, url, callback)
+function M.generate_rows(n, ddl, adapter, table_name, url, callback)
   local provider_name = M.resolve_provider()
   local provider = PROVIDERS[provider_name]
   if not provider then
@@ -474,7 +474,7 @@ function M.generate_rows(n, ddl, adapter, url, callback)
   end
 
   local system_prompt = "You are a test data generator. "
-    .. "Output ONLY a raw JSON array of " .. n .. " row objects. "
+    .. "Output ONLY a raw JSON array of " .. n .. " row objects for the `" .. table_name .. "` table. "
     .. "No prose, no markdown fences, no SQL, no comments. "
     .. "Values must be realistic: names look like names, emails like emails, "
     .. "dates in ISO 8601 format (YYYY-MM-DD), foreign keys as small integers (1-5). "
@@ -482,7 +482,7 @@ function M.generate_rows(n, ddl, adapter, url, callback)
     .. "Never include computed or auto-increment primary key columns. "
     .. "Schema:\n\n" .. ddl
 
-  local user_msg = "Generate " .. n .. " realistic rows."
+  local user_msg = "Generate " .. n .. " realistic row(s) for `" .. table_name .. "`."
   local model = _opts.model or provider.default_model
   local req = provider.build_request(system_prompt, user_msg, model, api_key, _opts.base_url)
 

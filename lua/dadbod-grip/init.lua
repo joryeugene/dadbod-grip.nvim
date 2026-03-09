@@ -2362,14 +2362,29 @@ function M.do_fill_rows(n)
   end
 
   local ai_mod = require("dadbod-grip.ai")
-  local db_url = session.url
+  local db_url  = session.url
+  local tbl     = session.state.table_name
+
+  -- Build single-table DDL so the AI knows exactly what to fill.
+  local db_mod = require("dadbod-grip.db")
+  local cols  = db_mod.get_column_info(tbl, db_url)
+  local pks   = db_mod.get_primary_keys(tbl, db_url)
+  local ok_fk, fks = pcall(db_mod.get_foreign_keys, tbl, db_url)
+  if not ok_fk then fks = {} end
+  local ddl     = ai_mod._format_ddl_line(tbl, cols or {}, pks or {}, fks)
+
+  -- Detect adapter for value-format hints.
+  local u = (db_url or ""):lower()
+  local adapter = u:match("^postgres") and "PostgreSQL"
+                or u:match("^mysql")   and "MySQL"
+                or u:match("^duckdb")  and "DuckDB"
+                or "SQLite"
 
   ui.blocking("Generating " .. n .. " row(s)...", function()
     local done = false
     local gen_rows, gen_err
 
-    local ddl, adapter = ai_mod.build_schema_context(db_url, "")
-    ai_mod.generate_rows(n, ddl, adapter, db_url, function(rows, err)
+    ai_mod.generate_rows(n, ddl, adapter, tbl, db_url, function(rows, err)
       gen_rows, gen_err = rows, err
       done = true
     end)
