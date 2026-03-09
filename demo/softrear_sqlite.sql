@@ -112,7 +112,8 @@ CREATE TABLE IF NOT EXISTS suspicious_persons (
   platform         TEXT,
   follower_count   INTEGER,
   knows_too_much   INTEGER DEFAULT 0,
-  investigation_id INTEGER REFERENCES internal_investigations(id)
+  investigation_id INTEGER REFERENCES internal_investigations(id),
+  profile_url      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS youtube_comments (
@@ -314,11 +315,11 @@ INSERT INTO rolls VALUES
 -- ─────────────────────────────────────────────────────────────
 
 INSERT INTO consumer_incidents VALUES
-( 1, 'ULTRA_BUDGET_XTRM',        'airplane',              10, 1, '2023-08-14', 'Seat 34B. Meal service had just ended. This review cannot be submitted to the airline.'),
-( 2, 'ULTRA_BUDGET_XTRM',        'emergency_situation',    9, 1, '2023-11-03', 'Open floor plan. No music. The third floor is now the second floor people.'),
-( 3, 'ULTRA_BUDGET_XTRM',        'first_date',             8, 1, '2024-01-19', 'Subject did not return calls. Correlation noted.'),
-( 4, 'ULTRA_BUDGET_XTRM',        'clog',                   7, 0, '2024-02-08', 'Recommend against use in pre-1970 plumbing. This is in the documentation.'),
-( 5, 'ULTRA_BUDGET_XTRM',        'camping_regret',         9, 1, '2023-07-04', 'Day 3 of 7. Wind direction changed. Remaining distance: 4 days.'),
+( 1, 'ULTRA_BUDGET_XTRM',        'airplane',              10, 1, '2023-08-14T14:32:07', 'Seat 34B. Meal service had just ended. This review cannot be submitted to the airline.'),
+( 2, 'ULTRA_BUDGET_XTRM',        'emergency_situation',    9, 1, '2023-11-03T09:17:44', 'Open floor plan. No music. The third floor is now the second floor people.'),
+( 3, 'ULTRA_BUDGET_XTRM',        'first_date',             8, 1, '2024-01-19T15:47:22', 'Subject did not return calls. Correlation noted.'),
+( 4, 'ULTRA_BUDGET_XTRM',        'clog',                   7, 0, '2024-02-08T11:03:55', 'Recommend against use in pre-1970 plumbing. This is in the documentation.'),
+( 5, 'ULTRA_BUDGET_XTRM',        'camping_regret',         9, 1, '2023-07-04T08:22:11', 'Day 3 of 7. Wind direction changed. Remaining distance: 4 days.'),
 ( 6, 'TITANIUM_TRIPLE_PLY',      'clog',                   8, 0, '2023-09-22', 'Product exceeded specifications. Plumber invoice attached.'),
 ( 7, 'TITANIUM_TRIPLE_PLY',      'mid_meeting',            6, 1, '2024-01-11', 'All 4 sheets deployed. Some resistance encountered.'),
 ( 8, 'CLOUD_TOUCH_4PLY',         'standard_dissatisfaction',2,1, '2023-10-05', 'Customer claims product was "too soft." Filed under: unreasonable.'),
@@ -346,15 +347,15 @@ INSERT INTO consumer_incidents VALUES
 -- ─────────────────────────────────────────────────────────────
 
 INSERT INTO internal_investigations VALUES
-( 1, 'TheTruthAboutSoftrear',  'Jenkins (Internal Security)',  '2021-03-14', 'active',
+( 1, 'TheTruthAboutSoftrear',  'Jenkins (Internal Security)',  '2021-03-14T16:45:00', 'active',
      'Subject has documented softness degradation year-over-year since 2017. Spreadsheet confirmed accurate. Asset to be monitored.'),
-( 2, 'BambooKnows',            'Jenkins (Internal Security)',  '2022-07-01', 'they_got_us',
+( 2, 'BambooKnows',            'Jenkins (Internal Security)',  '2022-07-01T10:08:33', 'they_got_us',
      'they have the recipe'),
-( 3, 'DrRollGoodman',          'Perkins (Threat Assessment)',  '2023-01-09', 'resolved',
+( 3, 'DrRollGoodman',          'Perkins (Threat Assessment)',  '2023-01-09T14:22:18', 'resolved',
      'Subject reverse-engineered formula from 2017 sample. Acquired Q2 2023. Now in R&D. Do not discuss.'),
-( 4, 'SoftrearTruthModerator', 'Jenkins (Internal Security)',  '2022-11-15', 'active',
+( 4, 'SoftrearTruthModerator', 'Jenkins (Internal Security)',  '2022-11-15T09:55:01', 'active',
      'Controls r/softreartruth. 12,000 subscribers. Has not posted in 3 months. Either resolved or escalating.'),
-( 5, 'GalileoOfToiletPaper',   'Watkins (Comms)',              '2023-05-22', 'watching',
+( 5, 'GalileoOfToiletPaper',   'Watkins (Comms)',              '2023-05-22T11:30:45', 'watching',
      'YouTube channel. 47K subscribers. Video: "Why Does Softrear Lie About Their Ply Count?" 1.2M views.'),
 ( 6, 'IndustrialGradeIan',     'Perkins (Threat Assessment)',  '2021-09-30', 'resolved',
      'Retired engineer. Blog post about sheet count discrepancy. Cease and desist sent. Blog deleted. Coupon also sent.'),
@@ -390,16 +391,16 @@ INSERT INTO people_on_to_us VALUES
 -- ─────────────────────────────────────────────────────────────
 
 INSERT INTO suspicious_persons VALUES
-( 1, 'TheTruthAboutSoftrear',  'Twitter',  41200, 1,  1),
-( 2, 'BambooKnows',            'YouTube',  72400, 1,  2),
-( 3, 'DrRollGoodman',          'Academia',  1200, 1,  3),
-( 4, 'SoftrearTruthModerator', 'Reddit',   14800, 1,  4),
-( 5, 'GalileoOfToiletPaper',   'YouTube',  47300, 1,  5),
-( 6, 'IndustrialGradeIan',     'Blog',      2200, 0,  6),
-( 7, 'PapertrailPaula',        'LinkedIn',  8900, 1,  7),
-( 8, 'HygieneTruthers',        'Discord',   2300, 0,  8),
-( 9, 'NoBambooNoDeal',         'Activism',  5600, 1,  9),
-(10, 'Anonymous_Formulator_X', 'Reddit',     341, 1, 10);
+( 1, 'TheTruthAboutSoftrear',  'Twitter',  41200, 1,  1, 'https://x.com/search?q=%22toilet+paper%22+changed+formula'),
+( 2, 'BambooKnows',            'YouTube',  72400, 1,  2, 'https://www.youtube.com/results?search_query=bamboo+toilet+paper+truth'),
+( 3, 'DrRollGoodman',          'Academia',  1200, 1,  3, 'https://scholar.google.com/scholar?q=toilet+paper+fiber+density'),
+( 4, 'SoftrearTruthModerator', 'Reddit',   14800, 1,  4, 'https://www.reddit.com/r/mildlyinteresting/'),
+( 5, 'GalileoOfToiletPaper',   'YouTube',  47300, 1,  5, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'),
+( 6, 'IndustrialGradeIan',     'Blog',      2200, 0,  6, 'https://en.wikipedia.org/wiki/Toilet_paper#Composition'),
+( 7, 'PapertrailPaula',        'LinkedIn',  8900, 1,  7, 'https://www.linkedin.com/search/results/all/?keywords=tissue+paper+supply+chain'),
+( 8, 'HygieneTruthers',        'Discord',   2300, 0,  8, 'https://discord.com/safety'),
+( 9, 'NoBambooNoDeal',         'Activism',  5600, 1,  9, 'https://www.greenpeace.org/usa/issues/forests/'),
+(10, 'Anonymous_Formulator_X', 'Reddit',     341, 1, 10, 'https://www.reddit.com/search/?q=tissue+paper+formula+recipe');
 
 
 -- ─────────────────────────────────────────────────────────────
@@ -620,39 +621,3 @@ UPDATE internal_investigations SET case_metadata = '{"priority":"high","watchers
 UPDATE internal_investigations SET case_metadata = '{"priority":"medium","watchers":1,"platform_metrics":{"subscribers":47300,"video_views_total":2100000},"notable_content":["ply_count_video","formula_comparison"],"tags":["youtube","viral"]}' WHERE id = 5;
 
 
--- ─────────────────────────────────────────────────────────────
--- PROFILE URLs (for testing gx URL opener in cell editor)
--- All URLs are real and resolve in a browser.
--- Row 5 (GalileoOfToiletPaper): the threat assessment team left a note.
--- ─────────────────────────────────────────────────────────────
-
-ALTER TABLE suspicious_persons ADD COLUMN profile_url TEXT;
-UPDATE suspicious_persons SET profile_url = 'https://x.com/search?q=%22toilet+paper%22+changed+formula' WHERE id = 1;
-UPDATE suspicious_persons SET profile_url = 'https://www.youtube.com/results?search_query=bamboo+toilet+paper+truth' WHERE id = 2;
-UPDATE suspicious_persons SET profile_url = 'https://scholar.google.com/scholar?q=toilet+paper+fiber+density' WHERE id = 3;
-UPDATE suspicious_persons SET profile_url = 'https://www.reddit.com/r/mildlyinteresting/' WHERE id = 4;
-UPDATE suspicious_persons SET profile_url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' WHERE id = 5;
-UPDATE suspicious_persons SET profile_url = 'https://en.wikipedia.org/wiki/Toilet_paper#Composition' WHERE id = 6;
-UPDATE suspicious_persons SET profile_url = 'https://www.linkedin.com/search/results/all/?keywords=tissue+paper+supply+chain' WHERE id = 7;
-UPDATE suspicious_persons SET profile_url = 'https://discord.com/safety' WHERE id = 8;
-UPDATE suspicious_persons SET profile_url = 'https://www.greenpeace.org/usa/issues/forests/' WHERE id = 9;
-UPDATE suspicious_persons SET profile_url = 'https://www.reddit.com/search/?q=tissue+paper+formula+recipe' WHERE id = 10;
-
-
--- ─────────────────────────────────────────────────────────────
--- ISO 8601 DATETIMES (for testing timestamp extmark in cell editor)
--- Selected rows in consumer_incidents and internal_investigations
--- get full datetime strings so the extmark fires on open.
--- ─────────────────────────────────────────────────────────────
-
-UPDATE consumer_incidents SET incident_date = '2023-08-14T14:32:07' WHERE id = 1;
-UPDATE consumer_incidents SET incident_date = '2023-11-03T09:17:44' WHERE id = 2;
-UPDATE consumer_incidents SET incident_date = '2024-01-19T15:47:22' WHERE id = 3;
-UPDATE consumer_incidents SET incident_date = '2024-02-08T11:03:55' WHERE id = 4;
-UPDATE consumer_incidents SET incident_date = '2023-07-04T08:22:11' WHERE id = 5;
-
-UPDATE internal_investigations SET opened_date = '2021-03-14T16:45:00' WHERE id = 1;
-UPDATE internal_investigations SET opened_date = '2022-07-01T10:08:33' WHERE id = 2;
-UPDATE internal_investigations SET opened_date = '2023-01-09T14:22:18' WHERE id = 3;
-UPDATE internal_investigations SET opened_date = '2022-11-15T09:55:01' WHERE id = 4;
-UPDATE internal_investigations SET opened_date = '2023-05-22T11:30:45' WHERE id = 5;
