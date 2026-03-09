@@ -15,7 +15,7 @@ Not committed to any release. Roughly ordered by expected impact.
 - [ ] Import from clipboard/pipe (`gI` / `:GripImport`: detect CSV/JSON/TSV, preview columns, stage as INSERT batch; DuckDB: `read_csv_auto()`; PG: COPY or multi-INSERT)
 - [ ] Generate sync SQL from diff (make table A match table B, emit INSERT/UPDATE/DELETE migration from `gD` output)
 - [ ] Virtual columns: computed display columns defined per-table in `.grip/config.lua` via Lua expressions evaluated client-side (e.g. `full_name = row.first .. " " .. row.last`); no DB writes, spreadsheet-style power
-- [ ] Row comparison: visual-select two rows and open a side-by-side diff float showing which cells differ; useful for spotting what changed between similar records
+- [x] Row comparison (`gd` visual: side-by-side diff float, differing cells highlighted): shipped v1.2.0
 - [ ] Multi-cursor column set: press on a column to stage the same value for all visible rows at once; bulk-edit a status field without writing SQL
 
 ### High Value -- UX / Developer Experience
@@ -34,7 +34,7 @@ Not committed to any release. Roughly ordered by expected impact.
 - [ ] Natural language result explanation (`gA` in grid asks AI to summarize what the current result set means in plain English)
 - [ ] AI explain query (`gA` in query pad, explain mode): describe what the current SQL does in plain English; distinct from "generate SQL"; useful for understanding inherited queries
 - [ ] Anomaly detection in profiling (AI scans `gR` profiling output and flags statistical outliers with reasoning)
-- [ ] AI-assisted data generation (`:GripFill N` asks AI to generate N realistic rows for the current table schema, staged as INSERTs; smarter than random: names look like names, emails look like emails)
+- [x] AI-assisted data generation (`:GripFill N` / `gA` in grid: AI generates realistic rows staged as INSERTs): shipped v1.2.0
 - [ ] pgvector support (render `vector` columns in row view, `gF` generates `ORDER BY vec <=> $1 LIMIT N` similarity queries, profiling shows dimension count and index type)
 
 ### High Value -- Adapters
@@ -56,7 +56,7 @@ Not committed to any release. Roughly ordered by expected impact.
 - [ ] Inline column resize with `+`/`-` on header row
 - [ ] Bookmarked rows (mark interesting rows with `m`, recall with `'`, persist per table in `.grip/bookmarks.json`)
 - [ ] Multi-row selection for bulk ops (visual `V`-mode selects rows, then `d`=bulk DELETE, `gy`=copy all as table)
-- [ ] Quick data generation (`:GripFill` to populate empty table with N rows of realistic fake data per column type)
+- [x] Quick data generation (`:GripFill N` / `gA` in grid): shipped v1.2.0 (merged with AI-assisted data generation)
 - [x] Connection health indicators: `*`/`o`/`x` dots in connection picker; `T` retests file connections; status set on successful switch
 - [ ] Saved views: persist full grid state (active filters, sort, hidden columns, page size) as a named snapshot per table in `.grip/views.json`; recall without writing SQL
 - [ ] ASCII histogram for numeric columns: extend `gS` to show a quick distribution histogram inline; complement to stats popup
