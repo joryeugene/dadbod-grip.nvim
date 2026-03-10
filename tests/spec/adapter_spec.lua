@@ -25,6 +25,17 @@ local function contains(s, pattern, msg)
   assert(s:find(pattern, 1, true), (msg or "") .. ": expected '" .. s .. "' to contain '" .. pattern .. "'")
 end
 
+local function has_arg(args, flag, msg)
+  for _, a in ipairs(args) do
+    if a == flag then return end
+  end
+  error((msg or "") .. ": expected args to contain '" .. flag .. "'")
+end
+
+local function last_arg(args)
+  return args[#args]
+end
+
 -- ── mock helpers ──────────────────────────────────────────────────────────────
 
 local function with_system_mock(stdout, stderr, code, fn)
@@ -206,6 +217,37 @@ test("pg execute: empty stdout parses as 0 affected", function()
   end)
 end)
 
+-- ── PostgreSQL .psqlrc bypass ────────────────────────────────────────────
+
+test("pg query: passes -X to skip .psqlrc", function()
+  with_executable(function()
+    local args = capture_system_args("col\nval\n", function()
+      pg.query("SELECT 1", "postgresql://localhost/db")
+    end)
+    has_arg(args, "-X", "query should pass -X")
+  end)
+end)
+
+test("pg ping: passes -X to skip .psqlrc", function()
+  with_executable(function()
+    local args = capture_system_args("", function()
+      pg.ping("postgresql://localhost/db")
+    end)
+    has_arg(args, "-X", "ping should pass -X")
+  end)
+end)
+
+-- ── SQLite .sqliterc bypass ─────────────────────────────────────────────
+
+test("sqlite query: passes -init '' to skip .sqliterc", function()
+  with_executable(function()
+    local args = capture_system_args("col\nval\n", function()
+      sqlite.query("SELECT 1", "sqlite:test.db")
+    end)
+    has_arg(args, "-init", "query should pass -init")
+  end)
+end)
+
 -- ── MySQL DEFAULT VALUES rewriting ───────────────────────────────────────────
 
 test("mysql execute: DEFAULT VALUES is rewritten", function()
@@ -273,8 +315,7 @@ test("sqlite get_primary_keys: table name is quoted in PRAGMA", function()
     end
     sqlite.get_primary_keys("users", "sqlite:test.db")
     vim.system = orig
-    -- sqlite3 args: { "sqlite3", "-csv", "-header", db_path, sql_str }
-    local sql_arg = captured_args[5]
+    local sql_arg = last_arg(captured_args)
     contains(sql_arg, '"users"', "table name should be quoted")
   end)
 end)
@@ -290,8 +331,7 @@ test("sqlite get_primary_keys: embedded quote is escaped", function()
     end
     sqlite.get_primary_keys('my"table', "sqlite:test.db")
     vim.system = orig
-    -- sqlite3 args: { "sqlite3", "-csv", "-header", db_path, sql_str }
-    local sql_arg = captured_args[5]
+    local sql_arg = last_arg(captured_args)
     -- Double-quote escaping: my"table becomes my""table inside quotes
     contains(sql_arg, 'my""table', "embedded quote should be doubled")
   end)
@@ -358,8 +398,7 @@ test("sqlite get_constraints: queries sqlite_master with table name", function()
   end
   sqlite.get_constraints("users", "sqlite:test.db")
   vim.system = orig
-  -- sqlite3 args: { "sqlite3", "-csv", "-header", db_path, sql_str }
-  local sql_arg = captured_args[5]
+  local sql_arg = last_arg(captured_args)
   contains(sql_arg, "sqlite_master", "queries sqlite_master")
   contains(sql_arg, "users", "filters by table name")
 end)

@@ -28,7 +28,7 @@ end
 
 local function sqlite3(db_path, sql_str, timeout_ms)
   return adapters.run_cmd(
-    { "sqlite3", "-csv", "-header", db_path, sql_str },
+    { "sqlite3", "-init", "", "-csv", "-header", db_path, sql_str },
     timeout_ms or DEFAULT_TIMEOUT
   )
 end
