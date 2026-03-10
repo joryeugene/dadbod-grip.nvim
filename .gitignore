@@ -8,3 +8,5 @@ tests/*.duckdb
 tests/*.db
 demo/*.duckdb
 demo/*.db
+assets/*.png
+assets/*.gif

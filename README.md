@@ -15,12 +15,13 @@ d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
 <a href="https://github.com/joryeugene/dadbod-grip.nvim/blob/main/LICENSE"><img src="https://img.shields.io/github/license/joryeugene/dadbod-grip.nvim.svg" alt="MIT License"></a>&nbsp;
 <img src="https://img.shields.io/badge/Neovim-0.10%2B-green.svg" alt="Neovim 0.10+">&nbsp;
 <a href="https://github.com/joryeugene/dadbod-grip.nvim/actions/workflows/test.yml"><img src="https://github.com/joryeugene/dadbod-grip.nvim/actions/workflows/test.yml/badge.svg" alt="Tests"></a>&nbsp;
+<a href="https://github.com/rockerBOO/awesome-neovim"><img src="https://img.shields.io/badge/awesome--neovim-listed-4ade80.svg" alt="Awesome Neovim"></a>&nbsp;
 </p>
 <b>Editable database grids for Neovim.</b><br>
 Connect to PostgreSQL, MySQL, SQLite, DuckDB, or MotherDuck and edit tables like Vim buffers.
 </td>
 <td align="center" valign="middle" width="180">
-<img src="assets/mascot.gif" width="160" alt="Chonk the dadbod-grip mascot"><br>
+<img src="https://jorypestorious.com/dadbod-grip-web/mascot.gif" width="160" alt="Chonk the dadbod-grip mascot"><br>
 <sub><b>Chonk</b></sub>
 </td>
 </tr></table>
@@ -43,7 +44,7 @@ A command palette (`<C-p>`) surfaces every action without memorizing keymaps. Th
 | **Write mode** `--write` · edit files and write back to disk | **Watch mode** `--watch` · auto-refresh grid on a timer | **Depth views** `5`-`9` Stats · Columns · FK · Indexes · Constraints |
 
 <p align="center">
-<img src="assets/live.png" alt="dadbod-grip: schema sidebar, query pad, and editable grid with color-coded mutations" width="900">
+<img src="https://jorypestorious.com/dadbod-grip-web/live.png" alt="dadbod-grip: schema sidebar, query pad, and editable grid with color-coded mutations" width="900">
 </p>
 
 An example database is included. `:GripStart` opens it with seventeen tables and something in the consumer incidents that does not add up. See the [walkthrough](demo/softrear-internal.md) for the full investigation.
