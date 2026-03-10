@@ -11,7 +11,7 @@ local DEFAULT_TIMEOUT = 30000
 
 local function psql(url, sql_str, timeout_ms)
   return adapters.run_cmd(
-    { "psql", url, "--no-password", "--csv", "-c", sql_str },
+    { "psql", url, "X", "--no-password", "--csv", "-c", sql_str },
     timeout_ms or DEFAULT_TIMEOUT
   )
 end
