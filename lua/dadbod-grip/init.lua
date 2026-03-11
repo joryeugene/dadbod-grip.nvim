@@ -2266,13 +2266,20 @@ function M.setup(opts)
       if vim.fn.filereadable(db_path) == 1 then vim.fn.delete(db_path) end
       vim.fn.mkdir(vim.fn.fnamemodify(db_path, ":h"), "p")
       local bin = db_path:match("%.duckdb$") and "duckdb" or "sqlite3"
+      if vim.fn.executable(bin) == 0 then
+        vim.notify(
+          "GripStart requires duckdb or sqlite3 for the demo database.\n"
+            .. "Install one, or use :GripConnect for your own DB.",
+          vim.log.levels.ERROR)
+        return
+      end
       vim.fn.system(bin .. " " .. vim.fn.shellescape(db_path)
         .. " < " .. vim.fn.shellescape(seed))
     end
 
-    -- Seed supplier intel database for federation demo
+    -- Seed supplier intel database for federation demo (requires sqlite3)
     local supplier_sql_files = vim.api.nvim_get_runtime_file("demo/softrear_supplier.sql", false)
-    if #supplier_sql_files > 0 then
+    if #supplier_sql_files > 0 and vim.fn.executable("sqlite3") == 1 then
       local grip_dir = vim.fn.getcwd() .. "/.grip"
       vim.fn.mkdir(grip_dir, "p")
       local supplier_db = grip_dir .. "/supplier_intel.db"
