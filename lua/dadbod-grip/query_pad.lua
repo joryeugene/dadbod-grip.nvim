@@ -148,7 +148,11 @@ local function ensure_buf(url)
       group  = _ag,
       buffer = _pad_bufnr,
       callback = function()
-        vim.schedule(function() setup_completion_keymaps(bufnr_ref) end)
+        vim.schedule(function()
+          if vim.api.nvim_buf_is_valid(bufnr_ref) then
+            setup_completion_keymaps(bufnr_ref)
+          end
+        end)
       end,
     })
   end
