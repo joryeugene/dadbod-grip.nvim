@@ -98,11 +98,12 @@ packer.nvim: >lua
 setup() is called automatically by the plugin loader with sensible defaults.
 Override if needed: >lua
   require("dadbod-grip").setup({
-    limit            = 100,    -- default row limit for SELECT queries
-    max_col_width    = 40,     -- max display width per column
-    timeout          = 10000,  -- query timeout in milliseconds
-    completion       = true,   -- set false to use blink.cmp/nvim-cmp instead
-    connections_path = nil,    -- absolute path to shared connections.json
+    limit            = 100,      -- default row limit for SELECT queries
+    max_col_width    = 40,       -- max display width per column
+    timeout          = 10000,    -- query timeout in milliseconds
+    completion       = true,     -- set false to use blink.cmp/nvim-cmp instead
+    connections_path = nil,      -- absolute path to shared connections.json
+    picker           = "builtin", -- "builtin", "telescope", or "snacks"
   })
 <
 When `completion` is false, grip's built-in TextChangedI popup is disabled.
@@ -112,6 +113,12 @@ for source configuration examples.
 When `connections_path` is set, grip reads and writes connections to that single
 file only (skips the project-local + global merge). Useful for a centralized
 connections file shared across projects.
+
+                                                             *grip-picker*
+When `picker` is set to "telescope" or "snacks", simple pickers (table picker,
+command palette, history) delegate to that backend. Complex pickers
+(connections, saved queries) always use the built-in picker. Falls back to
+built-in gracefully when the configured backend is not installed.
 
 AI SQL generation (optional): >lua
   require("dadbod-grip").setup({

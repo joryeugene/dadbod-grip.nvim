@@ -197,7 +197,7 @@ function M.open(context)
   local actions = filter_for_context(context, all)
   if #actions == 0 then return end
 
-  require("dadbod-grip.grip_picker").open({
+  require("dadbod-grip.grip_picker").pick({
     title   = "Commands  (/)filter  (<CR>)run  (q)close",
     items   = actions,
     display = function(a) return a.label end,

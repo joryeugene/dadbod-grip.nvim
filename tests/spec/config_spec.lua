@@ -88,7 +88,30 @@ test("connections_path resets to nil on empty setup", function()
   eq(grip.get_opts().connections_path, nil, "reset to nil")
 end)
 
--- Restore defaults
+--- picker config
+
+test("picker defaults to builtin", function()
+  grip.setup({})
+  eq(grip.get_opts().picker, "builtin", "default builtin")
+end)
+
+test("picker accepts telescope", function()
+  grip.setup({ picker = "telescope" })
+  eq(grip.get_opts().picker, "telescope", "telescope")
+end)
+
+test("picker accepts snacks", function()
+  grip.setup({ picker = "snacks" })
+  eq(grip.get_opts().picker, "snacks", "snacks")
+end)
+
+test("picker resets to builtin on empty setup", function()
+  grip.setup({ picker = "telescope" })
+  grip.setup({})
+  eq(grip.get_opts().picker, "builtin", "reset to builtin")
+end)
+
+--- Restore defaults
 grip.setup({})
 
 -- Summary

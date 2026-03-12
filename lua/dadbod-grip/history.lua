@@ -148,7 +148,7 @@ function M.pick_for_table(table_name, callback)
     vim.notify("Grip: no history for " .. (table_name or "this table"), vim.log.levels.INFO)
     return
   end
-  require("dadbod-grip.grip_picker").open({
+  require("dadbod-grip.grip_picker").pick({
     title = "History: " .. (table_name or ""),
     items = entries,
     display = function(e)
@@ -174,7 +174,7 @@ function M.pick(callback)
     return
   end
 
-  require("dadbod-grip.grip_picker").open({
+  require("dadbod-grip.grip_picker").pick({
     title = "Query History",
     items = entries,
     display = function(e)

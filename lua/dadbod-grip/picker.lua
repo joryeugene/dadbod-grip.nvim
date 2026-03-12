@@ -61,7 +61,7 @@ function M.pick_table(url, callback)
     return
   end
 
-  require("dadbod-grip.grip_picker").open({
+  require("dadbod-grip.grip_picker").pick({
     title = "Tables",
     items = tables,
     display = function(t)

@@ -564,15 +564,18 @@ Plug 'joryeugene/dadbod-grip.nvim', { 'tag': 'v*' }
 
 ```lua
 require("dadbod-grip").setup({
-  limit            = 100,   -- default row limit for SELECT queries
-  max_col_width    = 40,    -- max display width per column
-  timeout          = 30000, -- query timeout in ms (default: 10000; raise for slow tunnels)
-  completion       = true,  -- set false to use blink.cmp/nvim-cmp instead
-  connections_path = nil,   -- absolute path to a shared connections.json file
+  limit            = 100,      -- default row limit for SELECT queries
+  max_col_width    = 40,       -- max display width per column
+  timeout          = 30000,    -- query timeout in ms (default: 10000; raise for slow tunnels)
+  completion       = true,     -- set false to use blink.cmp/nvim-cmp instead
+  connections_path = nil,      -- absolute path to a shared connections.json file
+  picker           = "builtin", -- "builtin", "telescope", or "snacks"
 })
 ```
 
 Setting `connections_path` overrides the default project-local + global merge behavior. When set, grip reads and writes connections to that single file only.
+
+Setting `picker` to `"telescope"` or `"snacks"` delegates simple pickers (table picker, command palette, history) to that backend. Complex pickers (connections, saved queries) always use the built-in picker. Falls back to built-in gracefully when the configured backend is not installed.
 
 AI SQL generation (optional):
 

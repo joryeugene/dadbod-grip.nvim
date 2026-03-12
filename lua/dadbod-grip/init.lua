@@ -23,6 +23,7 @@ local OPTS = {
   timeout     = 10000,
   completion  = true,
   connections_path = nil,
+  picker      = "builtin",
 }
 
 --- Return a shallow copy of the current options.
@@ -30,7 +31,8 @@ local OPTS = {
 function M.get_opts()
   return { limit = OPTS.limit, max_col_width = OPTS.max_col_width,
            timeout = OPTS.timeout, completion = OPTS.completion,
-           connections_path = OPTS.connections_path }
+           connections_path = OPTS.connections_path,
+           picker = OPTS.picker }
 end
 
 -- ── helpers ───────────────────────────────────────────────────────────────
@@ -1500,6 +1502,9 @@ function M.setup(opts)
     timeout       = { opts.timeout,        "number",  true },
     completion       = { opts.completion,      "boolean", true },
     connections_path = { opts.connections_path, "string",  true },
+    picker           = { opts.picker, function(v)
+      return v == nil or v == "builtin" or v == "telescope" or v == "snacks"
+    end, '"builtin", "telescope", or "snacks"' },
     ai            = { opts.ai,             function(v) return v == nil or type(v) == "table" or v == false end, "table, false, or nil" },
     keymaps       = { opts.keymaps,        "table",   true },
   })
@@ -1508,6 +1513,7 @@ function M.setup(opts)
   OPTS.timeout      = opts.timeout      or 10000
   if opts.completion ~= nil then OPTS.completion = opts.completion end
   OPTS.connections_path = opts.connections_path or nil
+  OPTS.picker = opts.picker or "builtin"
 
   -- Keymap overrides: stored at module level for keymaps.get() to read.
   if opts.keymaps then
