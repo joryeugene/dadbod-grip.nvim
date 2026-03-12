@@ -125,6 +125,50 @@ function M.parse_csv(raw)
   return { columns = columns, rows = rows }
 end
 
+--- Parse TSV output from mysql --batch into rows + columns.
+--- MariaDB does not support --csv; --batch produces tab-separated output
+--- with \N for NULL and backslash escaping for special characters.
+function M.parse_batch(raw)
+  if not raw or raw == "" then
+    return { columns = {}, rows = {} }
+  end
+
+  -- Unescape a single field value from --batch output
+  local function unescape(field)
+    if field == "\\N" then return "" end
+    return (field:gsub("\\(.)", function(ch)
+      if ch == "t" then return "\t" end
+      if ch == "n" then return "\n" end
+      if ch == "\\" then return "\\" end
+      if ch == "0" then return "\0" end
+      return ch
+    end))
+  end
+
+  local all_rows = {}
+  for line in raw:gmatch("[^\r\n]+") do
+    local fields = {}
+    for field in (line .. "\t"):gmatch("([^\t]*)\t") do
+      fields[#fields + 1] = unescape(field)
+    end
+    if #fields > 0 then
+      all_rows[#all_rows + 1] = fields
+    end
+  end
+
+  if #all_rows == 0 then return { columns = {}, rows = {} } end
+
+  local columns = all_rows[1]
+  local rows = {}
+  for ri = 2, #all_rows do
+    local row = all_rows[ri]
+    while #row < #columns do row[#row + 1] = "" end
+    rows[#rows + 1] = row
+  end
+
+  return { columns = columns, rows = rows }
+end
+
 -- ── resolve adapter from URL ──────────────────────────────────────────────
 
 local function resolve(url)

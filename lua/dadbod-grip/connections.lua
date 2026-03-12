@@ -32,8 +32,13 @@ local function grip_dir()
   return root .. "/.grip"
 end
 
+local function configured_connections_path()
+  local opts = require("dadbod-grip").get_opts()
+  return opts.connections_path
+end
+
 local function connections_path()
-  return grip_dir() .. "/connections.json"
+  return configured_connections_path() or (grip_dir() .. "/connections.json")
 end
 
 local function global_connections_path()
@@ -42,7 +47,8 @@ local function global_connections_path()
 end
 
 local function ensure_grip_dir()
-  local dir = grip_dir()
+  local custom = configured_connections_path()
+  local dir = custom and vim.fn.fnamemodify(custom, ":h") or grip_dir()
   if vim.fn.isdirectory(dir) == 0 then
     vim.fn.mkdir(dir, "p")
   end
@@ -219,8 +225,12 @@ local function read_local_connections()
 end
 
 --- Read connections from project-local and global files (read-only paths only).
+--- When connections_path is configured, reads ONLY that file (no global merge).
 --- Do NOT pass this result to write_file_connections — use read_local_connections.
 local function read_file_connections()
+  if configured_connections_path() then
+    return read_local_connections()
+  end
   local result = {}
   for _, c in ipairs(read_local_connections()) do
     table.insert(result, c)

@@ -59,7 +59,7 @@ Quick start: >
 
   PostgreSQL ......... psql
   SQLite ............. sqlite3
-  MySQL/MariaDB ...... mysql (8.0.3+ for --csv, or MariaDB 10.5+)
+  MySQL/MariaDB ...... mysql (auto-detects MariaDB; uses --batch output)
   DuckDB ............. duckdb
 
 ==============================================================================
@@ -98,11 +98,21 @@ packer.nvim: >lua
 setup() is called automatically by the plugin loader with sensible defaults.
 Override if needed: >lua
   require("dadbod-grip").setup({
-    limit         = 100,    -- default row limit for SELECT queries
-    max_col_width = 40,     -- max display width per column
-    timeout       = 10000,  -- query timeout in milliseconds
+    limit            = 100,    -- default row limit for SELECT queries
+    max_col_width    = 40,     -- max display width per column
+    timeout          = 10000,  -- query timeout in milliseconds
+    completion       = true,   -- set false to use blink.cmp/nvim-cmp instead
+    connections_path = nil,    -- absolute path to shared connections.json
   })
 <
+When `completion` is false, grip's built-in TextChangedI popup is disabled.
+Use blink.cmp or nvim-cmp as the completion engine instead. See |grip-install|
+for source configuration examples.
+
+When `connections_path` is set, grip reads and writes connections to that single
+file only (skips the project-local + global merge). Useful for a centralized
+connections file shared across projects.
+
 AI SQL generation (optional): >lua
   require("dadbod-grip").setup({
     ai = {
@@ -342,6 +352,11 @@ All commands are global and available after the plugin loads.
 :GripCreate
   Open an interactive table designer. Prompts for table name and columns,
   previews the CREATE TABLE DDL, and asks for confirmation before executing.
+
+                                                              *:GripToggle*
+:GripToggle
+  Close all grip windows if any are open, or reopen the last workspace
+  (schema sidebar + query pad) if closed.
 
                                                                 *:GripDrop*
 :GripDrop [table]

@@ -21,7 +21,17 @@ local OPTS = {
   limit       = 100,
   max_col_width = 40,
   timeout     = 10000,
+  completion  = true,
+  connections_path = nil,
 }
+
+--- Return a shallow copy of the current options.
+--- Used by query_pad to gate completion setup.
+function M.get_opts()
+  return { limit = OPTS.limit, max_col_width = OPTS.max_col_width,
+           timeout = OPTS.timeout, completion = OPTS.completion,
+           connections_path = OPTS.connections_path }
+end
 
 -- ── helpers ───────────────────────────────────────────────────────────────
 
@@ -1485,15 +1495,19 @@ end
 function M.setup(opts)
   opts = opts or {}
   vim.validate({
-    limit         = { opts.limit,         "number", true },
-    max_col_width = { opts.max_col_width,  "number", true },
-    timeout       = { opts.timeout,        "number", true },
+    limit         = { opts.limit,         "number",  true },
+    max_col_width = { opts.max_col_width,  "number",  true },
+    timeout       = { opts.timeout,        "number",  true },
+    completion       = { opts.completion,      "boolean", true },
+    connections_path = { opts.connections_path, "string",  true },
     ai            = { opts.ai,             function(v) return v == nil or type(v) == "table" or v == false end, "table, false, or nil" },
-    keymaps       = { opts.keymaps,        "table",  true },
+    keymaps       = { opts.keymaps,        "table",   true },
   })
   OPTS.limit        = opts.limit        or 100
   OPTS.max_col_width = opts.max_col_width or 40
   OPTS.timeout      = opts.timeout      or 10000
+  if opts.completion ~= nil then OPTS.completion = opts.completion end
+  OPTS.connections_path = opts.connections_path or nil
 
   -- Keymap overrides: stored at module level for keymaps.get() to read.
   if opts.keymaps then
@@ -2315,6 +2329,39 @@ function M.setup(opts)
   vim.api.nvim_create_user_command("GripHome", function()
     M.open_welcome()
   end, { desc = "Open dadbod-grip welcome screen" })
+
+  -- :GripToggle: close all grip windows if visible, reopen if hidden
+  vim.api.nvim_create_user_command("GripToggle", function()
+    -- Find all windows showing grip:// buffers
+    local grip_wins = {}
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      local buf = vim.api.nvim_win_get_buf(win)
+      local name = vim.api.nvim_buf_get_name(buf)
+      if name:match("^grip://") then
+        grip_wins[#grip_wins + 1] = { win = win, buf = buf }
+      end
+    end
+
+    if #grip_wins > 0 then
+      -- Close: wipe all grip buffers (triggers bufhidden=wipe cleanup)
+      local seen = {}
+      for _, gw in ipairs(grip_wins) do
+        if not seen[gw.buf] and vim.api.nvim_buf_is_valid(gw.buf) then
+          seen[gw.buf] = true
+          pcall(vim.api.nvim_buf_delete, gw.buf, { force = true })
+        end
+      end
+    else
+      -- Open: reconnect to previous connection or show picker
+      local connections = require("dadbod-grip.connections")
+      local cur = connections.current()
+      if cur and cur.url then
+        connections.switch(cur.url, cur.name)
+      else
+        connections.pick()
+      end
+    end
+  end, { desc = "Toggle dadbod-grip windows on/off" })
 
   -- :GripExport: export current result set to a file
   vim.api.nvim_create_user_command("GripExport", function()

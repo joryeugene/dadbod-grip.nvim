@@ -103,21 +103,23 @@ local function ensure_buf(url)
   vim.bo[_pad_bufnr].filetype = "sql"
   vim.api.nvim_buf_set_name(_pad_bufnr, "grip://query")
   vim.b[_pad_bufnr].db = url
-  -- SQL completion: three paths that cooperate.
-  -- 1. omnifunc  → <C-x><C-o> (Vim-standard) and nvim-cmp { name = 'omni' } source
-  -- 2. auto-trigger → TextChangedI fires vim.fn.complete() for non-cmp users
-  -- 3. nvim-cmp source → register_cmp_source() so cmp users get first-class integration
-  vim.bo[_pad_bufnr].omnifunc = "v:lua.require'dadbod-grip.completion'.omnifunc"
-  local completion = require("dadbod-grip.completion")
-  completion.setup_auto_complete(_pad_bufnr, function()
-    return vim.b[_pad_bufnr].db or vim.g.db
-  end)
-  -- Register as nvim-cmp source (no-op when nvim-cmp is not installed).
-  completion.register_cmp_source()
-  -- Pre-warm schema cache so the first keystroke doesn't block on DB I/O.
+  -- SQL completion: gated on config.completion (default true).
+  -- When true, grip owns the popup: omnifunc, TextChangedI auto-trigger,
+  -- nvim-cmp/blink disabled per-buffer. When false, user brings their own
+  -- engine and wires grip as a source (blink provider or cmp source).
+  local grip_opts = require("dadbod-grip").get_opts()
+  if grip_opts.completion then
+    vim.bo[_pad_bufnr].omnifunc = "v:lua.require'dadbod-grip.completion'.omnifunc"
+    local completion = require("dadbod-grip.completion")
+    completion.setup_auto_complete(_pad_bufnr, function()
+      return vim.b[_pad_bufnr].db or vim.g.db
+    end)
+    completion.register_cmp_source()
+  end
+  -- Pre-warm schema cache regardless of completion mode (blink/cmp sources need it too).
   vim.schedule(function()
     local u = (vim.b[_pad_bufnr] and vim.b[_pad_bufnr].db) or vim.g.db
-    if u and u ~= "" then pcall(completion.get_schema, u) end
+    if u and u ~= "" then pcall(require("dadbod-grip.completion").get_schema, u) end
   end)
 
   -- Pre-fill with hint comment
@@ -139,16 +141,17 @@ local function ensure_buf(url)
   })
 
   -- BufEnter: re-register completion keymaps after completion plugins (blink.cmp etc.)
-  -- have had their BufEnter handlers run. vim.schedule defers us to after all BufEnter
-  -- autocmds, so our buffer-local keymaps are always registered last and win.
-  local bufnr_ref = _pad_bufnr
-  vim.api.nvim_create_autocmd("BufEnter", {
-    group  = _ag,
-    buffer = _pad_bufnr,
-    callback = function()
-      vim.schedule(function() setup_completion_keymaps(bufnr_ref) end)
-    end,
-  })
+  -- have had their BufEnter handlers run. Only needed when grip owns the popup.
+  if grip_opts.completion then
+    local bufnr_ref = _pad_bufnr
+    vim.api.nvim_create_autocmd("BufEnter", {
+      group  = _ag,
+      buffer = _pad_bufnr,
+      callback = function()
+        vim.schedule(function() setup_completion_keymaps(bufnr_ref) end)
+      end,
+    })
+  end
 
   return _pad_bufnr
 end
@@ -300,7 +303,9 @@ local function setup_keymaps(bufnr, url)
     if sql then run_sql(cur_url(), sql) end
   end, { desc = "Grip: run query" })
 
-  setup_completion_keymaps(bufnr)
+  if require("dadbod-grip").get_opts().completion then
+    setup_completion_keymaps(bufnr)
+  end
 
   -- Visual qpad_execute: run selection (line-wise: runs all selected lines)
   kmap("qpad_execute", "v", function()

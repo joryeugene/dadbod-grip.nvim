@@ -459,6 +459,7 @@ Note: explain query plan is at `gQ` (Query Doctor).
 | `:GripCreate` | Create a new table interactively |
 | `:GripDiff {table1} {table2}` | Compare two tables by PK (compact/wide, toggle `gv`) |
 | `:GripDrop [table]` | Drop a table with typed confirmation |
+| `:GripToggle` | Close all grip windows, or reopen if closed |
 
 ## Requirements
 
@@ -466,7 +467,7 @@ Note: explain query plan is at `gQ` (Query Doctor).
 - One or more database CLI tools in PATH:
   - **PostgreSQL**: `psql`
   - **SQLite**: `sqlite3`
-  - **MySQL/MariaDB**: `mysql` (8.0.3+ for `--csv`, or MariaDB 10.5+)
+  - **MySQL/MariaDB**: `mysql` (auto-detects MariaDB and uses `--batch` output)
   - **DuckDB**: `duckdb`
 
 ## Install
@@ -508,21 +509,39 @@ The plugin ships a `lazy.lua` spec so all commands work as lazy-load triggers au
 { "<leader>dd", "<cmd>GripStart<cr>", desc = "DB demo" },
 ```
 
-**nvim-cmp integration (optional):**
+**Completion engines:**
 
-dadbod-grip ships built-in SQL completion (tables, columns, aliases, and DuckDB federation) with no extra plugins required. To integrate with nvim-cmp, add the source to your cmp setup:
+dadbod-grip ships built-in SQL completion (tables, columns, aliases, DuckDB federation) with no extra plugins. Completions fire as you type and `<C-Space>` opens the menu manually.
+
+To use **blink.cmp** or **nvim-cmp** instead, disable the built-in popup and register the source:
 
 ```lua
+-- blink.cmp
+require("dadbod-grip").setup({ completion = false })
+
+require("blink.cmp").setup({
+  sources = {
+    providers = {
+      dadbod_grip = { name = "Grip SQL", module = "dadbod-grip.completion.blink" },
+    },
+  },
+})
+```
+
+```lua
+-- nvim-cmp
+require("dadbod-grip").setup({ completion = false })
+
 require("cmp").setup({
   sources = {
-    { name = "dadbod_grip" },  -- dadbod-grip built-in SQL completion
+    { name = "dadbod_grip" },
     { name = "nvim_lsp" },
     { name = "buffer" },
   },
 })
 ```
 
-Without nvim-cmp, completions fire automatically as you type (TextChangedI) and `<C-Space>` opens the menu manually.
+**Copilot** ghost text works alongside either engine (filetype is `sql`).
 
 ### packer.nvim
 
@@ -545,11 +564,15 @@ Plug 'joryeugene/dadbod-grip.nvim', { 'tag': 'v*' }
 
 ```lua
 require("dadbod-grip").setup({
-  limit         = 100,   -- default row limit for SELECT queries
-  max_col_width = 40,    -- max display width per column
-  timeout       = 30000, -- query timeout in ms (default: 10000; raise for slow tunnels)
+  limit            = 100,   -- default row limit for SELECT queries
+  max_col_width    = 40,    -- max display width per column
+  timeout          = 30000, -- query timeout in ms (default: 10000; raise for slow tunnels)
+  completion       = true,  -- set false to use blink.cmp/nvim-cmp instead
+  connections_path = nil,   -- absolute path to a shared connections.json file
 })
 ```
+
+Setting `connections_path` overrides the default project-local + global merge behavior. When set, grip reads and writes connections to that single file only.
 
 AI SQL generation (optional):
 

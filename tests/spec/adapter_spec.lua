@@ -4,6 +4,10 @@ local sqlite = require("dadbod-grip.adapters.sqlite")
 local duckdb = require("dadbod-grip.adapters.duckdb")
 local pg = require("dadbod-grip.adapters.postgresql")
 
+-- Pre-seed MariaDB cache to prevent vim.fn.system calls during tests.
+-- Individual MariaDB-specific tests override this explicitly.
+mysql._set_mariadb(false)
+
 local pass = 0
 local fail = 0
 
@@ -541,6 +545,83 @@ test("mysql execute: --init-command includes NO_BACKSLASH_ESCAPES", function()
     end
     assert(init_cmd ~= nil, "must have --init-command arg")
     contains(init_cmd, "NO_BACKSLASH_ESCAPES", "execute sql_mode must include NO_BACKSLASH_ESCAPES")
+  end)
+end)
+
+-- ── MariaDB detection ────────────────────────────────────────────────────────
+
+test("detect_mariadb: MariaDB version string returns true", function()
+  mysql._reset_mariadb_cache()
+  local orig_exe = vim.fn.executable
+  local orig_sys = vim.fn.system
+  vim.fn.executable = function() return 1 end
+  vim.fn.system = function() return "mysql  Ver 15.1 Distrib 10.11.6-MariaDB, for debian-linux-gnu (x86_64)" end
+  local result = mysql._detect_mariadb()
+  vim.fn.executable = orig_exe
+  vim.fn.system = orig_sys
+  mysql._set_mariadb(false)
+  eq(result, true, "should detect MariaDB")
+end)
+
+test("detect_mariadb: MySQL version string returns false", function()
+  mysql._reset_mariadb_cache()
+  local orig_exe = vim.fn.executable
+  local orig_sys = vim.fn.system
+  vim.fn.executable = function() return 1 end
+  vim.fn.system = function() return "mysql  Ver 8.0.33 for Linux on x86_64 (MySQL Community Server)" end
+  local result = mysql._detect_mariadb()
+  vim.fn.executable = orig_exe
+  vim.fn.system = orig_sys
+  mysql._set_mariadb(false)
+  eq(result, false, "should not detect MariaDB")
+end)
+
+test("detect_mariadb: mysql not installed returns false", function()
+  mysql._reset_mariadb_cache()
+  local orig_exe = vim.fn.executable
+  vim.fn.executable = function() return 0 end
+  local result = mysql._detect_mariadb()
+  vim.fn.executable = orig_exe
+  mysql._set_mariadb(false)
+  eq(result, false, "no mysql binary")
+end)
+
+test("detect_mariadb: caches result after first call", function()
+  mysql._reset_mariadb_cache()
+  local call_count = 0
+  local orig_exe = vim.fn.executable
+  local orig_sys = vim.fn.system
+  vim.fn.executable = function() return 1 end
+  vim.fn.system = function() call_count = call_count + 1; return "MariaDB" end
+  mysql._detect_mariadb()
+  mysql._detect_mariadb()
+  mysql._detect_mariadb()
+  vim.fn.executable = orig_exe
+  vim.fn.system = orig_sys
+  mysql._set_mariadb(false)
+  eq(call_count, 1, "system called once")
+end)
+
+-- ── MariaDB query routing ────────────────────────────────────────────────────
+
+test("mysql query: MariaDB uses --batch flag", function()
+  mysql._set_mariadb(true)
+  with_executable(function()
+    local args = capture_system_args("id\n1\n", function()
+      mysql.query("SELECT 1", "mysql://root@localhost/test")
+    end)
+    has_arg(args, "--batch", "MariaDB should use --batch")
+  end)
+  mysql._set_mariadb(false)
+end)
+
+test("mysql query: MySQL uses --csv flag", function()
+  mysql._set_mariadb(false)
+  with_executable(function()
+    local args = capture_system_args("id\n1\n", function()
+      mysql.query("SELECT 1", "mysql://root@localhost/test")
+    end)
+    has_arg(args, "--csv", "MySQL should use --csv")
   end)
 end)
 

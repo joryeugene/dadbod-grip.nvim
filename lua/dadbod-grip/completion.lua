@@ -458,14 +458,14 @@ end
 --- url_fn() returns the current connection URL (re-read live on each keystroke).
 --- Kept separate from omnifunc so nvim-cmp users who add { name = 'omni' } also work.
 function M.setup_auto_complete(bufnr, url_fn)
-  -- Disable nvim-cmp for this specific buffer so it doesn't conflict with the
-  -- native popup. BufEnter fires before insert mode, so the disable is in place
-  -- before TextChangedI. No-op when nvim-cmp is not installed.
+  -- Disable nvim-cmp and blink.cmp for this buffer so they don't conflict
+  -- with grip's native popup. No-op when neither is installed.
   vim.api.nvim_create_autocmd("BufEnter", {
     group  = _ag,
     buffer = bufnr,
     callback = function()
       pcall(function() require("cmp").setup.buffer({ enabled = false }) end)
+      vim.b[bufnr].completion = false
     end,
   })
 

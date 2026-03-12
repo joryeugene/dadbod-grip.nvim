@@ -44,9 +44,37 @@ local function parse_url(url)
   }
 end
 
+-- MariaDB detection: cached at module level after first real detection.
+-- nil = not yet detected; true/false = cached result.
+local _is_mariadb = nil
+
+--- Detect whether the mysql binary is actually MariaDB.
+--- Cached after first call. Safe to call multiple times.
+local function detect_mariadb()
+  if _is_mariadb ~= nil then return _is_mariadb end
+  if vim.fn.executable("mysql") == 0 then
+    _is_mariadb = false
+    return false
+  end
+  -- Synchronous shell call; uses string form to avoid E475 on non-executable.
+  local stdout = vim.fn.system("mysql --version 2>/dev/null")
+  _is_mariadb = type(stdout) == "string" and stdout:find("MariaDB") ~= nil
+  return _is_mariadb
+end
+
+--- Parse query output using the correct parser for the detected engine.
+local function parse_output(stdout)
+  if detect_mariadb() then
+    return db_util.parse_batch(stdout)
+  end
+  return db_util.parse_csv(stdout)
+end
+
 --- Build mysql CLI args and run a query.
+--- MariaDB gets --batch (no --csv support); MySQL gets --csv.
 local function mysql_query(parsed, sql_str, timeout_ms)
-  local args = { "mysql", "--csv", "--init-command=SET sql_mode='ANSI_QUOTES,NO_BACKSLASH_ESCAPES'" }
+  local output_flag = detect_mariadb() and "--batch" or "--csv"
+  local args = { "mysql", output_flag, "--init-command=SET sql_mode='ANSI_QUOTES,NO_BACKSLASH_ESCAPES'" }
   if parsed.host then
     args[#args + 1] = "-h"
     args[#args + 1] = parsed.host
@@ -117,7 +145,7 @@ function M.query(sql_str, url)
     return nil, msg
   end
 
-  local result, parse_err = db_util.parse_csv(stdout)
+  local result, parse_err = parse_output(stdout)
   if not result then return nil, parse_err end
 
   return {
@@ -151,7 +179,7 @@ function M.get_primary_keys(table_name, url)
     return {}, stderr ~= "" and stderr or "Failed to query primary keys"
   end
 
-  local result = db_util.parse_csv(stdout)
+  local result = parse_output(stdout)
   if not result then return {} end
 
   local pks = {}
@@ -200,7 +228,7 @@ function M.get_column_info(table_name, url)
     return nil, stderr ~= "" and stderr or "Failed to query column info"
   end
 
-  local result = db_util.parse_csv(stdout)
+  local result = parse_output(stdout)
   if not result then return nil, "Failed to parse column info" end
 
   local cols = {}
@@ -249,7 +277,7 @@ function M.get_foreign_keys(table_name, url)
     return {}, stderr ~= "" and stderr or "Failed to query foreign keys"
   end
 
-  local result = db_util.parse_csv(stdout)
+  local result = parse_output(stdout)
   if not result then return {} end
 
   local fks = {}
@@ -276,7 +304,7 @@ function M.explain(sql_str, url)
     end
   end
 
-  local result = db_util.parse_csv(stdout)
+  local result = parse_output(stdout)
   if not result then return nil, "Failed to parse EXPLAIN output" end
 
   local lines = {}
@@ -309,7 +337,7 @@ function M.list_tables(url)
   if code ~= 0 then
     return nil, stderr ~= "" and stderr or "Failed to list tables"
   end
-  local result_csv = db_util.parse_csv(stdout)
+  local result_csv = parse_output(stdout)
   if not result_csv then return nil, "Failed to parse table list" end
   local result = {}
   for _, row in ipairs(result_csv.rows) do
@@ -348,7 +376,7 @@ function M.get_indexes(table_name, url)
     return {}, stderr ~= "" and stderr or "Failed to query indexes"
   end
 
-  local result = db_util.parse_csv(stdout)
+  local result = parse_output(stdout)
   if not result then return {} end
 
   local indexes = {}
@@ -407,7 +435,7 @@ function M.get_constraints(table_name, url)
     return {}, stderr ~= "" and stderr or "Failed to query constraints"
   end
 
-  local result = db_util.parse_csv(stdout)
+  local result = parse_output(stdout)
   if not result then return {} end
 
   local constraints = {}
@@ -444,7 +472,7 @@ function M.get_table_stats(table_name, url)
     return nil, stderr ~= "" and stderr or "Failed to query table stats"
   end
 
-  local result = db_util.parse_csv(stdout)
+  local result = parse_output(stdout)
   if not result or #result.rows == 0 then return nil, "No stats found" end
 
   return {
@@ -488,5 +516,8 @@ end
 
 -- Exposed for testing
 M._parse_url = parse_url
+M._detect_mariadb = detect_mariadb
+function M._reset_mariadb_cache() _is_mariadb = nil end
+function M._set_mariadb(val) _is_mariadb = val end
 
 return M
