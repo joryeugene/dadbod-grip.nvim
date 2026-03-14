@@ -8,6 +8,7 @@
 :GripDrop	dadbod-grip.txt	/*:GripDrop*
 :GripExplain	dadbod-grip.txt	/*:GripExplain*
 :GripExport	dadbod-grip.txt	/*:GripExport*
+:GripFill	dadbod-grip.txt	/*:GripFill*
 :GripHome	dadbod-grip.txt	/*:GripHome*
 :GripLoad	dadbod-grip.txt	/*:GripLoad*
 :GripOpen	dadbod-grip.txt	/*:GripOpen*
@@ -19,6 +20,7 @@
 :GripSchema	dadbod-grip.txt	/*:GripSchema*
 :GripStart	dadbod-grip.txt	/*:GripStart*
 :GripTables	dadbod-grip.txt	/*:GripTables*
+:GripToggle	dadbod-grip.txt	/*:GripToggle*
 dadbod-grip.txt	dadbod-grip.txt	/*dadbod-grip.txt*
 grip-adapters	dadbod-grip.txt	/*grip-adapters*
 grip-advanced	dadbod-grip.txt	/*grip-advanced*
@@ -26,6 +28,7 @@ grip-ai	dadbod-grip.txt	/*grip-ai*
 grip-analysis	dadbod-grip.txt	/*grip-analysis*
 grip-api	dadbod-grip.txt	/*grip-api*
 grip-batch-editing	dadbod-grip.txt	/*grip-batch-editing*
+grip-cell-editor	dadbod-grip.txt	/*grip-cell-editor*
 grip-column-visibility	dadbod-grip.txt	/*grip-column-visibility*
 grip-commands	dadbod-grip.txt	/*grip-commands*
 grip-config	dadbod-grip.txt	/*grip-config*
@@ -48,6 +51,7 @@ grip-introduction	dadbod-grip.txt	/*grip-introduction*
 grip-keybindings	dadbod-grip.txt	/*grip-keybindings*
 grip-keymaps-cfg	dadbod-grip.txt	/*grip-keymaps-cfg*
 grip-navigation	dadbod-grip.txt	/*grip-navigation*
+grip-picker	dadbod-grip.txt	/*grip-picker*
 grip-profiling	dadbod-grip.txt	/*grip-profiling*
 grip-query-pad	dadbod-grip.txt	/*grip-query-pad*
 grip-requirements	dadbod-grip.txt	/*grip-requirements*
@@ -57,6 +61,7 @@ grip-schema	dadbod-grip.txt	/*grip-schema*
 grip-sort-filter	dadbod-grip.txt	/*grip-sort-filter*
 grip-sort-filter-page	dadbod-grip.txt	/*grip-sort-filter-page*
 grip-tab-views	dadbod-grip.txt	/*grip-tab-views*
+grip-visual-mode	dadbod-grip.txt	/*grip-visual-mode*
 grip-workflow	dadbod-grip.txt	/*grip-workflow*
 grip-yanking	dadbod-grip.txt	/*grip-yanking*
 grip.open()	dadbod-grip.txt	/*grip.open()*

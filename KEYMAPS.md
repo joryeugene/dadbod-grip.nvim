@@ -87,7 +87,7 @@ The editor starts in INSERT mode. Press `<Esc>` to drop into NORMAL for Vim moti
 | `S` | Add/toggle secondary sort (stacked: ▲1 ▼2 ▲3) |
 | `f` | Quick filter by cell value (= current value) |
 | `gn` | Filter: column IS NULL |
-| `gF` | **[NEW v2.9]** Filter builder (=, !=, >, <, LIKE, IN, BETWEEN, NULL, NOT NULL) |
+| `gF` | Filter builder (=, !=, >, <, LIKE, IN, BETWEEN, NULL, NOT NULL) |
 | `<C-f>` | Freeform WHERE clause filter |
 | `F` | Clear all active filters |
 | `gp` | Load saved filter preset |
@@ -125,7 +125,7 @@ The editor starts in INSERT mode. Press `<Esc>` to drop into NORMAL for Vim moti
 | `gx` | Open URL in current cell (http/https/ftp) |
 | `gD` | Diff against another table |
 | `gE` | Export to clipboard (CSV, TSV, JSON, SQL, Markdown, Grip Table) |
-| `gX` | **[NEW v2.9]** Export to file (csv/json/sql) |
+| `gX` | Export to file (csv/json/sql) |
 | `y` | Yank cell value to clipboard |
 | `Y` | Yank row as CSV |
 | `gY` | Yank entire table as CSV |
@@ -221,12 +221,12 @@ Note: explain query plan is accessible via `gQ` (removed from tab system).
 | `4` | ER diagram float |
 | `5-9` | Open table under cursor in that view (5=Stats, 6=Columns, 7=FK, 8=Indexes, 9=Constraints) |
 
-## Free `g` Keymaps (as of v3.1)
+## Free `g` Keymaps (as of v1.5)
 
 Available for future features. Check this list before assigning a new `g` keymap:
 
 **Uppercase (free):** `gB`, `gJ`, `gK`, `gL`, `gM`, `gU`, `gZ`
-**Lowercase (free in grid):** `gm`, `gr`, `gw`
+**Lowercase (free in grid):** `gm`, `gr`
 **Lowercase (free in sidebar):** `gm`, `gr`
 
 ## Command Palette

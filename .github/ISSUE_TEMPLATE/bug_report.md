@@ -25,7 +25,7 @@ If applicable, paste `:messages` output or screenshots.
 **Environment:**
 - OS: [e.g. macOS 14, Ubuntu 24.04]
 - Neovim version: [output of `nvim --version`]
-- Plugin version: [e.g. v1.3.0, or commit hash]
+- Plugin version: [e.g. v1.5.1, or commit hash]
 - Database adapter: [pg/sqlite/duckdb/mysql]
 - Plugin manager: [lazy.nvim/packer/etc.]
 
