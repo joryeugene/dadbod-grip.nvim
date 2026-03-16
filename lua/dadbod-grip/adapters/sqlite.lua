@@ -147,6 +147,40 @@ function M.get_foreign_keys(table_name, url)
   return fks, nil
 end
 
+--- Fetch all table columns in a single query (O(1) CLI spawns).
+--- Returns { [table_name] = [{column_name, data_type, is_nullable}] } or nil.
+function M.get_schema_batch(url)
+  local db_path = extract_path(url)
+  if not db_path then return nil end
+
+  local sql_str = [[
+    SELECT m.name AS table_name,
+           p.name AS column_name,
+           p.type AS data_type,
+           CASE WHEN p."notnull" = 1 THEN 'NO' ELSE 'YES' END AS is_nullable
+    FROM sqlite_master m, pragma_table_info(m.name) p
+    WHERE m.type IN ('table', 'view') AND m.name NOT LIKE 'sqlite_%'
+    ORDER BY m.name, p.cid
+  ]]
+
+  local stdout, stderr, code = sqlite3(db_path, sql_str)
+  if code ~= 0 then return nil end
+
+  local parsed = db_util.parse_csv(stdout)
+  if not parsed then return nil end
+
+  local tables = {}
+  for _, row in ipairs(parsed.rows) do
+    local tname     = row[1] or ""
+    local col_name  = row[2] or ""
+    local data_type = row[3] or ""
+    local nullable  = row[4] or ""
+    tables[tname] = tables[tname] or {}
+    table.insert(tables[tname], { column_name = col_name, data_type = data_type, is_nullable = nullable })
+  end
+  return tables
+end
+
 function M.explain(sql_str, url)
   local db_path = extract_path(url)
   if not db_path then return nil, "Invalid SQLite URL: " .. url end

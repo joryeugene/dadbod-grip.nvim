@@ -168,6 +168,41 @@ function M.get_foreign_keys(table_name, url)
   return fks, nil
 end
 
+--- Fetch all table columns in a single query (O(1) CLI spawns).
+--- Returns { [table_name] = [{column_name, data_type, is_nullable}] } or nil.
+--- public-schema tables use bare names ("users"); other schemas use "schema.table".
+function M.get_schema_batch(url)
+  local sql_str = [[
+    SELECT
+      table_schema,
+      table_name,
+      column_name,
+      data_type || COALESCE('(' || character_maximum_length || ')', '') AS data_type,
+      is_nullable
+    FROM information_schema.columns
+    WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY table_schema, table_name, ordinal_position
+  ]]
+  local stdout, stderr, code = psql(url, sql_str)
+  if code ~= 0 then return nil end
+
+  local parsed = db_util.parse_csv(stdout)
+  if not parsed then return nil end
+
+  local tables = {}
+  for _, row in ipairs(parsed.rows) do
+    local schema_name = row[1] or "public"
+    local tname       = row[2] or ""
+    local col_name    = row[3] or ""
+    local data_type   = row[4] or ""
+    local nullable    = row[5] or ""
+    local full_name = (schema_name == "public") and tname or (schema_name .. "." .. tname)
+    tables[full_name] = tables[full_name] or {}
+    table.insert(tables[full_name], { column_name = col_name, data_type = data_type, is_nullable = nullable })
+  end
+  return tables
+end
+
 function M.explain(sql_str, url)
   local explain_sql = "EXPLAIN (FORMAT TEXT, ANALYZE) " .. sql_str
   local stdout, stderr, code = psql(url, explain_sql)

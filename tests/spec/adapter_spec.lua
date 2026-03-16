@@ -625,6 +625,229 @@ test("mysql query: MySQL uses --csv flag", function()
   end)
 end)
 
+-- ── PostgreSQL get_schema_batch ──────────────────────────────────────────────
+-- get_schema_batch returns all table columns in a single query instead of N+1.
+-- Contract: { [table_name] = [{column_name, data_type, is_nullable}] } or nil.
+
+test("pg get_schema_batch: returns columns keyed by table name", function()
+  -- CSV output: psql --csv returns header + rows for all tables in one query
+  local csv_stdout = table.concat({
+    "table_schema,table_name,column_name,data_type,is_nullable",
+    "public,users,id,integer,NO",
+    "public,users,email,text,NO",
+    "public,users,name,text,YES",
+    "public,orders,id,integer,NO",
+    "public,orders,user_id,integer,NO",
+    "public,orders,total,numeric,YES",
+  }, "\n") .. "\n"
+
+  local result
+  with_system_mock(csv_stdout, "", 0, function()
+    result = pg.get_schema_batch("postgresql://localhost/test")
+  end)
+
+  assert(result ~= nil, "result must not be nil")
+  assert(result["users"] ~= nil, "must have users key")
+  assert(result["orders"] ~= nil, "must have orders key")
+  eq(#result["users"], 3, "users has 3 columns")
+  eq(#result["orders"], 3, "orders has 3 columns")
+  eq(result["users"][1].column_name, "id", "users first col is id")
+  eq(result["users"][2].column_name, "email", "users second col is email")
+  eq(result["orders"][3].data_type, "numeric", "orders third col type is numeric")
+end)
+
+test("pg get_schema_batch: non-public schema uses schema.table key", function()
+  local csv_stdout = table.concat({
+    "table_schema,table_name,column_name,data_type,is_nullable",
+    "analytics,events,id,bigint,NO",
+    "analytics,events,ts,timestamp,NO",
+  }, "\n") .. "\n"
+
+  local result
+  with_system_mock(csv_stdout, "", 0, function()
+    result = pg.get_schema_batch("postgresql://localhost/test")
+  end)
+
+  assert(result ~= nil, "result must not be nil")
+  assert(result["analytics.events"] ~= nil, "must have analytics.events key")
+  eq(#result["analytics.events"], 2, "analytics.events has 2 columns")
+end)
+
+test("pg get_schema_batch: mixed schemas", function()
+  local csv_stdout = table.concat({
+    "table_schema,table_name,column_name,data_type,is_nullable",
+    "public,users,id,integer,NO",
+    "analytics,events,id,bigint,NO",
+  }, "\n") .. "\n"
+
+  local result
+  with_system_mock(csv_stdout, "", 0, function()
+    result = pg.get_schema_batch("postgresql://localhost/test")
+  end)
+
+  assert(result ~= nil, "result must not be nil")
+  assert(result["users"] ~= nil, "public.users -> users")
+  assert(result["analytics.events"] ~= nil, "analytics.events keeps prefix")
+end)
+
+test("pg get_schema_batch: psql failure returns nil", function()
+  local result
+  with_system_mock("", "connection refused", 1, function()
+    result = pg.get_schema_batch("postgresql://localhost/test")
+  end)
+  eq(result, nil, "should return nil on failure")
+end)
+
+test("pg get_schema_batch: single subprocess call", function()
+  local call_count = 0
+  local orig = vim.system
+  vim.system = function(args, opts, cb)
+    call_count = call_count + 1
+    local csv = "table_schema,table_name,column_name,data_type,is_nullable\npublic,t1,c1,int,NO\n"
+    local r = { stdout = csv, stderr = "", code = 0 }
+    if cb then cb(r) else return { wait = function() return r end } end
+  end
+  pg.get_schema_batch("postgresql://localhost/test")
+  vim.system = orig
+  eq(call_count, 1, "exactly one subprocess call for batch")
+end)
+
+-- ── MySQL get_schema_batch ──────────────────────────────────────────────────
+
+test("mysql get_schema_batch: returns columns keyed by table name", function()
+  mysql._set_mariadb(false)
+  -- MySQL --csv output format
+  local csv_stdout = table.concat({
+    "table_name,column_name,data_type,is_nullable",
+    "customers,cust_id,int,NO",
+    "customers,region,varchar(255),YES",
+    "products,sku,varchar(50),NO",
+    '"products","price","decimal(10,2)","YES"',
+  }, "\n") .. "\n"
+
+  local result
+  with_executable(function()
+    with_system_mock(csv_stdout, "", 0, function()
+      result = mysql.get_schema_batch("mysql://root:pass@localhost/testdb")
+    end)
+  end)
+
+  assert(result ~= nil, "result must not be nil")
+  assert(result["customers"] ~= nil, "must have customers key")
+  assert(result["products"] ~= nil, "must have products key")
+  eq(#result["customers"], 2, "customers has 2 columns")
+  eq(#result["products"], 2, "products has 2 columns")
+  eq(result["customers"][1].column_name, "cust_id", "first col name")
+  eq(result["products"][2].data_type, "decimal(10,2)", "price data type")
+end)
+
+test("mysql get_schema_batch: mysql failure returns nil", function()
+  mysql._set_mariadb(false)
+  local result
+  with_executable(function()
+    with_system_mock("", "access denied", 1, function()
+      result = mysql.get_schema_batch("mysql://root:pass@localhost/testdb")
+    end)
+  end)
+  eq(result, nil, "should return nil on failure")
+end)
+
+test("mysql get_schema_batch: single subprocess call", function()
+  mysql._set_mariadb(false)
+  local call_count = 0
+  local orig = vim.system
+  local orig_exe = vim.fn.executable
+  vim.fn.executable = function() return 1 end
+  vim.system = function(args, opts, cb)
+    call_count = call_count + 1
+    local csv = "table_name,column_name,data_type,is_nullable\nt1,c1,int,NO\n"
+    local r = { stdout = csv, stderr = "", code = 0 }
+    if cb then cb(r) else return { wait = function() return r end } end
+  end
+  mysql.get_schema_batch("mysql://root:pass@localhost/testdb")
+  vim.system = orig
+  vim.fn.executable = orig_exe
+  eq(call_count, 1, "exactly one subprocess call for batch")
+end)
+
+-- ── SQLite get_schema_batch ──────────────────────────────────────────────────
+
+test("sqlite get_schema_batch: returns columns keyed by table name", function()
+  local csv_stdout = table.concat({
+    "table_name,column_name,data_type,is_nullable",
+    "orders,id,INTEGER,YES",
+    "orders,total,REAL,YES",
+    "users,id,INTEGER,YES",
+    "users,name,TEXT,NO",
+    "users,email,TEXT,YES",
+  }, "\n") .. "\n"
+
+  local result
+  with_system_mock(csv_stdout, "", 0, function()
+    result = sqlite.get_schema_batch("sqlite:test.db")
+  end)
+
+  assert(result ~= nil, "result must not be nil")
+  assert(result["users"] ~= nil, "must have users key")
+  assert(result["orders"] ~= nil, "must have orders key")
+  eq(#result["users"], 3, "users has 3 columns")
+  eq(#result["orders"], 2, "orders has 2 columns")
+  eq(result["users"][2].column_name, "name", "users second col is name")
+  eq(result["users"][2].is_nullable, "NO", "name is NOT NULL")
+end)
+
+test("sqlite get_schema_batch: failure returns nil", function()
+  local result
+  with_system_mock("", "unable to open database", 1, function()
+    result = sqlite.get_schema_batch("sqlite:nonexistent.db")
+  end)
+  eq(result, nil, "should return nil on failure")
+end)
+
+-- ── Completion: get_schema prefers batch over per-table ─────────────────────
+-- When get_schema_batch returns data, list_tables + get_column_info must NOT be called.
+
+test("completion get_schema: uses batch when available, skips per-table", function()
+  local compl = require("dadbod-grip.completion")
+  local db_mod = require("dadbod-grip.db")
+
+  local batch_called = false
+  local list_called = false
+  local col_called = false
+
+  local orig_batch = db_mod.get_schema_batch
+  local orig_list = db_mod.list_tables
+  local orig_cols = db_mod.get_column_info
+
+  db_mod.get_schema_batch = function(url)
+    batch_called = true
+    return {
+      ["users"] = {
+        { column_name = "id", data_type = "integer", is_nullable = "NO" },
+      },
+    }
+  end
+  db_mod.list_tables = function(url)
+    list_called = true
+    return { { name = "users" } }, nil
+  end
+  db_mod.get_column_info = function(tn, url)
+    col_called = true
+    return {}, nil
+  end
+
+  compl.invalidate("postgresql://localhost/batch_pref_test")
+  compl.get_schema("postgresql://localhost/batch_pref_test")
+
+  db_mod.get_schema_batch = orig_batch
+  db_mod.list_tables = orig_list
+  db_mod.get_column_info = orig_cols
+
+  assert(batch_called, "get_schema_batch must be called")
+  assert(not list_called, "list_tables must NOT be called when batch succeeds")
+  assert(not col_called, "get_column_info must NOT be called when batch succeeds")
+end)
+
 -- ── summary ──────────────────────────────────────────────────────────────────
 
 print(string.format("\nadapter_spec: %d passed, %d failed", pass, fail))

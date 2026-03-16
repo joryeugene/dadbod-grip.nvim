@@ -291,6 +291,50 @@ function M.get_foreign_keys(table_name, url)
   return fks, nil
 end
 
+--- Fetch all table columns in a single query (O(1) CLI spawns).
+--- Returns { [table_name] = [{column_name, data_type, is_nullable}] } or nil.
+function M.get_schema_batch(url)
+  local parsed = parse_url(url)
+  if not parsed then return nil end
+
+  local sql_str = [[
+    SELECT
+      c.TABLE_NAME AS table_name,
+      c.COLUMN_NAME AS column_name,
+      CONCAT(c.DATA_TYPE,
+             CASE WHEN c.CHARACTER_MAXIMUM_LENGTH IS NOT NULL
+                  THEN CONCAT('(', c.CHARACTER_MAXIMUM_LENGTH, ')')
+                  WHEN c.NUMERIC_PRECISION IS NOT NULL
+                       AND c.DATA_TYPE NOT IN ('int','bigint','smallint','tinyint','mediumint')
+                  THEN CONCAT('(', c.NUMERIC_PRECISION,
+                              CASE WHEN c.NUMERIC_SCALE > 0
+                                   THEN CONCAT(',', c.NUMERIC_SCALE) ELSE '' END, ')')
+                  ELSE ''
+             END) AS data_type,
+      c.IS_NULLABLE AS is_nullable
+    FROM information_schema.COLUMNS c
+    WHERE c.TABLE_SCHEMA = DATABASE()
+    ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION
+  ]]
+
+  local stdout, stderr, code = mysql_query(parsed, sql_str)
+  if code ~= 0 then return nil end
+
+  local result = parse_output(stdout)
+  if not result then return nil end
+
+  local tables = {}
+  for _, row in ipairs(result.rows) do
+    local tname     = row[1] or ""
+    local col_name  = row[2] or ""
+    local data_type = row[3] or ""
+    local nullable  = row[4] or ""
+    tables[tname] = tables[tname] or {}
+    table.insert(tables[tname], { column_name = col_name, data_type = data_type, is_nullable = nullable })
+  end
+  return tables
+end
+
 function M.explain(sql_str, url)
   local parsed = parse_url(url)
   if not parsed then return nil, "Invalid MySQL URL: " .. url end
