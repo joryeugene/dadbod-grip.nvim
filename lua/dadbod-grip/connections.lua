@@ -12,7 +12,7 @@ local function health_char(url)
   local s = _health[url] or "unknown"
   if s == "ok"   then return "*" end
   if s == "fail" then return "x" end
-  return "o"
+  return " "
 end
 
 --- Find project root by walking up from cwd looking for .git or .grip.
@@ -338,6 +338,17 @@ function M.list()
       table.insert(gdata, gentry)
     end
     vim.fn.writefile({ vim.fn.json_encode(gdata) }, global_connections_path())
+  end
+
+  -- Mark any connection whose URL is in the global file as source = "global".
+  -- When a URL exists in both local and global files, the local entry wins the
+  -- dedup above (local is read first), so its source stays "file". This pass
+  -- corrects that: if a URL is in global, it gets the [g] badge regardless of
+  -- which file was deduped first.
+  for _, c in ipairs(all) do
+    if global_seen[c.url] then
+      c.source = "global"
+    end
   end
 
   -- $DATABASE_URL
@@ -700,19 +711,54 @@ function M.pick(opts)
   local new_sentinel  = { name = "+ New connection...",          url = "", _new  = true }
   local temp_sentinel = { name = "~ Connect once (no save)...", url = "", _temp = true }
 
-  -- Build the full item list (connections, local files section, sentinels).
+  -- Build the full item list with scope sections.
+  -- When at least one global connection exists and connections_path is not set,
+  -- connections are grouped under "global" and "project" section headers so the
+  -- user can immediately see which connections are shared across projects.
   -- Called at open time and from on_delete to refresh after a deletion.
   local function build_picker_items()
     local fresh = M.list()
-    table.sort(fresh, function(a, b)
-      local af, bf = is_file_backed(a), is_file_backed(b)
-      if af ~= bf then return af end
-      if af and bf then return (a.last_used or 0) > (b.last_used or 0) end
-      return false
-    end)
-    local fresh_files = scan_local_files()
+    local use_sections = not configured_connections_path()
+
+    local global_conns, project_conns, other_conns = {}, {}, {}
+    for _, c in ipairs(fresh) do
+      if c._builtin_id or c._is_demo then
+        table.insert(other_conns, c)
+      elseif c.source == "global" then
+        table.insert(global_conns, c)
+      elseif c.source == "file" then
+        table.insert(project_conns, c)
+      else
+        table.insert(other_conns, c)
+      end
+    end
+
+    local function sort_mru(t)
+      table.sort(t, function(a, b) return (a.last_used or 0) > (b.last_used or 0) end)
+    end
+    sort_mru(global_conns)
+    sort_mru(project_conns)
+
     local out = {}
-    for _, c in ipairs(fresh) do table.insert(out, c) end
+    local show_headers = use_sections and #global_conns > 0
+
+    if show_headers then
+      table.insert(out, { name = "global", url = "", _section_header = true })
+      for _, c in ipairs(global_conns) do table.insert(out, c) end
+      table.insert(out, { name = "project", url = "", _section_header = true })
+      for _, c in ipairs(project_conns) do table.insert(out, c) end
+    else
+      -- Flat list: file-backed MRU first, then others
+      local flat = {}
+      for _, c in ipairs(global_conns)  do table.insert(flat, c) end
+      for _, c in ipairs(project_conns) do table.insert(flat, c) end
+      sort_mru(flat)
+      for _, c in ipairs(flat) do table.insert(out, c) end
+    end
+
+    for _, c in ipairs(other_conns) do table.insert(out, c) end
+
+    local fresh_files = scan_local_files()
     if #fresh_files > 0 then
       table.insert(out, { name = "Local Files (cwd)", url = "", _section_header = true })
       for _, f in ipairs(fresh_files) do table.insert(out, f) end
@@ -899,6 +945,40 @@ function M.pick(opts)
             local ok = require("dadbod-grip.db").ping(c.url)
             M.set_health(c.url, ok and "ok" or "fail")
           end
+        end,
+      },
+      {
+        -- G: promote a project-local connection to the global file (~/.grip/connections.json)
+        -- so it appears in every project's picker without re-adding it each time.
+        key   = "G",
+        label = "G:global",
+        when  = function(c)
+          -- No global concept when connections_path override is active (single-file mode)
+          if configured_connections_path() then return false end
+          return not (c._new or c._temp or c._section_header or c._local_file
+                      or c._builtin_id or c._is_demo)
+              and c.source == "file"
+        end,
+        fn    = function(c)
+          if c._new or c._temp or c._section_header or c._local_file then return end
+          ensure_global_grip_dir()
+          local global_path  = global_connections_path()
+          local global_conns = read_json_connections(global_path, "global")
+          for _, gc in ipairs(global_conns) do
+            if gc.url == c.url then
+              vim.notify("'" .. c.name .. "' is already in global connections", vim.log.levels.INFO)
+              return
+            end
+          end
+          table.insert(global_conns, { name = c.name, url = c.url })
+          local gdata = {}
+          for _, gc in ipairs(global_conns) do
+            local entry = { name = gc.name, url = gc.url }
+            if gc.type then entry.type = gc.type end
+            table.insert(gdata, entry)
+          end
+          vim.fn.writefile({ vim.fn.json_encode(gdata) }, global_path)
+          vim.notify("'" .. c.name .. "' saved to ~/.grip/connections.json", vim.log.levels.INFO)
         end,
       },
       {

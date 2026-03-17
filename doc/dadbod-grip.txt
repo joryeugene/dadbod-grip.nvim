@@ -759,8 +759,9 @@ looking for .git or .grip directories.
 
 `:GripConnect` manages database connections from multiple sources:
 
-  .grip/connections.json     project-local connection profiles
-  g:dbs                      vim-dadbod-ui compatible table
+  .grip/connections.json     project-local profiles (new connections save here)
+  ~/.grip/connections.json   global profiles (shared across all projects)
+  g:dbs                      vim-dadbod-ui compatible table (auto-saves to global)
   $DATABASE_URL              environment variable
   g:db / b:db                vim-dadbod variables
 
@@ -771,6 +772,23 @@ Or run `:GripConnect` with no arguments to pick from known connections
 or add a new one interactively.
 
 Connections are deduplicated by URL across all sources.
+
+Connection scope ~
+
+New connections added via the picker save to the project-local file
+(.grip/connections.json). To make a connection available in every project,
+press `G` on it in the picker to copy it to ~/.grip/connections.json.
+
+Both files are merged when the picker opens. When at least one global
+connection exists, connections are grouped under "global" and "project"
+section headers so the scope is immediately visible without any extra
+knowledge of the file layout.
+
+`g:dbs` entries auto-persist to the global file so they appear in every
+project without any extra steps.
+
+To use a single shared file across all projects instead of the two-tier
+system, set `connections_path` in your setup() call. See |grip-config|.
 
 Local file discovery ~
 
@@ -787,7 +805,7 @@ Connection health ~
 Each saved connection shows a session-scoped status indicator:
 
   *   connected this session (set automatically on successful switch)
-  o   unknown (not connected this session yet)
+      unknown (no indicator shown; not yet connected this session)
   x   failed (last attempt did not succeed)
 
 Press `T` on any file-based connection in the picker to retest it instantly.

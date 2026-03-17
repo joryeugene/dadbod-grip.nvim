@@ -573,7 +573,9 @@ require("dadbod-grip").setup({
 })
 ```
 
-Setting `connections_path` overrides the default project-local + global merge behavior. When set, grip reads and writes connections to that single file only.
+Connections added via the picker save to `.grip/connections.json` in the project root. A second file, `~/.grip/connections.json`, holds global connections shared across all projects. Both are merged in the picker. When at least one global connection exists, the picker groups connections under "global" and "project" section headers. Press `G` on any project connection to promote it to global.
+
+Setting `connections_path` overrides this two-tier behavior: grip reads and writes connections to that single file only.
 
 Setting `picker` to `"telescope"` or `"snacks"` delegates simple pickers (table picker, command palette, history) to that backend. Complex pickers (connections, saved queries) always use the built-in picker. Falls back to built-in gracefully when the configured backend is not installed.
 
