@@ -60,6 +60,14 @@ local function abbrev_type(dtype)
   return dtype
 end
 
+--- Right-truncate a table name to fit within max_cols display columns.
+--- Preserves the left side (schema prefix) and appends an ellipsis suffix.
+--- Returns label unchanged when it already fits.
+local function truncate_name(label, max_cols)
+  if vim.fn.strdisplaywidth(label) <= max_cols then return label end
+  return label:sub(1, math.max(1, max_cols - 1)) .. "\xe2\x80\xa6"
+end
+
 -- File extensions that DuckDB can query directly (mirrors init.lua).
 local FILE_EXTENSIONS = { ".parquet", ".csv", ".tsv", ".json", ".ndjson", ".jsonl", ".xlsx", ".orc", ".arrow", ".ipc" }
 
@@ -402,9 +410,11 @@ local function render(state)
       local label = node.display or node.name
       local cached_count = state.row_count_cache and state.row_count_cache[node.name]
       local count_str = (cached_count ~= nil) and (" (" .. fmt_count(cached_count) .. ")") or ""
-      local max_name = SIDEBAR_MAX_WIDTH - 3 - #count_str
-      local display_name = #label > max_name
-          and ("…" .. label:sub(-(max_name - 1))) or label
+      local win_width = (_sidebar_winid and vim.api.nvim_win_is_valid(_sidebar_winid))
+          and vim.api.nvim_win_get_width(_sidebar_winid)
+          or SIDEBAR_MAX_WIDTH
+      local max_name = win_width - 3 - #count_str
+      local display_name = truncate_name(label, max_name)
       table.insert(lines, arrow .. display_name .. count_str)
       -- No special hl for table names: keep it clean
     elseif node.kind == "column" then
@@ -1135,6 +1145,9 @@ end
 
 --- Expose per-URL state for use by er_diagram.lua (read-only; do not mutate).
 M.get_state = get_state
+
+--- Exposed for testing only.
+M._truncate_name = truncate_name
 
 --- Refresh sidebar if visible (e.g., after connection switch).
 function M.refresh(url)
