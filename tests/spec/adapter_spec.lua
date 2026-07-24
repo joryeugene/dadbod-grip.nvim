@@ -241,6 +241,46 @@ test("pg ping: passes -X to skip .psqlrc", function()
   end)
 end)
 
+-- ── PostgreSQL EXPLAIN safety ────────────────────────────────────────────
+-- ANALYZE executes the statement; it must only be added for read-only SQL.
+
+test("pg explain: SELECT uses ANALYZE for actual timings", function()
+  with_executable(function()
+    local args = capture_system_args("QUERY PLAN\nSeq Scan\n", function()
+      pg.explain("SELECT * FROM users", "postgresql://localhost/db")
+    end)
+    contains(last_arg(args), "EXPLAIN (FORMAT TEXT, ANALYZE) SELECT", "SELECT gets ANALYZE")
+  end)
+end)
+
+test("pg explain: UPDATE/DELETE/INSERT never use ANALYZE (would execute the DML)", function()
+  with_executable(function()
+    for _, stmt in ipairs({
+      "UPDATE users SET age = 1 WHERE id = 1",
+      "DELETE FROM users WHERE id = 1",
+      "INSERT INTO users (name) VALUES ('x')",
+    }) do
+      local args = capture_system_args("QUERY PLAN\nSeq Scan\n", function()
+        pg.explain(stmt, "postgresql://localhost/db")
+      end)
+      local sql_arg = last_arg(args)
+      assert(not sql_arg:find("ANALYZE", 1, true),
+        "no ANALYZE for: " .. stmt .. " (got: " .. sql_arg .. ")")
+      contains(sql_arg, "EXPLAIN (FORMAT TEXT) ", "plain EXPLAIN used")
+    end
+  end)
+end)
+
+test("pg explain: WITH gets plain EXPLAIN (may contain data-modifying CTEs)", function()
+  with_executable(function()
+    local args = capture_system_args("QUERY PLAN\nSeq Scan\n", function()
+      pg.explain("WITH gone AS (DELETE FROM users RETURNING *) SELECT * FROM gone",
+        "postgresql://localhost/db")
+    end)
+    assert(not last_arg(args):find("ANALYZE", 1, true), "no ANALYZE for WITH")
+  end)
+end)
+
 -- ── SQLite .sqliterc bypass ─────────────────────────────────────────────
 
 test("sqlite query: passes -init '' to skip .sqliterc", function()
