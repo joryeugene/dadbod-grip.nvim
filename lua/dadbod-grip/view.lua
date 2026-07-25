@@ -2117,7 +2117,9 @@ function M._setup_keymaps(bufnr)
     for _, row_idx in ipairs(r_gy.ordered) do
       local row = {}
       for _, col in ipairs(cols) do
-        table.insert(row, data.effective_value(st_gy, row_idx, col))
+        -- effective_value returns nil for NULL; table.insert(row, nil) is a
+        -- no-op that would shift the remaining columns left, so map to "".
+        table.insert(row, data.effective_value(st_gy, row_idx, col) or "")
       end
       table.insert(rows_data, row)
     end
@@ -2196,7 +2198,7 @@ function M._setup_keymaps(bufnr)
     local col_name = cell.col_name
     editor.open("Set " .. #row_indices .. " cells (" .. col_name .. ")", cell.value, function(new_val)
       if new_val == nil then return end
-      local actual = new_val == editor.NULL_VALUE and nil or new_val
+      local actual = editor.resolve_null(new_val)
       local st = session.state
       for _, ri in ipairs(row_indices) do
         st = data.add_change(st, ri, col_name, actual)
@@ -4030,8 +4032,11 @@ function M._setup_keymaps(bufnr)
       local rows_data = {}
       for _, row_idx in ipairs(r_e.ordered) do
         local row = {}
-        for _, col in ipairs(cols) do
-          table.insert(row, data.effective_value(st_e, row_idx, col))
+        -- Indexed assignment: effective_value returns nil for NULL, and
+        -- table.insert(row, nil) is a no-op that would shift columns left.
+        -- Holes are intentional; consumers below iterate `for ci = 1, #cols`.
+        for ci, col in ipairs(cols) do
+          row[ci] = data.effective_value(st_e, row_idx, col)
         end
         table.insert(rows_data, row)
       end
@@ -4041,8 +4046,8 @@ function M._setup_keymaps(bufnr)
         local lines_out = { table.concat(cols, ",") }
         for _, row in ipairs(rows_data) do
           local parts = {}
-          for _, v in ipairs(row) do
-            local s = v or ""
+          for ci = 1, #cols do
+            local s = row[ci] or ""
             if s:find('[,"\n]') then s = '"' .. s:gsub('"', '""') .. '"' end
             table.insert(parts, s)
           end
@@ -4053,7 +4058,7 @@ function M._setup_keymaps(bufnr)
         local lines_out = { table.concat(cols, "\t") }
         for _, row in ipairs(rows_data) do
           local parts = {}
-          for _, v in ipairs(row) do table.insert(parts, v or "") end
+          for ci = 1, #cols do table.insert(parts, row[ci] or "") end
           table.insert(lines_out, table.concat(parts, "\t"))
         end
         output = table.concat(lines_out, "\n")
@@ -4079,7 +4084,8 @@ function M._setup_keymaps(bufnr)
         local tbl = st_e.table_name or "table_name"
         for _, row in ipairs(rows_data) do
           local vals = {}
-          for _, v in ipairs(row) do table.insert(vals, sql.quote_value(v)) end
+          -- quote_value(nil) emits unquoted NULL for NULL cells
+          for ci = 1, #cols do table.insert(vals, sql.quote_value(row[ci])) end
           table.insert(stmts, string.format("INSERT INTO %s (%s) VALUES (%s);",
             sql.quote_ident(tbl),
             table.concat(vim.tbl_map(function(c) return sql.quote_ident(c) end, cols), ", "),
@@ -4092,8 +4098,8 @@ function M._setup_keymaps(bufnr)
         local lines_out = { hdr, sep }
         for _, row in ipairs(rows_data) do
           local parts = {}
-          for _, v in ipairs(row) do
-            table.insert(parts, (tostring(v or ""):gsub("|", "\\|")))
+          for ci = 1, #cols do
+            table.insert(parts, (tostring(row[ci] or ""):gsub("|", "\\|")))
           end
           table.insert(lines_out, "| " .. table.concat(parts, " | ") .. " |")
         end
@@ -4105,8 +4111,8 @@ function M._setup_keymaps(bufnr)
           widths[ci] = vim.fn.strdisplaywidth(col)
         end
         for _, row in ipairs(rows_data) do
-          for ci, v in ipairs(row) do
-            widths[ci] = math.max(widths[ci], vim.fn.strdisplaywidth(tostring(v or "NULL")))
+          for ci = 1, #cols do
+            widths[ci] = math.max(widths[ci], vim.fn.strdisplaywidth(tostring(row[ci] or "NULL")))
           end
         end
         -- Top border: ╔════╤════╗
@@ -4132,7 +4138,8 @@ function M._setup_keymaps(bufnr)
         local data_lines = {}
         for _, row in ipairs(rows_data) do
           local row_parts = {}
-          for ci, v in ipairs(row) do
+          for ci = 1, #cols do
+            local v = row[ci]
             local display = v or "NULL"
             local pad = widths[ci] - vim.fn.strdisplaywidth(display)
             -- Right-align numbers

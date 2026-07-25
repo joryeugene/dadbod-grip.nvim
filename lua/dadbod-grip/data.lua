@@ -280,8 +280,11 @@ function M.effective_value(state, row_idx, field)
   local idx = col_idx[field]
   if not idx then return nil end
   local raw = state.rows[row_idx] and state.rows[row_idx][idx]
-  -- psql --csv emits empty string for NULL
-  return raw == "" and nil or raw
+  -- CSV adapters emit an empty string for NULL. Must be an explicit if —
+  -- `raw == "" and nil or raw` is the classic Lua and/or trap: when raw is
+  -- "", the and-branch yields nil, so `or` short-circuits back to raw ("").
+  if raw == "" then return nil end
+  return raw
 end
 
 -- M.count_staged(state) → int (total staged operations)

@@ -184,11 +184,32 @@ test("effective_value: returns original for unstaged", function()
   eq(data.effective_value(st, 2, "name"), "bob")
 end)
 
-test("effective_value: empty string in original stays empty", function()
-  -- In the CSV output from DB CLIs, empty string represents NULL.
-  -- effective_value returns it as-is; view.lua handles display.
+test("effective_value: NULL original (empty CSV cell) returns nil", function()
+  -- All CSV CLIs emit "" for NULL, and db.parse_csv collapses quoted "" (a
+  -- genuinely empty string) and unquoted empty (NULL) into the same Lua "".
+  -- The distinction is therefore unrecoverable at this layer: "" in original
+  -- rows uniformly means NULL, and the documented contract is that
+  -- effective_value returns nil for NULL.
   local st = make_state({ rows = { { "1", "", "test@x.com" } } })
-  eq(data.effective_value(st, 1, "name"), "", "empty string preserved from original")
+  eq(data.effective_value(st, 1, "name"), nil, "NULL original must come back as nil")
+end)
+
+test("effective_value: staged NULL round-trip", function()
+  -- Stage a value over a NULL original, then undo: the cell must read as
+  -- NULL (nil) again, not "".
+  local st = make_state({ rows = { { "1", "", "test@x.com" } } })
+  local st2 = data.add_change(st, 1, "name", "temp")
+  eq(data.effective_value(st2, 1, "name"), "temp", "staged value visible")
+  local st3 = data.undo_row(st2, 1)
+  eq(data.effective_value(st3, 1, "name"), nil, "undo restores NULL original as nil")
+end)
+
+test("effective_value: staged nil reads back as nil over non-NULL original", function()
+  local st = make_state({})
+  local st2 = data.add_change(st, 1, "name", nil)
+  eq(data.effective_value(st2, 1, "name"), nil, "staged NULL is nil")
+  local st3 = data.undo_row(st2, 1)
+  eq(data.effective_value(st3, 1, "name"), "alice", "undo restores original")
 end)
 
 test("effective_value: staged overrides original", function()

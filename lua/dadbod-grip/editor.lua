@@ -67,6 +67,14 @@ end
 -- Sentinel: caller uses this to distinguish "user set NULL" from "user cancelled".
 M.NULL_VALUE = "__GRIP_NULL__"
 
+-- Translate the sentinel to a real nil for staging. Callers MUST use this
+-- instead of `v == M.NULL_VALUE and nil or v` — that and/or expression
+-- yields v (the sentinel string!) whenever the comparison is true.
+function M.resolve_null(v)
+  if v == M.NULL_VALUE then return nil end
+  return v
+end
+
 -- M.open(prompt, initial_value, on_save, opts)
 --   prompt:        string shown in border title (e.g. "users.name")
 --   initial_value: string | nil (nil = current value is NULL, pre-fill empty)

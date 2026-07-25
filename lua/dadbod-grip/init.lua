@@ -553,7 +553,7 @@ local function do_edit(bufnr, cell, url)
     end
 
     -- Valid mutation: stage and advance to next row (spreadsheet style).
-    local actual_val = now_null and nil or new_val
+    local actual_val = editor.resolve_null(new_val)
     local new_state = data.add_change(session.state, cell.row_idx, cell.col_name, actual_val)
     view.apply_edit(bufnr, new_state)
 
