@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.7.7] - 2026-07-27
+## [3.8.0] - 2026-07-27
 
 This release brings the work done in the [GlebYavorski/dadbod-grip.nvim](https://github.com/GlebYavorski/dadbod-grip.nvim)
 fork back into the main repository.
@@ -15,8 +15,9 @@ restarted at `v1.0.0` and continued through `v1.10.0`. Because `v3.3.1` still so
 `version = "*"` kept resolving to the March snapshot rather than to the newest code — the root
 cause behind ([#14](https://github.com/joryeugene/dadbod-grip.nvim/issues/14)) and
 ([#19](https://github.com/joryeugene/dadbod-grip.nvim/issues/19)). The fork continued the 3.x
-line above `v3.3.1` (3.4 through 3.7.6, released only in the fork), and this release lands at
-3.7.7. Pinned installs are unaffected; `version = "*"` now resolves to current code again. The
+line above `v3.3.1` (3.4 through 3.7.7, released only in the fork), and this release lands at
+3.8.0 — a minor rather than a patch bump, because two features landed after the fork's 3.7.7
+tag. Pinned installs are unaffected; `version = "*"` now resolves to current code again. The
 older tags are left in place so anyone pinned to them keeps working.
 
 ### Added
@@ -230,4 +231,4 @@ older tags are left in place so anyone pinned to them keeps working.
 - **joryeugene** — SQL Server adapter, PostgreSQL routines in the schema sidebar, focused ER diagram
   ([PR #17](https://github.com/joryeugene/dadbod-grip.nvim/pull/17)).
 
-[3.7.7]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.7.7
+[3.8.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.8.0
