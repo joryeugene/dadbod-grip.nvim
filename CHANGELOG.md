@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ga`, `gF` and filter-IS-NULL resolved the wrong column from the type row.** Four handlers
+  open-coded "column under the cursor" by pairing `view._snap_col` with a byte-position map, and
+  three of them passed `hdr_byte_positions` unconditionally. The rows do not share byte offsets:
+  a type name too long for its column is truncated with `…`, which spends 3 bytes on 1 display
+  cell, so every column after it sits elsewhere in the type row than in the header. With the
+  cursor on the type row those three could aggregate, filter or build a filter against a
+  neighbouring column. All four now call `ctx.cursor_column()`, which resolves through
+  `resolve_row_bp` — the row-type-aware path the fourth copy (`=`, column width) already used.
+- **`s`, `S` and `gS` refused to work off a data row.** Sorting and column statistics are
+  column-scoped, so pressing them with the cursor on the header — the most natural place to reach
+  for a sort — did nothing but print "Move cursor to a column". `_snap_col`'s own docblock names
+  sorting as a reason the snapping exists. They now resolve like every other column-scoped action.
+  Actions that need a cell *value* (`f`, edits, yanks) still require a data row, by design.
+
 ### Added
 
 - **ASCII distribution in the `gS` column-statistics popup.** Numeric columns get the eight

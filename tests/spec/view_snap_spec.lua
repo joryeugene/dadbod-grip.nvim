@@ -124,6 +124,72 @@ test("_snap_col: single column always returns that column", function()
   eq(result.col_idx, 1)
 end)
 
+-- ── _resolve_col_at: which row's byte positions get used ────────────────────
+-- Column resolution has to read the byte positions of the row the cursor is
+-- actually on. They differ per row: a type name truncated with "…" spends 3
+-- bytes on 1 display cell, so every column after it sits at a different byte
+-- offset in the type row than in the header row. Handlers that hardcoded
+-- hdr_byte_positions therefore resolved the wrong column while the cursor sat
+-- on the type row.
+
+-- data_start = 5 means: title, header, type row (line 3), separator (line 4).
+-- The type row's "id" column is one byte narrower here, which pushes name and
+-- email two bytes right of where the header has them.
+local render = {
+  data_start = 5,
+  visible_columns = vis_cols,
+  hdr_byte_positions = bp_row,
+  type_row_byte_positions = {
+    id    = { start = 4,  finish = 5  },
+    name  = { start = 13, finish = 19 },
+    email = { start = 27, finish = 42 },
+  },
+  byte_positions = {
+    [1] = {
+      id    = { start = 4,  finish = 5  },
+      name  = { start = 11, finish = 17 },
+      email = { start = 23, finish = 38 },
+    },
+  },
+}
+
+test("_resolve_col_at: header row resolves through hdr_byte_positions", function()
+  eq(view._resolve_col_at(render, vis_cols, 2, 11), "name", "byte 11 is name.start in the header")
+end)
+
+test("_resolve_col_at: type row resolves through its own byte positions", function()
+  -- The divergence, spelled out: at byte 11 the header says "name" (its
+  -- name.start) while the type row says "id" (mid-separator, name starts at
+  -- 13). Reading the header here is exactly the old bug.
+  eq(view._snap_col(vis_cols, render.hdr_byte_positions, 11).col_name, "name",
+    "the header would answer name")
+  eq(view._resolve_col_at(render, vis_cols, 3, 11), "id",
+    "on the type row the cursor is still over id")
+end)
+
+test("_resolve_col_at: data row resolves through that row's positions", function()
+  eq(view._resolve_col_at(render, vis_cols, 5, 11), "name", "first data row")
+end)
+
+test("_resolve_col_at: separator row falls back to the header", function()
+  eq(view._resolve_col_at(render, vis_cols, 4, 11), "name", "line 4 is the separator")
+end)
+
+test("_resolve_col_at: a line past the last data row still resolves", function()
+  -- Footer/border lines: keep answering with the column the cursor is over
+  -- rather than refusing, which is what the fallback in resolve_row_bp is for.
+  eq(view._resolve_col_at(render, vis_cols, 40, 11), "name", "past the last row")
+end)
+
+test("_resolve_col_at: no render state yields nil", function()
+  eq(view._resolve_col_at(nil, vis_cols, 3, 11), nil, "nil render")
+  eq(view._resolve_col_at({}, vis_cols, 3, 11), nil, "render without byte positions")
+end)
+
+test("_resolve_col_at: no columns yields nil", function()
+  eq(view._resolve_col_at(render, {}, 3, 11), nil, "empty column list")
+end)
+
 -- ── summary ─────────────────────────────────────────────────────────────────
 print(string.format("\nview_snap_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

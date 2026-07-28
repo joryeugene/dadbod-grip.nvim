@@ -26,25 +26,11 @@ function M.setup(bufnr, ctx)
     local r = session_a._render
     local st_a = session_a.state
 
-    -- Determine which column to aggregate from cursor position
-    local col_name
-    do
-      local cell = view.get_cell(bufnr)
-      if cell then
-        col_name = cell.col_name
-      else
-        -- Cursor may be on header/type row: resolve via byte position
-        local col_nr = vim.api.nvim_win_get_cursor(0)[2]
-        local cols = r.visible_columns or st_a.columns
-        if r.hdr_byte_positions then
-          local snapped = view._snap_col(cols, r.hdr_byte_positions, col_nr)
-          if snapped then col_name = snapped.col_name end
-        end
-      end
-      if not col_name then
-        vim.notify("Move cursor to a column first", vim.log.levels.INFO)
-        return
-      end
+    -- Works from a data row, the header row or the type row.
+    local col_name = ctx.cursor_column()
+    if not col_name then
+      vim.notify("Move cursor to a column first", vim.log.levels.INFO)
+      return
     end
 
     -- Collect values for the single column
@@ -98,8 +84,8 @@ function M.setup(bufnr, ctx)
       vim.notify("Column stats requires a table name", vim.log.levels.INFO)
       return
     end
-    local cell = view.get_cell(bufnr)
-    if not cell then
+    local col_name = ctx.cursor_column()
+    if not col_name then
       vim.notify("Move cursor to a column", vim.log.levels.INFO)
       return
     end
@@ -114,14 +100,14 @@ function M.setup(bufnr, ctx)
     end
     local data_type
     for _, ci in ipairs(session_cs._column_info or {}) do
-      if ci.column_name == cell.col_name then
+      if ci.column_name == col_name then
         data_type = ci.data_type
         break
       end
     end
 
     local profile = require("dadbod-grip.profile")
-    local cs, cs_err = profile.gather_column(st_cs.table_name, cell.col_name, data_type, st_cs.url)
+    local cs, cs_err = profile.gather_column(st_cs.table_name, col_name, data_type, st_cs.url)
     if not cs then
       vim.notify("Stats query failed: " .. (cs_err or "unknown error"), vim.log.levels.WARN)
       return

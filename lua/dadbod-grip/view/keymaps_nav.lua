@@ -248,24 +248,7 @@ function M.setup(bufnr, ctx)
   kmap("grid_col_width", function()
     local session = ctx.session()
     if not session then return end
-    -- Resolve column via data row or row-type-aware byte positions (same logic as nav_col)
-    local cell = view.get_cell(bufnr)
-    local col
-    if cell then
-      col = cell.col_name
-    else
-      local r = session._render
-      if r then
-        local cursor = vim.api.nvim_win_get_cursor(0)
-        local col_nr = cursor[2]
-        local vis_cols = r.visible_columns or (session.state and session.state.columns) or {}
-        local ref_bp = resolve_row_bp(r, cursor[1], true)
-        if ref_bp then
-          local snap = view._snap_col(vis_cols, ref_bp, col_nr)
-          if snap then col = snap.col_name end
-        end
-      end
-    end
+    local col = ctx.cursor_column()
     if not col then
       vim.notify("Move cursor to a column to resize", vim.log.levels.INFO)
       return

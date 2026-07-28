@@ -2160,6 +2160,23 @@ local function resolve_row_bp(r, line, fallback)
   return nil
 end
 
+--- Name of the column at (line, col_nr), resolved from whichever row the cursor
+--- is on: a data row, the header, or the type-annotation row.
+--- Always go through this rather than pairing _snap_col with hdr_byte_positions
+--- by hand. The rows do not share byte offsets -- a type name truncated with "…"
+--- spends 3 bytes on 1 display cell, so every column after it sits elsewhere in
+--- the type row than in the header -- and four call sites open-coded that pairing
+--- with three of them reading the header unconditionally, which resolved the
+--- wrong column whenever the cursor was on the type row.
+--- @return string|nil  column name, or nil without render state or columns
+function M._resolve_col_at(r, cols, line, col_nr)
+  if not r or not cols or #cols == 0 then return nil end
+  local ref_bp = resolve_row_bp(r, line, true)
+  if not ref_bp then return nil end
+  local snap = M._snap_col(cols, ref_bp, col_nr)
+  return snap and snap.col_name or nil
+end
+
 --- Byte range of the cursor's column inside the header row, for the sticky
 --- header to highlight. Defined here rather than next to M._update_winbar
 --- because it needs resolve_row_bp, which is declared above.
@@ -2227,6 +2244,22 @@ local function make_keymap_ctx(bufnr)
   -- ctx.session(), not for whatever session the caller happens to be holding.
   function ctx.session_is_editable()
     return is_editable(M._sessions[bufnr])
+  end
+
+  -- The column under the cursor, wherever the cursor is: a data row, the header
+  -- or the type row. Column-scoped actions (sort, filter, stats, resize) should
+  -- work from all three, and this is the only correct way to get there --
+  -- pairing _snap_col with a byte-position map by hand is what got three
+  -- handlers reading the header while the cursor sat on the type row.
+  -- Actions that need the cell *value* still want view.get_cell(), which is
+  -- nil off a data row by design.
+  function ctx.cursor_column()
+    local session = M._sessions[bufnr]
+    local r = session and session._render
+    if not r then return nil end
+    local cols = r.visible_columns or (session.state and session.state.columns)
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    return M._resolve_col_at(r, cols, cursor[1], cursor[2])
   end
 
   -- The view module itself. Handed over rather than require()d by the section
