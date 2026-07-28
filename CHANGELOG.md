@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Sticky column header**: the grid's column-name row is mirrored into the window's `winbar`,
+  so the column names stay visible once a table taller than the window scrolls past them, and
+  the column under the cursor is highlighted there with the grid's own column background. The
+  mirrored row is sliced by display width at the window's `leftcol` and indented past the
+  window gutter, so it stays aligned with the cells underneath on wide tables, with `number`
+  or `signcolumn` on, and with CJK/emoji headers. While the grid's own header is still on
+  screen the winbar goes blank instead of duplicating it — blank rather than unset, so the grid
+  never shifts by a row as scrolling crosses that threshold. The watch/write badges keep the
+  right edge of the winbar. On by default; `setup({ sticky_header = false })` reclaims the
+  screen line.
+
 ## [3.8.0] - 2026-07-27
 
 This release brings the work done in the [GlebYavorski/dadbod-grip.nvim](https://github.com/GlebYavorski/dadbod-grip.nvim)

@@ -39,7 +39,9 @@ local OPTS = {
   -- Auto-discover local Docker containers tagged with the
   -- dev.localdb.* label set. See sources/docker_localdb.lua. Set false
   -- to disable shelling out to `docker ps` on picker open.
-  discovery   = true,
+  -- Mirror the grid's column-name row into the window's winbar so it stays
+  -- visible when a long table scrolls past it. Costs one screen line.
+  sticky_header = true,
 }
 
 --- Return a copy of the current options.
@@ -1605,6 +1607,7 @@ function M.setup(opts)
       return v == nil or v == "horizontal" or v == "vertical"
     end, '"horizontal" or "vertical"' },
     discovery     = { opts.discovery, "boolean", true },
+    sticky_header = { opts.sticky_header, "boolean", true },
   })
   OPTS.limit        = opts.limit        or 100
   OPTS.max_col_width = opts.max_col_width or 40
@@ -1616,6 +1619,7 @@ function M.setup(opts)
   if opts.border ~= nil then OPTS.border = opts.border end
   OPTS.cell_split = opts.cell_split or "horizontal"
   if opts.discovery ~= nil then OPTS.discovery = opts.discovery end
+  if opts.sticky_header ~= nil then OPTS.sticky_header = opts.sticky_header end
 
   -- Keymap overrides: stored at module level for keymaps.get() to read.
   if opts.keymaps then

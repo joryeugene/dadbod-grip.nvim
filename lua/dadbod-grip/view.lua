@@ -129,6 +129,9 @@ local _hl_ag = vim.api.nvim_create_augroup("DadbodGripHL", { clear = true })
 local function ensure_highlights()
   local hl = vim.api.nvim_set_hl
   hl(0, "GripHeader",       { bold = true })
+  -- Sticky-header counterpart of GripColHighlight: same bg, so the column the
+  -- cursor is in reads the same in the winbar as it does in the grid.
+  hl(0, "GripHeaderActive", { bold = true, bg = "#313244", ctermbg = 237 })
   hl(0, "GripNull",         { italic = true, fg = "#6c7086", ctermfg = 243 })
   -- Staged groups carry guibg to visually distinguish pending mutations.
   -- Staged NULL: peach/flamingo fg signals "value cleared" (distinct from red=deleted, violet=modified)
@@ -836,6 +839,10 @@ function M.render(bufnr, state)
 
   -- Update live SQL float if active
   M._update_live_sql_float(session)
+
+  -- The sticky header mirrors this render's column row; a new render (page
+  -- turn, sort, FK jump, tab view) changes it, so refresh the winbar with it.
+  M._update_winbar(bufnr)
 end
 
 local UNDO_STACK_MAX = 50
@@ -1112,10 +1119,12 @@ local function reveal_col_edge(win, buf, lnum, bp)
   end
 end
 
--- ── badge helpers ────────────────────────────────────────────────────────
+-- ── winbar: sticky header + badges ───────────────────────────────────────
+-- One writer for 'winbar'. The watch/write badges came first and keep the
+-- right edge; the sticky column header (view/sticky_header.lua) fills the rest.
 
---- Update the winbar badge for watch/write mode indicators.
-local function _update_badge(bufnr)
+--- Rebuild the winbar for bufnr: sticky column header plus watch/write badges.
+function M._update_winbar(bufnr)
   local session = M._sessions[bufnr]
   if not session then return end
   -- Find the window showing this buffer
@@ -1125,16 +1134,55 @@ local function _update_badge(bufnr)
   end
   if not winid or not vim.api.nvim_win_is_valid(winid) then return end
 
-  local parts = {}
+  local badges = {}
   if session.watch_ms then
     local secs = session.watch_ms / 1000
     local label = secs == math.floor(secs) and tostring(math.floor(secs)) .. "s" or tostring(secs) .. "s"
-    table.insert(parts, "%#GripWatch#↺ " .. label .. "%#Normal#")
+    table.insert(badges, { text = "↺ " .. label, hl = "GripWatch" })
   end
   if session.write_mode then
-    table.insert(parts, "%#ErrorMsg#✎ WRITE%#Normal#")
+    table.insert(badges, { text = "✎ WRITE", hl = "ErrorMsg" })
   end
-  local bar = #parts > 0 and ("  " .. table.concat(parts, "  ")) or ""
+
+  local sticky = require("dadbod-grip").get_opts().sticky_header ~= false
+  local view_state = vim.api.nvim_win_call(winid, vim.fn.winsaveview)
+  -- Buffer line 2 IS the column-name row. While it is still on screen the winbar
+  -- would only show it a second time, so it goes blank instead of duplicating —
+  -- blank rather than unset, because unsetting drops the line and shifts the
+  -- whole grid by one row exactly when scrolling crosses this threshold.
+  --
+  -- The "does the whole grid fit" test is not redundant with the topline one: on
+  -- Neovim 0.10 a window that has not been drawn yet reports topline == the
+  -- cursor line (verified against v0.10.0, the CI baseline), which reads as
+  -- "scrolled" for a grid that cannot scroll at all. A buffer shorter than the
+  -- window always shows its header, whatever topline claims.
+  local fits_in_window =
+    vim.api.nvim_buf_line_count(bufnr) <= vim.api.nvim_win_get_height(winid)
+  local hdr_on_screen = fits_in_window or (view_state.topline or 1) <= 2
+  local hdr_line = sticky and not hdr_on_screen and session._render
+    and session._render.lines and session._render.lines[2] or nil
+  local bar
+  if hdr_line then
+    local wininfo = vim.fn.getwininfo(winid)[1]
+    -- A winbar spans the full window width, but the buffer text starts after the
+    -- gutter ('number', 'signcolumn', folds). textoff is that gutter: it comes
+    -- off the width AND goes back on as a leading indent, or the mirrored header
+    -- renders one gutter to the left of the columns it is labelling.
+    local textoff = wininfo and wininfo.textoff or 0
+    local width = wininfo and (wininfo.width - textoff) or 0
+    bar = require("dadbod-grip.view.sticky_header").build(
+      hdr_line, view_state.leftcol or 0, width,
+      M._active_col_bp(bufnr, winid), badges, textoff)
+  else
+    local parts = {}
+    for _, b in ipairs(badges) do
+      table.insert(parts, "%#" .. b.hl .. "#" .. b.text .. "%#Normal#")
+    end
+    bar = #parts > 0 and ("  " .. table.concat(parts, "  ")) or ""
+    -- Hold the line open while the feature is on, so it neither appears nor
+    -- disappears as the header scrolls in and out of view.
+    if bar == "" and sticky then bar = " " end
+  end
   pcall(function() vim.wo[winid].winbar = bar end)
 end
 
@@ -1165,7 +1213,7 @@ local function _start_watch(bufnr, ms)
     if staged then return end
     if s.on_refresh then s.on_refresh(bufnr) end
   end))
-  _update_badge(bufnr)
+  M._update_winbar(bufnr)
 end
 
 --- Stop the watch timer for bufnr.
@@ -1177,7 +1225,7 @@ local function _stop_watch(bufnr)
     session.watch_timer = nil
   end
   session.watch_ms = nil
-  _update_badge(bufnr)
+  M._update_winbar(bufnr)
 end
 
 -- ── open ──────────────────────────────────────────────────────────────────
@@ -1304,7 +1352,7 @@ function M.open(state, url, query_sql, opts)
   if (opts and opts.watch_ms) or (opts and opts.write) then
     vim.schedule(function()
       if opts.watch_ms then _start_watch(bufnr, opts.watch_ms) end
-      _update_badge(bufnr)
+      M._update_winbar(bufnr)
     end)
   end
 
@@ -2117,6 +2165,23 @@ local function resolve_row_bp(r, line, fallback)
   return nil
 end
 
+--- Byte range of the cursor's column inside the header row, for the sticky
+--- header to highlight. Defined here rather than next to M._update_winbar
+--- because it needs resolve_row_bp, which is declared above.
+--- @return table|nil  { start, finish } from hdr_byte_positions
+function M._active_col_bp(bufnr, winid)
+  local session = M._sessions[bufnr]
+  local r = session and session._render
+  if not r or not r.hdr_byte_positions then return nil end
+  local ok, cursor = pcall(vim.api.nvim_win_get_cursor, winid)
+  if not ok then return nil end
+  -- fallback: on the border/footer lines, keep labelling the column the cursor
+  -- column falls in rather than dropping the highlight entirely.
+  local ref_bp = resolve_row_bp(r, cursor[1], true)
+  local snap = ref_bp and M._snap_col(r.visible_columns or {}, ref_bp, cursor[2]) or nil
+  return snap and r.hdr_byte_positions[snap.col_name] or nil
+end
+
 -- ── keymap wiring ─────────────────────────────────────────────────────────
 -- One module per keymap group under view/, each exporting setup(bufnr, ctx);
 -- they all share the helper set built once by make_keymap_ctx() instead of
@@ -2144,6 +2209,7 @@ local KEYMAP_SECTIONS = {
   require("dadbod-grip.view.keymaps_results"),
   require("dadbod-grip.view.keymaps_tab_view"),
   require("dadbod-grip.view.column_highlight"),
+  require("dadbod-grip.view.sticky_header"),
 }
 
 --- Helpers shared by every keymap section: the four map wrappers, the visual
@@ -2195,7 +2261,7 @@ local function make_keymap_ctx(bufnr)
   ctx.open_info_float = open_info_float
   ctx.resolve_row_bp  = resolve_row_bp
   ctx.reveal_col_edge = reveal_col_edge
-  ctx.update_badge    = _update_badge
+  ctx.update_winbar   = M._update_winbar
   ctx.start_watch     = _start_watch
   ctx.stop_watch      = _stop_watch
   ctx.augroup         = _ag
