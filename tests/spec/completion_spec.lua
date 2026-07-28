@@ -419,19 +419,19 @@ end
 -- parse_context("supplier.") should return "dotted" so the auto-trigger
 -- detects dotted context even when word == "".
 do
-  local ctx = completion.parse_context_full("FROM supplier.")
-  eq(ctx and ctx.type, "dotted", "auto-trigger guard: dotted context detected after '.'")
-  eq(ctx and ctx.qualifier, "supplier", "auto-trigger guard: qualifier is 'supplier'")
-  eq(ctx and ctx.word, "", "auto-trigger guard: word is empty after '.'")
+  local guard_ctx = completion.parse_context_full("FROM supplier.")
+  eq(guard_ctx and guard_ctx.type, "dotted", "auto-trigger guard: dotted context detected after '.'")
+  eq(guard_ctx and guard_ctx.qualifier, "supplier", "auto-trigger guard: qualifier is 'supplier'")
+  eq(guard_ctx and guard_ctx.word, "", "auto-trigger guard: word is empty after '.'")
 
-  -- Ensure before:match("[%w_]+%.[%w_]*$") fires for the guard condition
-  local before = "FROM supplier."
-  local in_dotted = before:match("[%w_]+%.[%w_]*$") ~= nil
-  ok(in_dotted, "auto-trigger guard: dotted pattern matches 'supplier.'")
-
-  local before2 = "FROM "
-  local not_dotted = before2:match("[%w_]+%.[%w_]*$") ~= nil
-  ok(not not_dotted, "auto-trigger guard: plain FROM does not match dotted pattern")
+  -- The autotrigger's own guard (completion.lua:532) tests the same thing with
+  -- the pattern parse_context holds at line 197, so assert through that function.
+  -- Re-matching the pattern in the test body, as this used to, only asserts that
+  -- string.match works: it stays green however the plugin's copies drift.
+  eq(completion.parse_context("FROM supplier."), "dotted",
+    "auto-trigger guard: 'supplier.' reads as dotted, so word == '' must not bail out")
+  eq(completion.parse_context("FROM "), "table",
+    "auto-trigger guard: a plain FROM is not dotted, so word == '' does bail out")
 end
 
 -- ── DuckDB federation: live-query fallback for SQLite attachments ─────────────

@@ -24,10 +24,6 @@ local function gt(a, b, msg)
   assert(a > b, (msg or "") .. ": expected > " .. tostring(b) .. ", got " .. tostring(a))
 end
 
-local function is_fn(v, msg)
-  assert(type(v) == "function", (msg or "") .. ": expected function, got " .. type(v))
-end
-
 -- ── M.register ────────────────────────────────────────────────────────────
 
 test("register: accepts valid action", function()

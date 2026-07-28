@@ -16,123 +16,117 @@ local function eq(a, b, msg)
   assert(a == b, (msg or "") .. ": expected " .. tostring(b) .. ", got " .. tostring(a))
 end
 
--- ── resolve_query: statement detection ──
+local init = require("dadbod-grip")
+local view = require("dadbod-grip.view")
+local URL = "sqlite:tests/seed_sqlite.db"
 
-test("resolve_query: SELECT returns raw spec", function()
-  -- resolve_query is local, but we can test through the public interface
-  -- by checking that M.open doesn't error for SELECT
-  local query = require("dadbod-grip.query")
-  local spec = query.new_raw("SELECT * FROM users", 100)
+-- ── resolve_query: statement detection ──
+-- Through the real resolver, exported as _resolve_query for exactly this. An
+-- earlier version of these tests re-derived the keyword match in the test body
+-- (`sql:upper():match("^%s*(%u+)")`) and asserted on that, which is a test of
+-- string.match: it passes no matter what init.lua decides to do with the
+-- statement, including the very bug it was named after.
+
+test("resolve_query: SELECT returns a raw spec, not a mutation", function()
+  local spec, table_name, file_path, mutation = init._resolve_query("SELECT * FROM users", 100)
   assert(spec ~= nil, "spec should exist")
   eq(spec.is_raw, true, "is_raw")
   eq(spec.base_sql, "SELECT * FROM users", "base_sql")
+  eq(table_name, "users", "single-table SELECT still names its table")
+  eq(file_path, nil, "not a file")
+  eq(mutation, nil, "not routed to the mutation path")
 end)
 
-test("resolve_query: UPDATE is detected as mutation (not wrapped in SELECT)", function()
-  -- We test this by calling init.open with an UPDATE and checking it doesn't
-  -- produce a "no such table" error (which was the old bug: wrapping in SELECT)
-  -- Since resolve_query is local, we test the behavior:
-  -- An UPDATE should NOT be treated as a table name
-  local query = require("dadbod-grip.query")
-  -- If UPDATE were treated as table name, new_table would be called
-  -- Let's verify the first keyword detection
-  local sql = 'UPDATE "users" SET name = \'test\' WHERE id = 1'
-  local upper = sql:upper():match("^%s*(%u+)")
-  eq(upper, "UPDATE", "detects UPDATE keyword")
+-- The old bug: a mutation was treated as a table name and wrapped in SELECT,
+-- which surfaced as "no such table: UPDATE". The resolver must return the
+-- statement verbatim as its 4th value and nothing else.
+for _, case in ipairs({
+  { kw = "UPDATE",  sql = 'UPDATE "users" SET name = \'test\' WHERE id = 1' },
+  { kw = "DELETE",  sql = "DELETE FROM orders WHERE id = 5" },
+  { kw = "INSERT",  sql = "INSERT INTO users (name) VALUES ('test')" },
+  { kw = "REPLACE", sql = "REPLACE INTO users (id, name) VALUES (1, 'test')" },
+}) do
+  test("resolve_query: " .. case.kw .. " is routed to the mutation path", function()
+    local spec, table_name, file_path, mutation = init._resolve_query(case.sql, 100)
+    eq(spec, nil, "no SELECT spec")
+    eq(table_name, nil, "not treated as a table name")
+    eq(file_path, nil, "not a file")
+    eq(mutation, case.sql, "returned verbatim as mutation SQL")
+  end)
+end
+
+test("resolve_query: a bare word is a table name", function()
+  local spec, table_name, _, mutation = init._resolve_query("orders", 100)
+  assert(spec ~= nil, "spec should exist")
+  eq(spec.is_raw, false, "table spec is not raw")
+  eq(table_name, "orders", "table name passed through")
+  eq(mutation, nil, "not a mutation")
 end)
 
-test("resolve_query: DELETE is detected as mutation", function()
-  local sql = "DELETE FROM orders WHERE id = 5"
-  local upper = sql:upper():match("^%s*(%u+)")
-  eq(upper, "DELETE", "detects DELETE keyword")
-end)
+-- ── mutation preview: table and WHERE extraction ──
+-- _mutation_preview parses the table name and WHERE clause out of the statement
+-- and builds the preview SELECT from them, so session.state.sql is that parser's
+-- output. The previous tests copied its patterns into the test body instead,
+-- which cannot fail when the parser they were meant to cover changes.
 
-test("resolve_query: INSERT is detected as mutation", function()
-  local sql = "INSERT INTO users (name) VALUES ('test')"
-  local upper = sql:upper():match("^%s*(%u+)")
-  eq(upper, "INSERT", "detects INSERT keyword")
-end)
-
--- ── SQL parsing for preview ──
-
-test("extract table from UPDATE SQL", function()
-  local sql = 'UPDATE "orders" SET status = \'done\' WHERE id = 1'
-  local flat = sql:gsub("\n", " ")
-  local after_update = flat:match("[Uu][Pp][Dd][Aa][Tt][Ee]%s+(.*)")
-  local table_name = after_update:match('^"([^"]+)"')
-    or after_update:match("^`([^`]+)`")
-    or after_update:match("^([%w_%.]+)")
-  eq(table_name, "orders", "extracts table from UPDATE")
-end)
-
-test("extract table from DELETE SQL", function()
-  local sql = 'DELETE FROM "users" WHERE age > 60'
-  local flat = sql:gsub("\n", " ")
-  local table_name = flat:match('[Ff][Rr][Oo][Mm]%s+"([^"]+)"')
-    or flat:match("[Ff][Rr][Oo][Mm]%s+`([^`]+)`")
-    or flat:match("[Ff][Rr][Oo][Mm]%s+([%w_%.]+)")
-  eq(table_name, "users", "extracts table from DELETE")
-end)
-
-test("extract WHERE from UPDATE SQL", function()
-  local sql = 'UPDATE orders SET status = \'done\' WHERE id = 1;'
-  local flat = sql:gsub("\n", " ")
-  local where = flat:match("[Ww][Hh][Ee][Rr][Ee]%s+(.+)$")
-  if where then where = where:gsub("%s*;%s*$", "") end
-  eq(where, "id = 1", "extracts WHERE clause")
-end)
-
-test("extract WHERE from DELETE SQL", function()
-  local sql = "DELETE FROM orders WHERE status = 'cancelled' ORDER BY id LIMIT 10;"
-  local flat = sql:gsub("\n", " ")
-  local where = flat:match("[Ww][Hh][Ee][Rr][Ee]%s+(.+)$")
-  if where then
-    where = where:gsub("%s*;%s*$", "")
-    where = where:gsub("%s+[Oo][Rr][Dd][Ee][Rr]%s+[Bb][Yy].*$", "")
-    where = where:gsub("%s+[Ll][Ii][Mm][Ii][Tt]%s+.*$", "")
-  end
-  eq(where, "status = 'cancelled'", "extracts WHERE, strips ORDER BY/LIMIT")
-end)
-
--- ── mutation preview: grid opens with pending_mutation ──
-
-test("_mutation_preview opens grid with pending_mutation flag", function()
-  -- This requires a real DB. Use the test sqlite DB.
-  local init = require("dadbod-grip")
-  local view = require("dadbod-grip.view")
-  local url = "sqlite:tests/seed_sqlite.db"
-
-  -- Clean up any existing sessions
-  for bufnr, _ in pairs(view._sessions) do
-    view._sessions[bufnr] = nil
-    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
-  end
-
-  -- Call _mutation_preview directly
-  local mutation_sql = 'UPDATE "orders" SET status = \'done\' WHERE id = 1'
-  init._mutation_preview(mutation_sql, url, "UPDATE", {})
-
-  -- Check that a grid was opened with pending_mutation
-  local found_mutation = false
-  for bufnr, session in pairs(view._sessions) do
-    if session.pending_mutation then
-      found_mutation = true
-      eq(session.pending_mutation.type, "UPDATE", "mutation type")
-      eq(session.pending_mutation.table_name, "orders", "mutation table")
-      assert(session.pending_mutation.row_count >= 0, "row_count set")
-      assert(session.pending_mutation.sql == mutation_sql, "original SQL stored")
-    end
-  end
-  assert(found_mutation, "grid opened with pending_mutation flag")
-
-  -- Clean up
-  for bufnr, _ in pairs(view._sessions) do
+local function close_sessions()
+  for bufnr in pairs(view._sessions) do
     view._sessions[bufnr] = nil
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
   end
   while #vim.api.nvim_tabpage_list_wins(0) > 1 do
-    pcall(vim.api.nvim_win_close, vim.api.nvim_tabpage_list_wins(0)[#vim.api.nvim_tabpage_list_wins(0)], true)
+    local wins = vim.api.nvim_tabpage_list_wins(0)
+    pcall(vim.api.nvim_win_close, wins[#wins], true)
   end
+end
+
+--- Run the real preview against the sqlite seed, hand back the session it staged.
+local function preview(mutation_sql, stmt_type)
+  close_sessions()
+  init._mutation_preview(mutation_sql, URL, stmt_type, {})
+  for _, session in pairs(view._sessions) do
+    if session.pending_mutation then return session end
+  end
+  error("no grid opened with pending_mutation for: " .. mutation_sql)
+end
+
+test("preview: UPDATE with a quoted table scopes the preview to its WHERE", function()
+  local mutation_sql = 'UPDATE "orders" SET status = \'done\' WHERE id = 1'
+  local s = preview(mutation_sql, "UPDATE")
+  eq(s.pending_mutation.type, "UPDATE", "mutation type")
+  eq(s.pending_mutation.table_name, "orders", "table parsed out of the quoted identifier")
+  eq(s.state.sql, 'SELECT * FROM "orders" WHERE id = 1', "preview SELECT")
+  eq(s.pending_mutation.row_count, 1, "one row matches the WHERE")
+  eq(s.pending_mutation.sql, mutation_sql, "original SQL stored")
+  close_sessions()
+end)
+
+test("preview: DELETE reads its table from FROM and stages every matched row", function()
+  local s = preview('DELETE FROM "users" WHERE age > 40', "DELETE")
+  eq(s.pending_mutation.table_name, "users", "table parsed out of the FROM clause")
+  eq(s.state.sql, 'SELECT * FROM "users" WHERE age > 40', "preview SELECT")
+  eq(s.pending_mutation.row_count, 3, "three seeded users are over 40")
+  local staged = 0
+  for _ in pairs(s.state.deleted) do staged = staged + 1 end
+  eq(staged, 3, "every previewed row is marked deleted, which is what shows it red")
+  close_sessions()
+end)
+
+test("preview: DELETE drops ORDER BY and LIMIT from the extracted WHERE", function()
+  -- The WHERE has to survive into a plain SELECT. Carrying ORDER BY/LIMIT over
+  -- would preview a different row set than the statement is going to touch.
+  local s = preview("DELETE FROM orders WHERE status = 'cancelled' ORDER BY id LIMIT 10;", "DELETE")
+  eq(s.state.sql, 'SELECT * FROM "orders" WHERE status = \'cancelled\'',
+    "trailing ORDER BY, LIMIT and semicolon stripped")
+  close_sessions()
+end)
+
+test("preview: INSERT previews the whole table and counts the incoming rows", function()
+  local s = preview("INSERT INTO users (name) VALUES ('probe')", "INSERT")
+  eq(s.pending_mutation.table_name, "users", "table parsed out of INSERT INTO")
+  eq(s.state.sql, 'SELECT * FROM "users"', "no WHERE for INSERT")
+  eq(s.pending_mutation.row_count, 1, "row_count is the rows being inserted, not the table size")
+  close_sessions()
 end)
 
 -- ── delete on inserted row ──
@@ -158,14 +152,16 @@ test("delete on inserted row removes it via undo_row", function()
   state = data.undo_row(state, ins_idx)
   eq(state.inserted[ins_idx], nil, "inserted row removed by undo_row")
 
-  -- toggle_delete should NOT be used for inserted rows
-  -- (this is a design test: the on_delete callback should check)
+  -- toggle_delete is the wrong verb for an unsaved inserted row: it only adds a
+  -- delete mark, leaving the row in `inserted` and thus staged both ways. That
+  -- is by design, not a bug -- deciding between the two is the caller's job, and
+  -- init.lua's on_delete does branch on state.inserted[row_idx] before choosing.
+  -- Both halves of that contract are pinned here so the branch stays meaningful.
   state = data.insert_row(state, 0)
   for idx in pairs(state.inserted) do ins_idx = idx end
   state = data.toggle_delete(state, ins_idx)
-  -- toggle_delete marks it in deleted but doesn't remove from inserted
   eq(state.deleted[ins_idx], true, "toggle_delete marks deleted")
-  assert(state.inserted[ins_idx] ~= nil, "toggle_delete does NOT remove from inserted (bug)")
+  assert(state.inserted[ins_idx] ~= nil, "toggle_delete leaves the row in inserted")
 end)
 
 print(string.format("\nmutation_spec: %d passed, %d failed", pass, fail))

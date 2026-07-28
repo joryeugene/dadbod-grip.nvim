@@ -777,7 +777,11 @@ test("duckdb get_constraints: returns empty list on query failure", function()
     with_system_mock("", "Error: table not found", 1, function()
       local result, err = duckdb.get_constraints("missing", "duckdb::memory:")
       eq(#result, 0, "empty list on error")
-      -- error is returned (or nil: either is acceptable since duckdb silences errors)
+      -- The error is swallowed on purpose: a non-zero exit here usually means the
+      -- server predates duckdb_constraints(), which must degrade to "no
+      -- constraints", not surface as a failure. Pinned so a later "let's
+      -- propagate the error" change has to face that trade-off deliberately.
+      eq(err, nil, "query failure reports no error")
     end)
   end)
 end)

@@ -134,7 +134,7 @@ end
 
 test("scrolled: the grid window carries the header row in its winbar", function()
   cleanup()
-  local bufnr, win = open_scrolled_grid()
+  local _, win = open_scrolled_grid()
   local winbar = vim.wo[win].winbar
   assert(winbar:find("GripHeader", 1, true), "no GripHeader group: " .. vim.inspect(winbar))
   assert(winbar:find("email", 1, true), "column names missing: " .. vim.inspect(winbar))

@@ -15,7 +15,7 @@ spec name:
 # Lint with luacheck. Settings live in .luacheckrc; same args as CI.
 # Install: luarocks --lua-version=5.1 --local install luacheck
 lint:
-    luacheck lua/ plugin/ lazy.lua
+    luacheck lua/ plugin/ lazy.lua tests/
 
 # Seed PostgreSQL test database
 seed-pg:
