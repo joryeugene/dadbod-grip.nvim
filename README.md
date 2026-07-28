@@ -640,8 +640,13 @@ require("dadbod-grip").setup({
 With `sticky_header` on (the default), the grid's column-name row is mirrored into the window's
 `winbar`, so it stays in place once a long table scrolls past it — and the column the cursor is
 in is highlighted there, the same way it is inside the grid. The mirrored row follows horizontal
-scrolling too, so it stays aligned with the cells underneath on wide tables. It costs one screen
-line per grid window; set `sticky_header = false` to get that line back.
+scrolling too, so it stays aligned with the cells underneath on wide tables.
+
+While the grid's own header is still on screen there is nothing to repeat, so the winbar goes
+blank rather than showing the column names twice. It stays blank rather than disappearing: an
+absent winbar gives the window its line back and would shift the whole grid by a row every time
+scrolling crosses that threshold. It costs one screen line per grid window; set
+`sticky_header = false` to get that line back for good.
 
 Connections added via the picker save to `.grip/connections.json` in the project root. A second file, `~/.grip/connections.json`, holds global connections shared across all projects. Both are merged in the picker. When at least one global connection exists, the picker groups connections under "global" and "project" section headers. Press `G` on any project connection to promote it to global.
 

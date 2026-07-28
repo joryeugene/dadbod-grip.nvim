@@ -166,8 +166,13 @@ sliced to follow horizontal scrolling, so it stays aligned with the cells
 underneath on wide tables. The watch/write badges keep the right edge of the
 winbar and the header yields that space to them.
 
+While the grid's own header row is still on screen there is nothing to repeat,
+so the winbar goes blank instead of showing the column names twice. Blank, not
+absent: an unset 'winbar' hands the line back to the window, which would shift
+the whole grid by one row every time scrolling crosses that threshold.
+
 A winbar costs one screen line per grid window; set `sticky_header = false`
-to reclaim it (the badges then render as before).
+to reclaim it for good (the badges then render as before).
 
 AI SQL generation (optional): >lua
   require("dadbod-grip").setup({

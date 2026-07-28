@@ -105,10 +105,14 @@ local function cleanup()
   end
 end
 
-local function open_grid()
+local function open_grid(row_count)
+  local rows = {}
+  for i = 1, row_count or 2 do
+    rows[i] = { tostring(i), "name" .. i, "u" .. i .. "@example.com" }
+  end
   local st = data.new({
     columns = { "id", "name", "email" },
-    rows = { { "1", "Alice", "a@example.com" }, { "2", "Bob", "b@example.com" } },
+    rows = rows,
     primary_keys = { "id" },
     table_name = "users",
     url = "sqlite:tests/seed_sqlite.db",
@@ -116,10 +120,22 @@ local function open_grid()
   return view.open(st, st.url, "SELECT * FROM users")
 end
 
-test("open: the grid window carries the header row in its winbar", function()
+--- Open a grid tall enough to scroll and put the buffer's own header row off
+--- the top of the window, which is when the sticky header takes over.
+local function open_scrolled_grid()
+  local bufnr = open_grid(200)
+  local win = vim.fn.bufwinid(bufnr)
+  vim.api.nvim_win_call(win, function() vim.fn.winrestview({ topline = 20, lnum = 25 }) end)
+  -- Through the autocmd rather than a direct call, so the wiring is under test
+  -- too: scrolling is what has to bring the header in.
+  vim.api.nvim_exec_autocmds("WinScrolled", { buffer = bufnr })
+  return bufnr, win
+end
+
+test("scrolled: the grid window carries the header row in its winbar", function()
   cleanup()
-  local bufnr = open_grid()
-  local winbar = vim.wo[vim.fn.bufwinid(bufnr)].winbar
+  local bufnr, win = open_scrolled_grid()
+  local winbar = vim.wo[win].winbar
   assert(winbar:find("GripHeader", 1, true), "no GripHeader group: " .. vim.inspect(winbar))
   assert(winbar:find("email", 1, true), "column names missing: " .. vim.inspect(winbar))
   cleanup()
@@ -127,11 +143,10 @@ end)
 
 test("cursor move: the column under the cursor is marked in the winbar", function()
   cleanup()
-  local bufnr = open_grid()
-  local win = vim.fn.bufwinid(bufnr)
+  local bufnr, win = open_scrolled_grid()
   local r = view._sessions[bufnr]._render
   local bp = r.hdr_byte_positions["name"]
-  vim.api.nvim_win_set_cursor(win, { r.data_start, bp.start })
+  vim.api.nvim_win_set_cursor(win, { 25, bp.start })
   vim.api.nvim_exec_autocmds("CursorMoved", { buffer = bufnr })
   local winbar = vim.wo[win].winbar
   assert(winbar:find("%%#GripHeaderActive#name"),
@@ -162,6 +177,16 @@ test("option: sticky_header=false still renders the write badge", function()
   grip.setup({ sticky_header = true })
 end)
 
+test("badges survive the blank winbar while the header is still on screen", function()
+  cleanup()
+  local bufnr = open_grid()
+  view._sessions[bufnr].write_mode = true
+  view._update_winbar(bufnr)
+  local winbar = vim.wo[vim.fn.bufwinid(bufnr)].winbar
+  assert(winbar:find("WRITE", 1, true), "badge dropped before scrolling: " .. vim.inspect(winbar))
+  cleanup()
+end)
+
 test("leaving the grid clears the winbar it set on the window", function()
   cleanup()
   local bufnr = open_grid()
@@ -175,8 +200,7 @@ end)
 
 test("gutter: the winbar is indented past 'number'/'signcolumn'", function()
   cleanup()
-  local bufnr = open_grid()
-  local win = vim.fn.bufwinid(bufnr)
+  local bufnr, win = open_scrolled_grid()
   -- A winbar spans the whole window, the buffer text starts after the gutter.
   -- Without a matching indent the mirrored header sits left of its own columns.
   vim.wo[win].number = true
@@ -187,6 +211,20 @@ test("gutter: the winbar is indented past 'number'/'signcolumn'", function()
   local plain = vim.wo[win].winbar:gsub("%%#%w*#", ""):gsub("%%%*", ""):gsub("%%=", "")
   eq(plain:sub(1, textoff + 3), string.rep(" ", textoff) .. "║",
      "header must start one gutter in")
+  cleanup()
+end)
+
+test("no duplicate: the winbar stays blank while the real header is on screen", function()
+  cleanup()
+  local bufnr = open_grid()
+  local win = vim.fn.bufwinid(bufnr)
+  view._update_winbar(bufnr)
+  local winbar = vim.wo[win].winbar
+  assert(not winbar:find("createdAt", 1, true) and not winbar:find("email", 1, true),
+    "header shown twice while the buffer's own header is visible: " .. vim.inspect(winbar))
+  -- Blank, not absent: an empty winbar drops the line and the grid jumps by one
+  -- row every time scrolling crosses the threshold.
+  assert(winbar ~= "", "winbar must stay reserved to keep the layout stable")
   cleanup()
 end)
 
