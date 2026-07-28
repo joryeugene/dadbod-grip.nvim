@@ -18,8 +18,10 @@ local M = {}
 ---                             in hdr_line (0-based, finish inclusive), as
 ---                             render() records it in hdr_byte_positions
 --- @param badges table|nil  list of {text,hl}, rendered right-aligned
+--- @param gutter integer|nil  window's textoff: the winbar starts at the window
+---                            edge, the buffer text one gutter in
 --- @return string
-function M.build(hdr_line, leftcol, width, active_bp, badges)
+function M.build(hdr_line, leftcol, width, active_bp, badges, gutter)
   -- Badges keep the right edge (that is where they already were before the
   -- header moved in), so they come off the header's budget first.
   local badge_str, badge_w = "", 0
@@ -44,6 +46,9 @@ function M.build(hdr_line, leftcol, width, active_bp, badges)
   end
 
   local out, seg_start, used = {}, 0, 0
+  if gutter and gutter > 0 then
+    out[#out + 1] = "%#Normal#" .. string.rep(" ", gutter)
+  end
   for _, seg in ipairs(segments) do
     local dw = vim.fn.strdisplaywidth(seg.text)
     -- How far into this segment the visible window starts.

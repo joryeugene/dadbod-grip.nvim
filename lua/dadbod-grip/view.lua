@@ -1150,12 +1150,17 @@ function M._update_winbar(bufnr)
   local bar
   if hdr_line then
     local wininfo = vim.fn.getwininfo(winid)[1]
-    local width = wininfo and (wininfo.width - wininfo.textoff) or 0
+    -- A winbar spans the full window width, but the buffer text starts after the
+    -- gutter ('number', 'signcolumn', folds). textoff is that gutter: it comes
+    -- off the width AND goes back on as a leading indent, or the mirrored header
+    -- renders one gutter to the left of the columns it is labelling.
+    local textoff = wininfo and wininfo.textoff or 0
+    local width = wininfo and (wininfo.width - textoff) or 0
     local leftcol = vim.api.nvim_win_call(winid, function()
       return vim.fn.winsaveview().leftcol
     end)
     bar = require("dadbod-grip.view.sticky_header")
-      .build(hdr_line, leftcol, width, M._active_col_bp(bufnr, winid), badges)
+      .build(hdr_line, leftcol, width, M._active_col_bp(bufnr, winid), badges, textoff)
   else
     local parts = {}
     for _, b in ipairs(badges) do

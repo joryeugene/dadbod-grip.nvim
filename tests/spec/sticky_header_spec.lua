@@ -173,5 +173,22 @@ test("leaving the grid clears the winbar it set on the window", function()
   cleanup()
 end)
 
+test("gutter: the winbar is indented past 'number'/'signcolumn'", function()
+  cleanup()
+  local bufnr = open_grid()
+  local win = vim.fn.bufwinid(bufnr)
+  -- A winbar spans the whole window, the buffer text starts after the gutter.
+  -- Without a matching indent the mirrored header sits left of its own columns.
+  vim.wo[win].number = true
+  vim.wo[win].numberwidth = 6
+  view._update_winbar(bufnr)
+  local textoff = vim.fn.getwininfo(win)[1].textoff
+  assert(textoff > 0, "test setup: expected a gutter, got textoff " .. textoff)
+  local plain = vim.wo[win].winbar:gsub("%%#%w*#", ""):gsub("%%%*", ""):gsub("%%=", "")
+  eq(plain:sub(1, textoff + 3), string.rep(" ", textoff) .. "║",
+     "header must start one gutter in")
+  cleanup()
+end)
+
 print("\nsticky_header_spec: " .. pass .. " passed, " .. fail .. " failed")
 if fail > 0 then os.exit(1) end
