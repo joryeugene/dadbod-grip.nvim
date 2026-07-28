@@ -3,6 +3,7 @@
 -- All functions return (result, err). Never throw.
 
 local paths = require("dadbod-grip.paths")
+local ui = require("dadbod-grip.ui")
 
 local M = {}
 

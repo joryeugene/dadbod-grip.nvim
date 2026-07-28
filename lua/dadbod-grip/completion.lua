@@ -115,8 +115,7 @@ function M.extract_aliases(sql)
 
   -- Pattern B/D: FROM/JOIN table alias (no AS)
   -- Match FROM or JOIN specifically to avoid false hits inside SELECT lists
-  for kw, tbl, alias in up:gmatch("(FROM%s+)([%w_%.\"'`]+)%s+([%w_]+)") do
-    _ = kw  -- unused, present to anchor the pattern
+  for _, tbl, alias in up:gmatch("(FROM%s+)([%w_%.\"'`]+)%s+([%w_]+)") do
     local a_up = alias:upper()
     if not _ALIAS_KEYWORDS[a_up] then
       local key = alias:lower()
@@ -125,8 +124,7 @@ function M.extract_aliases(sql)
       end
     end
   end
-  for kw, tbl, alias in up:gmatch("(JOIN%s+)([%w_%.\"'`]+)%s+([%w_]+)") do
-    _ = kw
+  for _, tbl, alias in up:gmatch("(JOIN%s+)([%w_%.\"'`]+)%s+([%w_]+)") do
     local a_up = alias:upper()
     if not _ALIAS_KEYWORDS[a_up] then
       local key = alias:lower()

@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   right edge of the winbar. On by default; `setup({ sticky_header = false })` reclaims the
   screen line.
 
+### Fixed
+
+- **`attempt to index global 'ui'` on the connection prompts** ([#12](https://github.com/joryeugene/dadbod-grip.nvim/issues/12)):
+  the shared-`ui`-helpers refactor in 3.8.0 started calling `ui.input()`/`ui.confirm()` from
+  `connections.lua` without requiring the module there, so eight prompts raised as soon as they
+  were opened — new connection, connect-once, the three remove confirmations, the DuckDB attach
+  alias, and "Save as". Lua compiles an undeclared `ui` as a global read, which is why this got
+  past the test suite: nothing fails until a user reaches one of those prompts. A new
+  `globals_spec` now walks the bytecode of every plugin file for global reads and writes, so a
+  missing `require` fails the suite instead of shipping. Also removes a stray write to the global
+  `_` in `completion.lua`, found by the same scan.
+
 ## [3.8.0] - 2026-07-27
 
 This release brings the work done in the [GlebYavorski/dadbod-grip.nvim](https://github.com/GlebYavorski/dadbod-grip.nvim)
