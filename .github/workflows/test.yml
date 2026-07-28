@@ -26,6 +26,30 @@ jobs:
           version: ${{ matrix.neovim }}
       - name: Seed SQLite test database
         run: sqlite3 tests/seed_sqlite.db < tests/seed_sqlite.sql
+      # duckdb_federation, duckdb_native_schema and duckdb_federated_schema gate on
+      # this binary — 66 assertions that print SKIPPED without it while the runner
+      # still reports ALL TESTS PASSED. Pinned rather than floating: those specs
+      # assert on catalog and cross-database semantics that have changed across
+      # DuckDB minors, so a bump belongs in a commit of its own. To bump, change the
+      # version and replace the checksum with the new asset's sha256.
+      - name: Install DuckDB CLI
+        run: |
+          curl -fsSL -o duckdb.zip \
+            https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip
+          echo "08c0ca117111fcede14239d0093792352befdc174218c344d232c13279643d05  duckdb.zip" \
+            | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/duckdb"
+          unzip -q duckdb.zip -d "$RUNNER_TEMP/duckdb"
+          rm duckdb.zip
+          echo "$RUNNER_TEMP/duckdb" >> "$GITHUB_PATH"
+      # GITHUB_PATH only applies to later steps, so the check is its own step. It
+      # is not redundant with GRIP_REQUIRE_DUCKDB below: this one names the cause.
+      - name: Verify DuckDB is on PATH
+        run: duckdb --version
       - name: Run unit tests
+        # Turns a missing duckdb/sqlite3 into a failure instead of a silent skip,
+        # so removing the step above can't quietly take those 66 assertions with it.
+        env:
+          GRIP_REQUIRE_DUCKDB: '1'
         run: |
           nvim --headless -u tests/minimal_init.lua -l tests/run_specs.lua
