@@ -325,7 +325,10 @@ function M.explain(sql_str, url)
   local parsed = parse_url(url)
   if not parsed then return nil, "Invalid MySQL URL: " .. url end
 
-  -- Try FORMAT=TREE (MySQL 8.0.16+), fallback to plain EXPLAIN
+  -- Try FORMAT=TREE (MySQL 8.0.16+), fallback to plain EXPLAIN. This stderr is
+  -- dropped on purpose: a failure here only means the server predates 8.0.16, and
+  -- the plain-EXPLAIN retry below produces the error worth showing.
+  -- luacheck: ignore 311
   local stdout, stderr, code = mysql_query(parsed, "EXPLAIN FORMAT=TREE " .. sql_str)
   if code ~= 0 then
     stdout, stderr, code = mysql_query(parsed, "EXPLAIN " .. sql_str)

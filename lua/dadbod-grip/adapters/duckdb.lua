@@ -600,7 +600,7 @@ function M.get_indexes(table_name, url)
     ORDER BY is_primary DESC, index_name
   ]], is_prefix, is_prefix, db_filter, esc(schema), esc(tbl))
 
-  local stdout, stderr, code = duckdb(db_path, idx_sql, nil, url)
+  local stdout, _, code = duckdb(db_path, idx_sql, nil, url)
   if code ~= 0 then
     -- DuckDB may not support duckdb_indexes() in all versions; fallback
     return {}, nil
@@ -647,7 +647,7 @@ function M.get_constraints(table_name, url)
     ORDER BY constraint_type, constraint_name
   ]], db_filter, esc(schema), esc(tbl))
 
-  local stdout, stderr, code = duckdb(db_path, sql_str, nil, url)
+  local stdout, _, code = duckdb(db_path, sql_str, nil, url)
   if code ~= 0 then
     -- duckdb_constraints() may not exist in older versions
     return {}, nil

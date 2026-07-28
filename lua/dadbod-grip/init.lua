@@ -2090,8 +2090,8 @@ function M.setup(opts)
   })
 
   -- :GripOpen [path]: open any data source without saving to connections
-  vim.api.nvim_create_user_command("GripOpen", function(opts)
-    local path = vim.fn.trim(opts.args or "")
+  vim.api.nvim_create_user_command("GripOpen", function(cmd_opts)
+    local path = vim.fn.trim(cmd_opts.args or "")
     local connections = require("dadbod-grip.connections")
     if path == "" then
       connections.pick()

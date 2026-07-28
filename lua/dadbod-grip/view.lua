@@ -113,14 +113,11 @@ local VIEW_LABELS = {
 local SEP_COL = "│"
 local SEP_HDR = "═"
 local SEP_MID = "╪"
-local TOP_L   = "╔"
-local TOP_R   = "╗"
 local MID_L   = "╠"
 local MID_R   = "╣"
 local BOT_L   = "╚"
 local BOT_R   = "╝"
 local BOT_MID = "╧"
-local TOP_MID = "╤"
 
 -- ── highlight group setup ──────────────────────────────────────────────────
 -- Groups are re-applied on ColorScheme so they survive :colorscheme switches.
@@ -579,7 +576,6 @@ local function build_render(session, opts)
   local ROW_PREFIX = "║ "
   local ROW_PREFIX_BYTES = #ROW_PREFIX  -- 4 bytes (3+1)
   local COL_SEP = " " .. SEP_COL .. " "
-  local COL_SEP_BYTES = #COL_SEP  -- 5 bytes (1+3+1)
   local row_byte_positions = {}  -- [row_order_idx] = {col_name = {start, finish}}
 
 
@@ -1754,7 +1750,6 @@ local function fetch_view_stats(table_name, url, session)
 
   local stats_sql = table.concat(parts, "\nUNION ALL\n")
 
-  local db_mod = require("dadbod-grip.db")
   local result, query_err = db_mod.query(stats_sql, url)
   if query_err then return nil, nil, "Stats query failed: " .. query_err end
   if not result then return nil, nil, "no stats result" end
@@ -2543,9 +2538,9 @@ function M.show_help(opts)
     local function hadd(ln, group, s, e)
       -- Missing or negative end column means "to the end of the line": add_highlight
       -- took col_end = -1 for that, set_extmark wants end_row = ln + 1 / end_col = 0.
-      local opts = { hl_group = group }
-      if e and e >= 0 then opts.end_col = e else opts.end_row, opts.end_col = ln + 1, 0 end
-      vim.api.nvim_buf_set_extmark(popup_buf, ns_h, ln, s or 0, opts)
+      local ext = { hl_group = group }
+      if e and e >= 0 then ext.end_col = e else ext.end_row, ext.end_col = ln + 1, 0 end
+      vim.api.nvim_buf_set_extmark(popup_buf, ns_h, ln, s or 0, ext)
     end
     local in_ro_box = false
     for i, line in ipairs(help) do

@@ -12,9 +12,10 @@ test:
 spec name:
     nvim --headless -u tests/minimal_init.lua -l tests/spec/{{name}}_spec.lua
 
-# Lint with luacheck (if installed)
+# Lint with luacheck. Settings live in .luacheckrc; same args as CI.
+# Install: luarocks --lua-version=5.1 --local install luacheck
 lint:
-    luacheck lua/ --no-unused-args --no-max-line-length
+    luacheck lua/ plugin/ lazy.lua
 
 # Seed PostgreSQL test database
 seed-pg:

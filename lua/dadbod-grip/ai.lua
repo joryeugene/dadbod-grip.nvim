@@ -239,7 +239,7 @@ function M.build_schema_context(url, question)
   end
 
   vim.notify("Fetching schema...", vim.log.levels.INFO)
-  local tables, err = db.list_tables(url)
+  local tables = db.list_tables(url)
   if not tables then return "", "unknown" end
 
   -- Detect adapter name (generic "SQL" when no adapter claims the scheme)

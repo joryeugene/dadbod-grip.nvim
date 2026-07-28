@@ -1,6 +1,17 @@
 name: Tests
 on: [push, pull_request]
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Settings live in .luacheckrc. Catches missing requires read as globals,
+      # typo'd locals and shadowing — see tests/spec/globals_spec.lua for the
+      # bytecode-side check of the same class.
+      - uses: lunarmodules/luacheck@v1
+        with:
+          args: lua/ plugin/ lazy.lua
+
   test:
     runs-on: ubuntu-latest
     strategy:

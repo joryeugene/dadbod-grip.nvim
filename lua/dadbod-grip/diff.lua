@@ -470,7 +470,6 @@ function M.open(left_arg, right_arg, url)
 
     -- Update mutable state for navigation
     diff_lines = new_diff_lines
-    lines = new_lines
 
     vim.api.nvim_win_set_height(winid, math.min(30, #new_lines + 2))
 
