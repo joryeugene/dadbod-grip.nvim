@@ -162,7 +162,7 @@ test("render_compact: highlight marks match expected count", function()
   local left  = make_state({"id", "name"}, {"id"}, {{"1", "Alice"}, {"2", "Bob"}})
   local right = make_state({"id", "name"}, {"id"}, {{"1", "Alicia"}, {"2", "Bob"}})
   local result = diff.compute(left, right)
-  local lines, marks = diff._render_compact(result, left, right, left.columns)
+  local _, marks = diff._render_compact(result, left, right, left.columns)
   assert(#marks > 0, "should have highlight marks")
   -- Changed row: separator (1 mark) + changed col (1 mark) = at least 2
   local changed_marks = 0

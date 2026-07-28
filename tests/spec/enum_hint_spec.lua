@@ -156,16 +156,24 @@ end)
 
 --- Open the editor with opts, inspect its buffer via fn(buf), then cancel.
 local function with_editor(opts, fn)
-  local result_holder = {}
+  local committed = nil
   editor.open("orders.status", "pending", function(res)
-    result_holder.res = res
+    if res ~= nil then committed = res end
   end, opts)
   local buf = vim.api.nvim_get_current_buf()
   local win = vim.api.nvim_get_current_win()
   local ok, err = pcall(fn, buf)
+  -- Leave through the editor's own cancel mapping (NORMAL q) rather than closing
+  -- the window out from under it, so the teardown exercises the cancel path
+  -- instead of bypassing it. nvim_win_close is only the fallback.
   vim.cmd("stopinsert")
+  pcall(vim.cmd, "normal q")
   pcall(vim.api.nvim_win_close, win, true)
   if not ok then error(err) end
+  -- Cancelling must report nil, not write the value through. The callback used to
+  -- be captured into a table nothing ever read, so a commit-on-cancel regression
+  -- would have gone unnoticed here.
+  assert(committed == nil, "editor committed a value on cancel: " .. tostring(committed))
 end
 
 --- Collect virt_lines hint texts from the enum-hint namespace.

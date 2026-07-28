@@ -206,7 +206,7 @@ end)
 
 test("build_lines: highlight marks generated", function()
   local data = mock_profile_data()
-  local lines, marks = profile.build_lines(data, 120)
+  local _, marks = profile.build_lines(data, 120)
   assert(#marks > 0, "should have highlight marks")
 end)
 

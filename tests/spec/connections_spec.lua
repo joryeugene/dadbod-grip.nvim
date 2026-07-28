@@ -311,6 +311,7 @@ end)
 
 test("switch: resulting file is byte-identical to the old add()+touch() sequence for the same inputs", function()
   local orig_os_time = os.time
+  -- luacheck: push ignore 122
   os.time = function() return 1700000000 end
 
   local old_content, new_content
@@ -332,6 +333,7 @@ test("switch: resulting file is byte-identical to the old add()+touch() sequence
   end)
 
   os.time = orig_os_time
+  -- luacheck: pop
 
   eq(old_content, new_content, "byte-identical output for the same logical mutation")
 end)

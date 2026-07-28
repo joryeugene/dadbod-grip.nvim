@@ -294,7 +294,7 @@ test("explain: SELECT produces a plan and never runs DML", function()
   assert(before ~= SENTINEL,
     "orders.id=1 already holds the sentinel; reseed with tests/seed_mysql.sql")
 
-  local ok, err = pcall(function()
+  local ok, sentinel_err = pcall(function()
     my.explain("UPDATE orders SET status = '" .. SENTINEL .. "' WHERE id = 1", URL)
     local after = my.query("SELECT status FROM orders WHERE id = 1", URL).rows[1][1]
     eq(after, before, "EXPLAIN must not mutate data")
@@ -302,7 +302,7 @@ test("explain: SELECT produces a plan and never runs DML", function()
 
   my.execute(string.format("UPDATE orders SET status = '%s' WHERE id = 1",
     sql.escape_literal(before)), URL)
-  if not ok then error(err) end
+  if not ok then error(sentinel_err) end
 end)
 
 print(string.format("\nmysql_integration_spec: %d passed, %d failed", pass, fail))

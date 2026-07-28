@@ -2,7 +2,6 @@
 dofile("tests/minimal_init.lua")
 local adapter = require("dadbod-grip.adapters.duckdb")
 
-local T = {}
 local pass, fail = 0, 0
 
 local function eq(a, b, msg)

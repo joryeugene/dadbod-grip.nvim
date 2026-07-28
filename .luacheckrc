@@ -26,12 +26,12 @@ unused_args = false
 -- Line length is left to review, not the linter.
 max_line_length = false
 
--- The gate covers shipped code only (see the `lint` recipe in the justfile).
--- tests/ is deliberately out: specs legitimately stub read-only fields such as
--- os.exit and os.time, and their remaining warnings are unused locals that look
--- like missing assertions — renaming those to `_` to please the linter would
--- hide the question rather than answer it. Worth its own pass.
+-- tests/ is in the gate too. Its warnings were worth reading rather than
+-- silencing: an unused local in a spec is often a result that was captured and
+-- never asserted on, or — worse — a test that re-implements the logic it claims
+-- to cover and so asserts on its own copy. See the mutation_spec rewrite. The
+-- two legitimate stubs of read-only fields (os.exit in the runner, os.time in
+-- connections_spec) carry inline `-- luacheck: push ignore 122` at their site.
 exclude_files = {
   ".luarocks",
-  "tests",
 }

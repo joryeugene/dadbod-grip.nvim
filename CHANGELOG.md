@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **luacheck now covers `tests/` too, and the specs it flagged were fixed rather than silenced.**
+  Excluding the suite from the gate in 3.9.0 left 15 warnings unexamined; read individually, most
+  marked a real hole. Seven `mutation_spec` tests copied the statement-detection and
+  table/WHERE-extraction logic out of `init.lua` into their own bodies and asserted on the copy,
+  so they passed no matter what the plugin did — including the "UPDATE wrapped in SELECT" bug one
+  of them was named after. They now drive `_resolve_query` and `_mutation_preview` directly; each
+  new assertion was checked against a deliberately broken build to confirm it can fail.
+  `completion_spec` had the same defect in its auto-trigger guard test. `enum_hint_spec` fed the
+  editor a callback whose result nothing read, and tore the window down without going through the
+  cancel mapping, so a commit-on-cancel regression was invisible; the teardown now cancels for
+  real. `adapter_spec` and `duckdb_federation_spec` captured an error value and never checked it.
+  The two legitimate stubs of read-only fields (`os.exit` in the runner, `os.time` in
+  `connections_spec`) carry inline luacheck directives at their site. No production behaviour
+  changes.
+
 ## [3.9.0] - 2026-07-28
 
 ### Added
@@ -266,5 +285,6 @@ older tags are left in place so anyone pinned to them keeps working.
 - **joryeugene** — SQL Server adapter, PostgreSQL routines in the schema sidebar, focused ER diagram
   ([PR #17](https://github.com/joryeugene/dadbod-grip.nvim/pull/17)).
 
+[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.9.0...HEAD
 [3.9.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.9.0
 [3.8.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.8.0

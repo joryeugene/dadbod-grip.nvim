@@ -7,10 +7,11 @@ jobs:
       - uses: actions/checkout@v4
       # Settings live in .luacheckrc. Catches missing requires read as globals,
       # typo'd locals and shadowing — see tests/spec/globals_spec.lua for the
-      # bytecode-side check of the same class.
+      # bytecode-side check of the same class. tests/ is linted too: an unused
+      # local in a spec is often a result nothing asserted on.
       - uses: lunarmodules/luacheck@v1
         with:
-          args: lua/ plugin/ lazy.lua
+          args: lua/ plugin/ lazy.lua tests/
 
   test:
     runs-on: ubuntu-latest

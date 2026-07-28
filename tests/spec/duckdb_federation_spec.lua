@@ -196,6 +196,7 @@ vim.fn.delete(native_duck_path)
 adapter.detach(duck_url, "supplier")
 tables, err = adapter.list_tables(duck_url)
 truthy(tables, "list_tables returns results after detach")
+eq(err, nil, "no error after detach")
 
 has_schema_field = false
 for _, t in ipairs(tables or {}) do

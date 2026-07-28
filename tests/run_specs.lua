@@ -6,6 +6,7 @@
 -- Override os.exit so individual specs don't kill the runner
 local any_failure = false
 local real_exit = os.exit
+-- luacheck: push ignore 122
 os.exit = function(code)
   if code and code ~= 0 then any_failure = true end
 end
@@ -35,6 +36,7 @@ for _, file in ipairs(files) do
 end
 
 os.exit = real_exit
+-- luacheck: pop
 
 print("═══════════════════════════════════")
 if any_failure then
