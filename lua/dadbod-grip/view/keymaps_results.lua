@@ -8,7 +8,7 @@ local M = {}
 --- The only two keys that look past this buffer at every other open grid:
 --- pin/unpin (which the switcher sorts on) and the switcher itself.
 function M.setup(bufnr, ctx)
-  local update_badge = ctx.update_badge
+  local update_winbar = ctx.update_winbar
   local kmap = ctx.kmap
 
   -- gL: pin / unpin this result (exclude from auto-reuse by query pad)
@@ -42,7 +42,7 @@ function M.setup(bufnr, ctx)
       pcall(vim.api.nvim_buf_set_name, bufnr, cur_name:gsub("%s*%[pinned%]", ""))
       vim.notify("Result unpinned", vim.log.levels.INFO)
     end
-    update_badge(bufnr)
+    update_winbar(bufnr)
   end, "Pin/unpin result (exclude from auto-reuse)")
 
   -- gJ: result switcher: pick from all live grip grid sessions

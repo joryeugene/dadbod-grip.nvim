@@ -11,7 +11,7 @@ local M = {}
 --- picker, connection switcher, watch mode, write mode, open-as-editable and
 --- the query history.
 function M.setup(bufnr, ctx)
-  local update_badge = ctx.update_badge
+  local update_winbar = ctx.update_winbar
   local start_watch = ctx.start_watch
   local stop_watch = ctx.stop_watch
   local map, kmap = ctx.map, ctx.kmap
@@ -80,7 +80,7 @@ function M.setup(bufnr, ctx)
         return
       end
       session.write_mode = false
-      update_badge(bufnr)
+      update_winbar(bufnr)
       vim.notify("Write mode off", vim.log.levels.INFO)
     else
       -- Turning ON: destructive-action confirm
@@ -90,7 +90,7 @@ function M.setup(bufnr, ctx)
         return
       end
       session.write_mode = true
-      update_badge(bufnr)
+      update_winbar(bufnr)
       vim.notify("Write mode on: edits will overwrite " .. short, vim.log.levels.INFO)
     end
   end, "Toggle write mode (overwrite file on apply)")

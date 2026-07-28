@@ -125,6 +125,7 @@ Override if needed: >lua
     picker           = "builtin",
     pinned_max       = nil,
     cell_split       = "horizontal",
+    sticky_header    = true,
   })
 <
 When `completion` is false, grip's built-in TextChangedI popup is disabled.
@@ -155,6 +156,18 @@ something first. Unset (nil, the default) means no cap.
 `cell_split` controls how the full-buffer cell editor (`gB`) opens:
 "horizontal" (default) splits below the grid at ~40% height, "vertical"
 splits at ~40% width. See |grip-cell-buffer|.
+
+                                                       *grip-sticky-header*
+`sticky_header` (default true) mirrors the grid's column-name row into the
+window's 'winbar', so the column names stay visible once a table taller than
+the window scrolls past them. The column under the cursor is highlighted
+there with the same background the grid uses for it, and the mirrored row is
+sliced to follow horizontal scrolling, so it stays aligned with the cells
+underneath on wide tables. The watch/write badges keep the right edge of the
+winbar and the header yields that space to them.
+
+A winbar costs one screen line per grid window; set `sticky_header = false`
+to reclaim it (the badges then render as before).
 
 AI SQL generation (optional): >lua
   require("dadbod-grip").setup({
@@ -1052,6 +1065,8 @@ grip.setup({opts})
     limit         (number)  Default row limit. Default: 100
     max_col_width (number)  Max display width per column. Default: 40
     timeout       (number)  Query timeout in ms. Default: 10000
+    sticky_header (boolean) Column names in the winbar. Default: true
+                            See |grip-sticky-header|
 
                                                            *grip.open()*
 grip.open({arg}, {url}, {opts})

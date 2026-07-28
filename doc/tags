@@ -28,7 +28,9 @@ grip-ai	dadbod-grip.txt	/*grip-ai*
 grip-analysis	dadbod-grip.txt	/*grip-analysis*
 grip-api	dadbod-grip.txt	/*grip-api*
 grip-batch-editing	dadbod-grip.txt	/*grip-batch-editing*
+grip-cell-buffer	dadbod-grip.txt	/*grip-cell-buffer*
 grip-cell-editor	dadbod-grip.txt	/*grip-cell-editor*
+grip-cell-split	dadbod-grip.txt	/*grip-cell-split*
 grip-column-visibility	dadbod-grip.txt	/*grip-column-visibility*
 grip-commands	dadbod-grip.txt	/*grip-commands*
 grip-config	dadbod-grip.txt	/*grip-config*
@@ -48,10 +50,12 @@ grip-history	dadbod-grip.txt	/*grip-history*
 grip-inspection	dadbod-grip.txt	/*grip-inspection*
 grip-install	dadbod-grip.txt	/*grip-install*
 grip-introduction	dadbod-grip.txt	/*grip-introduction*
+grip-json-tree	dadbod-grip.txt	/*grip-json-tree*
 grip-keybindings	dadbod-grip.txt	/*grip-keybindings*
 grip-keymaps-cfg	dadbod-grip.txt	/*grip-keymaps-cfg*
 grip-navigation	dadbod-grip.txt	/*grip-navigation*
 grip-picker	dadbod-grip.txt	/*grip-picker*
+grip-pinned-max	dadbod-grip.txt	/*grip-pinned-max*
 grip-profiling	dadbod-grip.txt	/*grip-profiling*
 grip-query-pad	dadbod-grip.txt	/*grip-query-pad*
 grip-requirements	dadbod-grip.txt	/*grip-requirements*
@@ -60,6 +64,7 @@ grip-saved-queries	dadbod-grip.txt	/*grip-saved-queries*
 grip-schema	dadbod-grip.txt	/*grip-schema*
 grip-sort-filter	dadbod-grip.txt	/*grip-sort-filter*
 grip-sort-filter-page	dadbod-grip.txt	/*grip-sort-filter-page*
+grip-sticky-header	dadbod-grip.txt	/*grip-sticky-header*
 grip-tab-views	dadbod-grip.txt	/*grip-tab-views*
 grip-visual-mode	dadbod-grip.txt	/*grip-visual-mode*
 grip-workflow	dadbod-grip.txt	/*grip-workflow*

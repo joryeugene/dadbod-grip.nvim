@@ -74,6 +74,41 @@ function M.pad_display(s, width, ellipsize, marker)
   return trimmed .. string.rep(" ", math.max(0, width - dw)), dw
 end
 
+--- Slice `width` display cells out of `s`, starting `from` cells in.
+--- `from` is 0-based and in the same units as winsaveview().leftcol.
+--- @return string
+function M.slice_display(s, from, width)
+  s = tostring(s or "")
+  if width <= 0 then return "" end
+
+  local out, used, skipped = {}, 0, 0
+  for i = 0, vim.fn.strchars(s) - 1 do
+    local ch = vim.fn.strcharpart(s, i, 1)
+    local cw = vim.fn.strdisplaywidth(ch)
+    if skipped + cw <= from then
+      skipped = skipped + cw
+    elseif skipped < from then
+      -- `from` lands inside a wide glyph: only its trailing cells are visible.
+      -- Emitting the glyph itself would pull everything after it one cell left
+      -- of the grid row underneath, so pad with what is actually on screen.
+      local visible = math.min(skipped + cw - from, width - used)
+      out[#out + 1] = string.rep(" ", visible)
+      used = used + visible
+      skipped = skipped + cw
+    else
+      if used + cw > width then
+        -- Mirror of the `from` case at the right edge: a glyph straddling the
+        -- end of the slice contributes only the cells that fit.
+        out[#out + 1] = string.rep(" ", width - used)
+        break
+      end
+      out[#out + 1] = ch
+      used = used + cw
+    end
+  end
+  return table.concat(out)
+end
+
 --- Return the configured float border style.
 --- Lazy-requires init to avoid circular dependency.
 function M.border()
