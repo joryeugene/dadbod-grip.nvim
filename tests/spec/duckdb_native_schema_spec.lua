@@ -35,7 +35,12 @@ local function falsy(v, msg)
   end
 end
 
+-- CI sets GRIP_REQUIRE_DUCKDB so a missing binary fails instead of skipping:
+-- the runner prints ALL TESTS PASSED either way.
 if vim.fn.executable("duckdb") ~= 1 then
+  if vim.env.GRIP_REQUIRE_DUCKDB == "1" then
+    error("duckdb_native_schema_spec: duckdb missing while GRIP_REQUIRE_DUCKDB=1")
+  end
   print("duckdb_native_schema_spec: SKIPPED (duckdb not found)")
   return
 end

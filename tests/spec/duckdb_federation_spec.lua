@@ -24,8 +24,13 @@ local function truthy(v, msg)
   end
 end
 
--- Skip if duckdb or sqlite3 not available
+-- Skip if duckdb or sqlite3 not available. CI sets GRIP_REQUIRE_DUCKDB so a
+-- missing binary fails instead: the runner prints ALL TESTS PASSED either way,
+-- which is how these assertions went unrun in CI for as long as they did.
 if vim.fn.executable("duckdb") ~= 1 or vim.fn.executable("sqlite3") ~= 1 then
+  if vim.env.GRIP_REQUIRE_DUCKDB == "1" then
+    error("duckdb_federation_spec: duckdb or sqlite3 missing while GRIP_REQUIRE_DUCKDB=1")
+  end
   print("duckdb_federation_spec: SKIPPED (duckdb or sqlite3 not found)")
   return
 end

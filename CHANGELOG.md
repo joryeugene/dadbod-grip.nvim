@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CI installs the DuckDB CLI, so 66 previously unrun assertions actually run.**
+  `duckdb_federation_spec`, `duckdb_native_schema_spec` and `duckdb_federated_schema_spec` gate on
+  the `duckdb` binary and printed `SKIPPED` without it, while the runner still reported
+  `ALL TESTS PASSED` — cross-database federation, native non-`main` schemas and schema-prefixed
+  table names were never exercised on any push. The version is pinned (1.5.5) and the download
+  checksum-verified, because those specs assert on catalog semantics that have changed across
+  DuckDB minors; a bump should be a deliberate commit. The three specs still skip locally when
+  `duckdb` is absent, but CI sets `GRIP_REQUIRE_DUCKDB=1`, which turns a missing binary into a
+  failure so the install step cannot be dropped without the suite going red.
+
 - **luacheck now covers `tests/` too, and the specs it flagged were fixed rather than silenced.**
   Excluding the suite from the gate in 3.9.0 left 15 warnings unexamined; read individually, most
   marked a real hole. Seven `mutation_spec` tests copied the statement-detection and
