@@ -871,7 +871,7 @@ Created by **[@joryeugene](https://github.com/joryeugene)**, who designed and wr
 
 Maintained by **[@GlebYavorski](https://github.com/GlebYavorski)**.
 
-Thanks to **[@Kimilhee](https://github.com/Kimilhee)** for multibyte/CJK cell alignment and **[@mireq](https://github.com/mireq)** for earlier contributions, and to everyone who filed the issues that shaped the 3.8.0 release.
+Thanks to **[@Kimilhee](https://github.com/Kimilhee)** for multibyte/CJK cell alignment and **[@mireq](https://github.com/mireq)** for earlier contributions, and to everyone who filed the issues that shaped the 3.9.0 release.
 
 ---
 
