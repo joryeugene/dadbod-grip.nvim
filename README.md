@@ -193,7 +193,7 @@ work without credentials.
 - **Reverse FK navigation** via `gm` to open the rows in other tables that reference the current row (e.g. `orders.user_id ← users`). One referencing table opens directly; several show a picker of `child_table.fk_column`. Hops chain: users → orders → order_items.
 - **Query history** via `gh` or `:GripHistory` browsing all executed queries with timestamp and SQL preview, stored in `.grip/history.jsonl`.
 - **Data profiling** via `gR` or `:GripProfile` showing sparkline distributions, completeness, cardinality, and top values per column.
-- **Column statistics** via `gS` showing count, distinct, nulls, min/max, and top values.
+- **Column statistics** via `gS` showing count, distinct, nulls, min/max, and an ASCII distribution: numeric columns get eight labelled buckets, everything else gets its top values, both as horizontal bars.
 - **Aggregate on selection** via `ga` in visual mode showing count/sum/avg/min/max.
 - **Query Doctor** via `:GripExplain` translating EXPLAIN plans into plain-English health checks with cost bars and index suggestions.
 - **AI SQL generation** via `A` or `:GripAsk` turning natural language into SQL queries using Anthropic, OpenAI, Gemini, or local Ollama. AI reads existing query pad SQL to modify it rather than generating from scratch. Schema context cached per connection.
@@ -382,7 +382,7 @@ Note: explain query plan is at `gQ` (Query Doctor).
 | Key | Action |
 |-----|--------|
 | `ga` | Aggregate selected cells (visual mode) |
-| `gS` | Column statistics popup |
+| `gS` | Column statistics popup (with ASCII distribution) |
 | `gR` | Table profile (sparkline distributions) |
 | `gQ` | Query Doctor (plain-English EXPLAIN) |
 | `gx` | Open URL in current cell (http/https/ftp) |

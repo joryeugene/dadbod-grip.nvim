@@ -584,7 +584,9 @@ ANALYSIS AND EXPORT ~
   ga              Aggregate selected cells (visual mode)
                   Shows count, sum, avg, min, max
   gS              Column statistics popup
-                  Shows count, distinct, nulls, min/max, top values
+                  Shows count, distinct, nulls, min/max and an ASCII
+                  distribution as horizontal bars: numeric columns get eight
+                  labelled buckets, every other type gets its top 8 values
   gQ              Explain current query plan
   gx              Open URL in current cell (http/https/ftp)
   gR              Table profile (sparkline distributions)
