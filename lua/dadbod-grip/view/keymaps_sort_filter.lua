@@ -31,13 +31,13 @@ function M.setup(bufnr, ctx)
   kmap("grid_sort", function()
     local session_s = ctx.session()
     if not session_s or not session_s.query_spec then return end
-    local cell = view.get_cell(bufnr)
-    if not cell then
+    local col_name = ctx.cursor_column()
+    if not col_name then
       vim.notify("Move cursor to a column to sort", vim.log.levels.INFO)
       return
     end
     if not confirm_discard_changes("Sort") then return end
-    local new_spec = qmod.toggle_sort(session_s.query_spec, cell.col_name)
+    local new_spec = qmod.toggle_sort(session_s.query_spec, col_name)
     if session_s.on_requery then session_s.on_requery(bufnr, new_spec) end
   end, "Sort by column")
 
@@ -45,13 +45,13 @@ function M.setup(bufnr, ctx)
   kmap("grid_sort_stack", function()
     local session_s = ctx.session()
     if not session_s or not session_s.query_spec then return end
-    local cell = view.get_cell(bufnr)
-    if not cell then
+    local col_name = ctx.cursor_column()
+    if not col_name then
       vim.notify("Move cursor to a column to sort", vim.log.levels.INFO)
       return
     end
     if not confirm_discard_changes("Sort") then return end
-    local new_spec = qmod.add_sort(session_s.query_spec, cell.col_name)
+    local new_spec = qmod.add_sort(session_s.query_spec, col_name)
     if session_s.on_requery then session_s.on_requery(bufnr, new_spec) end
   end, "Add secondary sort")
 
@@ -100,21 +100,7 @@ function M.setup(bufnr, ctx)
   kmap("grid_filter_null", function()
     local session_n = ctx.session()
     if not session_n or not session_n.query_spec then return end
-    local col_name
-    local cell = view.get_cell(bufnr)
-    if cell then
-      col_name = cell.col_name
-    else
-      local r = session_n._render
-      if r then
-        local col_nr = vim.api.nvim_win_get_cursor(0)[2]
-        local cols = r.visible_columns or session_n.state.columns
-        if r.hdr_byte_positions then
-          local snapped = view._snap_col(cols, r.hdr_byte_positions, col_nr)
-          if snapped then col_name = snapped.col_name end
-        end
-      end
-    end
+    local col_name = ctx.cursor_column()
     if not col_name then
       vim.notify("Move cursor to a column first", vim.log.levels.INFO)
       return
@@ -130,21 +116,7 @@ function M.setup(bufnr, ctx)
     if not session_gF or not session_gF.query_spec then return end
 
     -- Resolve column name from cursor (data row or header/type row)
-    local col_name
-    local cell = view.get_cell(bufnr)
-    if cell then
-      col_name = cell.col_name
-    else
-      local r = session_gF._render
-      if r then
-        local col_nr = vim.api.nvim_win_get_cursor(0)[2]
-        local cols = r.visible_columns or session_gF.state.columns
-        if r.hdr_byte_positions then
-          local snapped = view._snap_col(cols, r.hdr_byte_positions, col_nr)
-          if snapped then col_name = snapped.col_name end
-        end
-      end
-    end
+    local col_name = ctx.cursor_column()
     if not col_name then
       vim.notify("Move cursor to a column first", vim.log.levels.INFO)
       return
