@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.9.0] - 2026-07-28
 
 ### Added
 
@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `globals_spec` now walks the bytecode of every plugin file for global reads and writes, so a
   missing `require` fails the suite instead of shipping. Also removes a stray write to the global
   `_` in `completion.lua`, found by the same scan.
+
+### Changed
+
+- **luacheck now runs in CI.** The `just lint` recipe existed but was wired into nothing, and
+  there was no `.luacheckrc` — so the linter that would have caught the bug above at parse time
+  never ran. Clearing it removed four unused constants and a duplicated `require` in `view.lua`,
+  two variables re-declared over an identical binding already in scope in `connections.lua`, a
+  dead assignment in `diff.lua`, and three shadowed `opts` bindings. No behaviour changes.
 
 ## [3.8.0] - 2026-07-27
 
@@ -258,4 +266,5 @@ older tags are left in place so anyone pinned to them keeps working.
 - **joryeugene** — SQL Server adapter, PostgreSQL routines in the schema sidebar, focused ER diagram
   ([PR #17](https://github.com/joryeugene/dadbod-grip.nvim/pull/17)).
 
+[3.9.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.9.0
 [3.8.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.8.0
