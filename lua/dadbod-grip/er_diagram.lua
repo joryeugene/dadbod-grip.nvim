@@ -649,12 +649,12 @@ function M.show(url, scroll_to, opts)
       target = targets[1].ref
     else
       -- Multiple FKs: show numbered prompt
-      local opts = {}
+      local choices = {}
       for i, t in ipairs(targets) do
-        opts[i] = i .. ": " .. t.col .. " → " .. t.ref
+        choices[i] = i .. ": " .. t.col .. " → " .. t.ref
       end
       local choice = ui.input({
-        prompt = table.concat(opts, "   ") .. "\nFollow FK [#]: ",
+        prompt = table.concat(choices, "   ") .. "\nFollow FK [#]: ",
       })
       if not choice then return end
       local idx = tonumber(choice)

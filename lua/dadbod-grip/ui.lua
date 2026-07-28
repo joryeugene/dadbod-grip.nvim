@@ -375,6 +375,9 @@ function M.blocking(msg, fn)
   vim.api.nvim__redraw({ flush = true })
 
   if not ok then error(rets[1], 2) end
+  -- table.unpack is nil on the LuaJIT Neovim embeds; probed so this keeps working
+  -- if Neovim ever moves to a 5.2+ VM, where the bare `unpack` global is gone.
+  -- luacheck: ignore 143
   return (table.unpack or unpack)(rets)
 end
 

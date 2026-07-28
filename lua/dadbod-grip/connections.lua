@@ -395,7 +395,6 @@ function M.list()
   local hidden = vim.fn.stdpath("data") .. "/grip/softrear.hidden"
   local sql_files = vim.api.nvim_get_runtime_file("demo/softrear.sql", false)
   if #sql_files > 0 and vim.fn.filereadable(hidden) == 0 then
-    local has_duck = vim.fn.executable("duckdb") == 1
     local ext      = has_duck and ".duckdb" or ".db"
     local db_path  = vim.fn.stdpath("data") .. "/grip/softrear" .. ext
     local demo_url = (has_duck and "duckdb:" or "sqlite:") .. db_path
@@ -932,7 +931,6 @@ function M.pick(opts)
           if not alias then return end
           local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
           local schema_mod = require("dadbod-grip.schema")
-          local url = vim.g.db
           local dsn = duckdb_adapter.url_to_dsn(c.url)
           local err = duckdb_adapter.attach(url, dsn, alias)
           if err then
