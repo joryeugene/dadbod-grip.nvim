@@ -4,7 +4,6 @@
 -- bearing.
 
 local data   = require("dadbod-grip.data")
-local sql    = require("dadbod-grip.sql")
 local db     = require("dadbod-grip.db")
 local qmod   = require("dadbod-grip.query")
 
@@ -92,7 +91,7 @@ function M.setup(bufnr, ctx)
     aggregate_column(rows_a)
   end, "Aggregate selected rows in column")
 
-  -- gS: column statistics
+  -- gS: column statistics with a distribution histogram
   kmap("grid_col_stats", function()
     local session_cs = ctx.session()
     if not session_cs or not session_cs.state.table_name then
@@ -104,53 +103,32 @@ function M.setup(bufnr, ctx)
       vim.notify("Move cursor to a column", vim.log.levels.INFO)
       return
     end
-    local tbl = session_cs.state.table_name
-    local col_q = sql.quote_ident(cell.col_name)
-    local stats_sql = string.format(
-      "SELECT COUNT(*) AS total, COUNT(DISTINCT %s) AS distinct_count, " ..
-      "COUNT(*) - COUNT(%s) AS null_count, MIN(%s) AS min_val, MAX(%s) AS max_val " ..
-      "FROM %s",
-      col_q, col_q, col_q, col_q, sql.quote_ident(tbl)
-    )
-    local result, err = db.query(stats_sql, session_cs.state.url)
-    if err then
-      vim.notify("Stats query failed: " .. err, vim.log.levels.WARN)
-      return
-    end
-    if not result or #result.rows == 0 then
-      vim.notify("No stats returned", vim.log.levels.INFO)
-      return
-    end
-    local row = result.rows[1]
-    local info = {
-      " " .. cell.col_name .. ": Column Statistics",
-      " " .. string.rep("─", 40),
-      "  Total:    " .. (row[1] or "?"),
-      "  Distinct: " .. (row[2] or "?"),
-      "  Nulls:    " .. (row[3] or "?"),
-      "  Min:      " .. (row[4] or "NULL"),
-      "  Max:      " .. (row[5] or "NULL"),
-    }
+    local st_cs = session_cs.state
 
-    -- Try to get top 5 values
-    local top_sql = string.format(
-      "SELECT %s, COUNT(*) AS cnt FROM %s WHERE %s IS NOT NULL " ..
-      "GROUP BY %s ORDER BY cnt DESC LIMIT 5",
-      col_q, sql.quote_ident(tbl), col_q, col_q
-    )
-    local top_result = db.query(top_sql, session_cs.state.url)
-    if top_result and #top_result.rows > 0 then
-      table.insert(info, "")
-      table.insert(info, "  Top values:")
-      for _, r_top in ipairs(top_result.rows) do
-        local val = r_top[1] or "?"
-        local cnt = r_top[2] or "?"
-        table.insert(info, "    " .. tostring(val):sub(1, 30) .. "  (" .. cnt .. ")")
+    -- The data type decides bucketed-vs-top-values, so fill the session cache
+    -- if some other view has not already (same lazy pattern as K and gy). A
+    -- failure here is not fatal: an unknown type profiles as top values.
+    if not session_cs._column_info then
+      local info, info_err = db.get_column_info(st_cs.table_name, st_cs.url)
+      if not info_err then session_cs._column_info = info end
+    end
+    local data_type
+    for _, ci in ipairs(session_cs._column_info or {}) do
+      if ci.column_name == cell.col_name then
+        data_type = ci.data_type
+        break
       end
     end
 
+    local profile = require("dadbod-grip.profile")
+    local cs, cs_err = profile.gather_column(st_cs.table_name, cell.col_name, data_type, st_cs.url)
+    if not cs then
+      vim.notify("Stats query failed: " .. (cs_err or "unknown error"), vim.log.levels.WARN)
+      return
+    end
+
     local grip_win = vim.api.nvim_get_current_win()
-    open_info_float(grip_win, info, { title = " Column Stats " })
+    open_info_float(grip_win, profile.build_column_lines(cs), { title = " Column Stats " })
   end, "Column statistics")
 
   -- gR: table profile report

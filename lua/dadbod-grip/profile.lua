@@ -9,8 +9,15 @@ local M = {}
 
 local SPARK_CHARS = { "\xe2\x96\x81", "\xe2\x96\x82", "\xe2\x96\x83", "\xe2\x96\x84",
                       "\xe2\x96\x85", "\xe2\x96\x86", "\xe2\x96\x87", "\xe2\x96\x88" }
+-- Horizontal bars: a full block plus the seven eighth-width blocks, so a bar
+-- resolves to 1/8 of a cell instead of a whole one.
+local HBAR_FULL = "\xe2\x96\x88"
+local HBAR_FRAC = { "\xe2\x96\x8f", "\xe2\x96\x8e", "\xe2\x96\x8d", "\xe2\x96\x8c",
+                    "\xe2\x96\x8b", "\xe2\x96\x8a", "\xe2\x96\x89" }
 local MAX_COLUMNS = 20
 local BUCKET_COUNT = 8
+local HBAR_WIDTH = 16      -- display cells a full-scale bar occupies
+local HBAR_LABEL_MAX = 30  -- widest bucket/value label; matches the popup's old cut
 
 -- ── pure helpers ──────────────────────────────────────────────────────────────
 
@@ -26,6 +33,44 @@ function M.sparkline(counts, max_count)
     table.insert(parts, SPARK_CHARS[idx])
   end
   return table.concat(parts)
+end
+
+--- Build a horizontal bar `width` display cells wide at full scale.
+--- A non-zero count never renders as empty: anything that would round below one
+--- eighth still gets the thinnest block. One row out of ten million has to stay
+--- visible, otherwise it is indistinguishable from an empty bucket.
+function M.hbar(count, max_count, width)
+  width = width or HBAR_WIDTH
+  local c = tonumber(count) or 0
+  local mx = tonumber(max_count) or 0
+  if c <= 0 or mx <= 0 or width <= 0 then return "" end
+
+  local eighths = math.floor((c / mx) * width * 8 + 0.5)
+  eighths = math.max(1, math.min(width * 8, eighths))
+  local bar = string.rep(HBAR_FULL, math.floor(eighths / 8))
+  local rem = eighths % 8
+  if rem > 0 then bar = bar .. HBAR_FRAC[rem] end
+  return bar
+end
+
+--- The BUCKET_COUNT ranges a numeric histogram spans, or nil when the column
+--- cannot be bucketed at all (missing, equal or non-numeric bounds -- a date
+--- whose MIN is a timestamp string lands here).
+--- Buckets are half-open [lo, hi) except the last, whose hi is max_val and is
+--- inclusive, because build_histogram_sql emits it as the CASE's ELSE arm.
+--- This is the single source of truth for the step: the SQL thresholds and the
+--- labels in the gS popup are both generated from it, so they cannot drift.
+function M.bucket_bounds(min_val, max_val)
+  if not min_val or not max_val or min_val == max_val then return nil end
+  local min_n, max_n = tonumber(min_val), tonumber(max_val)
+  if not min_n or not max_n then return nil end
+
+  local step = (max_n - min_n) / BUCKET_COUNT
+  local bounds = {}
+  for b = 1, BUCKET_COUNT do
+    bounds[b] = { lo = min_n + step * (b - 1), hi = min_n + step * b }
+  end
+  return bounds
 end
 
 --- Classify a column's data type into a profiling category.
@@ -75,40 +120,34 @@ function M.build_stats_sql(table_name, col_infos)
   return "SELECT " .. table.concat(parts, ", ")
 end
 
+--- Whether a column of `col_type` with these bounds gets CASE buckets rather
+--- than a top-values GROUP BY. Callers need to know which shape a
+--- build_histogram_sql result will have before they read its rows.
+function M.is_bucketed(col_type, min_val, max_val)
+  if col_type ~= "numeric" and col_type ~= "date" then return false end
+  return M.bucket_bounds(min_val, max_val) ~= nil
+end
+
 --- Build a histogram query for one column.
+--- Text, boolean and unknown columns -- and anything numeric or date-like whose
+--- bounds cannot be bucketed -- get the top BUCKET_COUNT values by frequency.
 function M.build_histogram_sql(table_name, col_name, col_type, min_val, max_val)
   local tbl = sql.quote_ident(table_name)
   local col = sql.quote_ident(col_name)
 
-  if col_type == "text" or col_type == "boolean" or col_type == "unknown" then
+  if not M.is_bucketed(col_type, min_val, max_val) then
     return string.format(
       "SELECT %s AS val, COUNT(*) AS cnt FROM %s WHERE %s IS NOT NULL GROUP BY %s ORDER BY cnt DESC LIMIT %d",
       col, tbl, col, col, BUCKET_COUNT
     )
   end
 
-  -- Numeric or date: build CASE WHEN buckets
-  if not min_val or not max_val or min_val == max_val then
-    return string.format(
-      "SELECT %s AS val, COUNT(*) AS cnt FROM %s WHERE %s IS NOT NULL GROUP BY %s ORDER BY cnt DESC LIMIT %d",
-      col, tbl, col, col, BUCKET_COUNT
-    )
-  end
-
-  local min_n = tonumber(min_val)
-  local max_n = tonumber(max_val)
-  if not min_n or not max_n then
-    -- Non-numeric min/max (dates): fall back to GROUP BY
-    return string.format(
-      "SELECT %s AS val, COUNT(*) AS cnt FROM %s WHERE %s IS NOT NULL GROUP BY %s ORDER BY cnt DESC LIMIT %d",
-      col, tbl, col, col, BUCKET_COUNT
-    )
-  end
-
-  local step = (max_n - min_n) / BUCKET_COUNT
+  -- Numeric or date: build CASE WHEN buckets. Only BUCKET_COUNT - 1 thresholds
+  -- are emitted; the last bucket is the ELSE arm, so max lands inside it.
+  local bounds = M.bucket_bounds(min_val, max_val)
   local cases = {}
   for b = 1, BUCKET_COUNT - 1 do
-    table.insert(cases, string.format("WHEN CAST(%s AS REAL) < %s THEN %d", col, min_n + step * b, b))
+    table.insert(cases, string.format("WHEN CAST(%s AS REAL) < %s THEN %d", col, bounds[b].hi, b))
   end
   table.insert(cases, "ELSE " .. BUCKET_COUNT)
 
@@ -187,8 +226,14 @@ function M.gather(table_name, url)
     local hist_sql = M.build_histogram_sql(table_name, p.name, p.category, p.min, p.max)
     local hist_result = db.query(hist_sql, url)
     if hist_result and #hist_result.rows > 0 then
-      if p.category == "text" or p.category == "boolean" or p.category == "unknown"
-        or (p.category == "numeric" and (not tonumber(p.min) or p.min == p.max)) then
+      -- Which shape the rows have is decided by the same predicate that chose
+      -- the SQL. The open-coded version this replaced left "date" out, so a
+      -- date column -- whose bounds are never numeric, hence always a
+      -- GROUP BY -- fell into the bucketed branch below, where tonumber() on a
+      -- timestamp string yields nil and every value collapsed into bucket 1: a
+      -- single-spike sparkline that described nothing, with no top values to
+      -- fall back on either.
+      if not M.is_bucketed(p.category, p.min, p.max) then
         -- Categorical: store as top_values and build sparkline from counts
         local top = {}
         local counts = {}
@@ -225,6 +270,74 @@ function M.gather(table_name, url)
   }
 end
 
+--- Gather stats plus a distribution for a single column -- the gS popup.
+--- Two queries, the same count the popup has always issued: the distribution
+--- replaces its bespoke top-values query instead of adding to it.
+--- `data_type` may be nil (column info unavailable), which classifies as
+--- "unknown" and yields a top-values distribution rather than an error.
+--- Returns (colstats, nil) or (nil, err). A failed *histogram* is not an error:
+--- the caller still gets its statistics, with kind left nil, because losing the
+--- whole popup over the optional half of it would be the worse trade.
+function M.gather_column(table_name, col_name, data_type, url)
+  local tbl = sql.quote_ident(table_name)
+  local col = sql.quote_ident(col_name)
+
+  local stats_sql = string.format(
+    "SELECT COUNT(*) AS total, COUNT(DISTINCT %s) AS distinct_count, " ..
+    "COUNT(*) - COUNT(%s) AS null_count, MIN(%s) AS min_val, MAX(%s) AS max_val " ..
+    "FROM %s",
+    col, col, col, col, tbl
+  )
+  local stats_result, stats_err = db.query(stats_sql, url)
+  if stats_err then return nil, stats_err end
+  if not stats_result or #stats_result.rows == 0 then return nil, "No stats returned" end
+
+  local row = stats_result.rows[1]
+  local cs = {
+    name       = col_name,
+    data_type  = data_type,
+    category   = M.classify_column(data_type),
+    total      = row[1],
+    distinct   = row[2],
+    nulls      = row[3],
+    min        = row[4],
+    max        = row[5],
+    kind       = nil,  -- "buckets" | "values" | nil when the histogram failed
+    buckets    = nil,
+    top_values = nil,
+  }
+
+  local bucketed = M.is_bucketed(cs.category, cs.min, cs.max)
+  local hist_result = db.query(
+    M.build_histogram_sql(table_name, col_name, cs.category, cs.min, cs.max), url)
+  if not hist_result or #hist_result.rows == 0 then return cs end
+
+  if bucketed then
+    local bounds = M.bucket_bounds(cs.min, cs.max)
+    local counts = {}
+    for b = 1, BUCKET_COUNT do counts[b] = 0 end
+    -- Buckets absent from the result set are empty, not missing: GROUP BY only
+    -- returns the ones that matched a row.
+    for _, r in ipairs(hist_result.rows) do
+      local b = math.max(1, math.min(BUCKET_COUNT, tonumber(r[1]) or 1))
+      counts[b] = tonumber(r[2]) or 0
+    end
+    cs.kind = "buckets"
+    cs.buckets = {}
+    for b = 1, BUCKET_COUNT do
+      cs.buckets[b] = { lo = bounds[b].lo, hi = bounds[b].hi, count = counts[b] }
+    end
+  else
+    cs.kind = "values"
+    cs.top_values = {}
+    for _, r in ipairs(hist_result.rows) do
+      table.insert(cs.top_values, { value = r[1], count = tonumber(r[2]) or 0 })
+    end
+  end
+
+  return cs
+end
+
 -- ── display rendering ─────────────────────────────────────────────────────────
 
 --- Format a percentage with one decimal place.
@@ -234,6 +347,82 @@ local function fmt_pct(v) return string.format("%.1f%%", v) end
 --- this module's original style: values are silently cut, not "…"-marked).
 local function pad(s, w) return (ui.pad_display(s, w, false)) end
 M._pad = pad  -- exposed for unit tests
+
+--- Pick one number format for a whole histogram. Integral bounds throughout
+--- print as integers, anything else as one decimal: switching format between
+--- adjacent rows of the same histogram reads as noise.
+local function bounds_formatter(buckets)
+  for _, b in ipairs(buckets) do
+    if b.lo % 1 ~= 0 or b.hi % 1 ~= 0 then
+      return function(v) return string.format("%.1f", v) end
+    end
+  end
+  return function(v) return string.format("%d", v) end
+end
+
+--- Render label/bar/count rows, aligned on display width. Widths come from
+--- strdisplaywidth, never from #s: the popup used to cut values with
+--- value:sub(1, 30) -- a byte offset derived from a display-cell budget -- which
+--- corrupted any multibyte value (the same bug class already fixed in _pad).
+local function bar_rows(rows)
+  local max_count, label_w, count_w = 0, 0, 0
+  for _, r in ipairs(rows) do
+    max_count = math.max(max_count, r.count or 0)
+    label_w = math.max(label_w, vim.fn.strdisplaywidth(r.label))
+    count_w = math.max(count_w, #tostring(r.count))
+  end
+  label_w = math.min(label_w, HBAR_LABEL_MAX)
+
+  local out = {}
+  for _, r in ipairs(rows) do
+    table.insert(out, "    " .. pad(r.label, label_w)
+      .. "  " .. pad(M.hbar(r.count, max_count, HBAR_WIDTH), HBAR_WIDTH)
+      .. "  " .. string.format("%" .. count_w .. "d", r.count))
+  end
+  return out, max_count
+end
+
+--- Build display lines for the single-column stats popup (gS).
+function M.build_column_lines(cs)
+  if not cs then return {} end
+
+  local lines = {
+    " " .. cs.name .. ": Column Statistics",
+    " " .. string.rep("─", 40),
+    "  Total:    " .. (cs.total or "?"),
+    "  Distinct: " .. (cs.distinct or "?"),
+    "  Nulls:    " .. (cs.nulls or "?"),
+    "  Min:      " .. (cs.min or "NULL"),
+    "  Max:      " .. (cs.max or "NULL"),
+  }
+
+  local header, rows = nil, {}
+  if cs.kind == "buckets" and cs.buckets then
+    header = "  Distribution (" .. BUCKET_COUNT .. " buckets)"
+    local fmt = bounds_formatter(cs.buckets)
+    for _, b in ipairs(cs.buckets) do
+      -- ".." and not an en dash: a column with negative values would otherwise
+      -- render bounds as "-12.5 - -3.0".
+      table.insert(rows, { label = fmt(b.lo) .. " .. " .. fmt(b.hi), count = b.count })
+    end
+  elseif cs.kind == "values" and cs.top_values then
+    header = "  Top values"
+    for _, tv in ipairs(cs.top_values) do
+      table.insert(rows, { label = tostring(tv.value or "?"), count = tv.count })
+    end
+  end
+  if not header or #rows == 0 then return lines end
+
+  local rendered, max_count = bar_rows(rows)
+  -- An empty table (or a column that is entirely NULL) has nothing to plot;
+  -- eight zero-height bars would only claim otherwise.
+  if max_count == 0 then return lines end
+
+  table.insert(lines, "")
+  table.insert(lines, header)
+  for _, l in ipairs(rendered) do table.insert(lines, l) end
+  return lines
+end
 
 --- Build display lines for the profile buffer.
 function M.build_lines(profile_data, term_width)

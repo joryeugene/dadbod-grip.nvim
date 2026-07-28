@@ -134,7 +134,7 @@ Opens with the top level expanded and children collapsed; documents with ≤ 20 
 | Key | Action |
 |-----|--------|
 | `ga` | Aggregate current column (count, sum, avg, min, max) |
-| `gS` | Column statistics popup (distinct, nulls%, top values) |
+| `gS` | Column statistics popup (distinct, nulls%, ASCII distribution) |
 | `gR` | Table profile (sparkline distributions) |
 | `gV` | Show CREATE TABLE DDL float |
 | `gQ` | Explain current query plan |

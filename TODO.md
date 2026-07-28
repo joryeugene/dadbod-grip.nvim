@@ -40,7 +40,7 @@ Not committed to any release. Roughly ordered by expected impact.
 ### High Value -- Adapters
 - [ ] Snowflake adapter (snowsql CLI, auth delegated to `~/.snowsql/config`, 3-level hierarchy database/schema/table, `SHOW TABLES IN DATABASE` metadata, warehouse selection)
 - [ ] BigQuery adapter (bq CLI, auth via gcloud ADC, project/dataset/table hierarchy, `bq show --format=json` for schema, `bq query --use_legacy_sql=false`)
-- [ ] MSSQL adapter (sqlcmd CLI, `mssql://` scheme, sys.tables/sys.columns metadata, SET STATISTICS for explain, TOP N pagination, `##temp` table support)
+- [x] MSSQL adapter (sqlcmd CLI, `mssql://` scheme, sys.tables/sys.columns metadata, SET STATISTICS for explain): shipped v3.8.0, read-only. TOP N pagination and `##temp` table support are still open.
 - [ ] Turso/libSQL adapter (extend SQLite adapter with HTTP transport, auth token in URL, branch management via `:GripBranch`, time-travel queries)
 - [ ] CockroachDB adapter (extend PostgreSQL adapter, `cockroachdb://` scheme, CDC changefeed exposure, multi-region config display in properties)
 - [ ] MongoDB: deprioritized; document model incompatible with grid renderer; needs separate path (JSON tree view, not tabular)
@@ -48,18 +48,18 @@ Not committed to any release. Roughly ordered by expected impact.
 ### High Value -- Cell Editor
 - [x] Timestamp cells: detect ISO timestamp pattern in cell editor, show parsed human-readable date as extmark virtual text below the input line: shipped v1.2.0
 - [x] URL cells: `gx` opens the URL in the system browser -- cell editor NORMAL mode (buf-local keymap) and grid (current cell value): shipped v1.2.0
-- [ ] Markdown columns: auto-set `ft=markdown` in cell editor for columns named body, description, notes, content, text, bio (column name heuristic)
+- [x] Markdown columns: auto-set `ft=markdown` in cell editor for columns named body, description, notes, content, text, bio (column name heuristic): shipped with `gB` (`cell_buffer.lua`, `PROSE_COLUMNS`)
 - [x] Enum hint: if column has known distinct values, show them as virtual text in the cell editor (on-demand SELECT DISTINCT, cached per session): shipped
 
 ### Medium Value
 - [ ] Column reordering via keymap (`<` / `>` to shift column left/right)
-- [ ] Inline column resize with `+`/`-` on header row
+- [x] Inline column resize: solved differently in v3.4.0 -- `=` (`grid_col_width`) cycles the column under the cursor through compact -> expanded -> reset. `+`/`-` on the header row is not the binding to use: `-` already hides a column.
 - [ ] Bookmarked rows (mark interesting rows with `m`, recall with `'`, persist per table in `.grip/bookmarks.json`)
-- [ ] Multi-row selection for bulk ops (visual `V`-mode selects rows, then `d`=bulk DELETE, `gy`=copy all as table)
+- [x] Multi-row selection for bulk ops: shipped v3.4.0 (`view/keymaps_visual_batch.lua` -- visual `d` stages the selected rows for DELETE, `e` bulk-edits, `x` sets NULL, `y` yanks the column slice). Only `gy`-as-table is missing; `gE` already exports the whole grid in six formats.
 - [x] Quick data generation (`:GripFill N` / `gA` in grid): shipped v1.2.0 (merged with AI-assisted data generation)
 - [x] Connection health indicators: `*`/`o`/`x` dots in connection picker; `T` retests file connections; status set on successful switch
 - [ ] Saved views: persist full grid state (active filters, sort, hidden columns, page size) as a named snapshot per table in `.grip/views.json`; recall without writing SQL
-- [ ] ASCII histogram for numeric columns: extend `gS` to show a quick distribution histogram inline; complement to stats popup
+- [x] ASCII histogram for numeric columns: extend `gS` to show a quick distribution histogram inline; complement to stats popup: shipped (horizontal bars, eight labelled buckets for numeric, top values for every other type)
 - [ ] Row pinning: mark up to 5 rows to keep visible at the top of every page regardless of filter/sort; useful as reference anchors while editing
 
 ### Exploration

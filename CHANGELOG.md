@@ -7,7 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **ASCII distribution in the `gS` column-statistics popup.** Numeric columns get the eight
+  `build_histogram_sql` buckets with their bounds labelled and their counts drawn as horizontal
+  bars; every other type gets its top values the same way. Bars resolve to an eighth of a cell,
+  and a non-zero count never renders as blank — one row out of ten million must not be
+  indistinguishable from an empty bucket. `profile.hbar`, `profile.bucket_bounds`,
+  `profile.is_bucketed`, `profile.gather_column` and `profile.build_column_lines` are the new
+  public surface; the popup's logic moved out of the keymap closure into `profile.lua`, where it
+  is unit-testable.
+
+### Fixed
+
+- **Date columns produced a meaningless sparkline in `gR`.** A date's `MIN`/`MAX` are timestamp
+  strings, so `build_histogram_sql` always answered it with a top-values `GROUP BY` — but the
+  branch that read the rows back listed `text`, `boolean` and `unknown` and left `date` out. Date
+  rows therefore went down the bucketed path, where `tonumber("2025-01-02 13:13:00")` is `nil`,
+  every value collapsed into bucket 1, and the column drew one bar and seven zeros with no top
+  values to fall back on. Both sides now ask `profile.is_bucketed()`, so the SQL and the reader
+  cannot disagree again.
+- **Multibyte values were corrupted in the `gS` popup.** Top values were cut with
+  `value:sub(1, 30)` — a byte offset derived from a display-cell budget — which sliced Cyrillic,
+  CJK and emoji values mid-character. Labels are now truncated and padded with `ui.pad_display`.
+
 ### Changed
+
+- **`gS` shows a distribution instead of a bare top-5 list.** Text, boolean and date columns list
+  their top 8 values (was 5), and numeric columns show bucket ranges rather than individual
+  values, since the top values of an `id`-like column are all count 1. The popup still issues
+  exactly two queries: the distribution replaced its bespoke top-values query rather than adding
+  to it.
 
 - **CI installs the DuckDB CLI, so 66 previously unrun assertions actually run.**
   `duckdb_federation_spec`, `duckdb_native_schema_spec` and `duckdb_federated_schema_spec` gate on
