@@ -113,6 +113,44 @@ do
   eq(#lines, 3, "edited: one preserved block + one live tail")
 end
 
+-- ── sync_query: never restates a query the pad already ends with ─────────────
+-- The FK round trip: the user runs a query from the pad, jumps away with gf (we
+-- append the FK query below theirs), then <C-o> back — which syncs their original
+-- query again. Restating it would leave the pad holding it twice.
+
+do
+  local b = make_pad()
+  set_lines(b, { "SELECT id, user_id FROM orders" })  -- user ran this from the pad
+  qp.sync_query('SELECT * FROM "users" WHERE ("id" = 1)')  -- gf: appended below
+  qp.sync_query("SELECT id, user_id FROM orders")          -- <C-o>: back to theirs
+  local lines = get_lines(b)
+  eq(#lines, 1, "round trip: the query is not duplicated")
+  eq(lines[1], "SELECT id, user_id FROM orders", "round trip: the user's query is what's left")
+end
+
+do
+  local b = make_pad()
+  set_lines(b, { "SELECT 1" })
+  qp.sync_query("SELECT 1")  -- pad already ends with exactly this
+  local lines = get_lines(b)
+  eq(#lines, 1, "already-there: nothing appended")
+  eq(lines[1], "SELECT 1", "already-there: content untouched")
+end
+
+-- Dropping our block must not make us the owner of the user's block: a later
+-- jump has to append below it, not overwrite it.
+do
+  local b = make_pad()
+  set_lines(b, { "SELECT id, user_id FROM orders" })
+  qp.sync_query('SELECT * FROM "users" WHERE ("id" = 1)')
+  qp.sync_query("SELECT id, user_id FROM orders")  -- dedup: our block dropped
+  qp.sync_query('SELECT * FROM "products"')        -- next jump
+  local lines = get_lines(b)
+  eq(lines[1], "SELECT id, user_id FROM orders", "ownership: user's query still there")
+  eq(lines[3], 'SELECT * FROM "products"', "ownership: new query appended below it")
+  eq(#lines, 3, "ownership: one user block + one live tail")
+end
+
 -- ── sync_query: hint on line 1, real content below → append, not replace ─────
 -- The pad starts with the hint comment. If the user has written SQL below it,
 -- the buffer is NOT empty. sync_query must append, not clobber.

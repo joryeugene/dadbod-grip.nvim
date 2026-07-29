@@ -111,10 +111,17 @@ end
 -- ── filter modifiers ─────────────────────────────────────────────────────
 
 --- Add a WHERE clause fragment. Multiple filters are AND-ed.
-function M.add_filter(spec, clause)
+--- opts.pinned = true marks the clause as part of the grid's identity rather than
+--- a user-applied view modifier: FK navigation (gf/gm) pins the clause that scopes
+--- the grid to the referenced/referencing rows. Pinned filters survive
+--- clear_filters/reset/set_filters, are excluded from has_filters/user_filters, and
+--- show up in clean_sql. See the pinned-filter block in tests/spec/query_spec.lua.
+function M.add_filter(spec, clause, opts)
   local new = deep_copy(spec)
   new.page = 1
-  table.insert(new.filters, { clause = clause })
+  local entry = { clause = clause }
+  if opts and opts.pinned then entry.pinned = true end
+  table.insert(new.filters, entry)
   return new
 end
 
@@ -189,17 +196,38 @@ function M.quick_filter(spec, column, value)
   return M.add_filter(spec, clause)
 end
 
---- Clear all filters.
+--- Return the pinned filters of a spec, in order. Local helper: callers outside
+--- this module care about user filters, never about the pinned ones directly.
+local function pinned_filters(spec)
+  local kept = {}
+  for _, f in ipairs(spec.filters) do
+    if f.pinned then table.insert(kept, f) end
+  end
+  return kept
+end
+
+--- Clear the user's filters. Pinned filters (FK navigation context) are kept:
+--- dropping them would silently widen the grid to the whole table.
 function M.clear_filters(spec)
   local new = deep_copy(spec)
-  new.filters = {}
+  new.filters = pinned_filters(new)
   new.page = 1
   return new
 end
 
---- Check if spec has active filters.
+--- Return the user-applied (unpinned) filters, in order.
+function M.user_filters(spec)
+  local user = {}
+  for _, f in ipairs(spec.filters) do
+    if not f.pinned then table.insert(user, f) end
+  end
+  return user
+end
+
+--- Check if spec has active user filters. Pinned filters don't count: they are
+--- navigation context, not something the user applied and can clear.
 function M.has_filters(spec)
-  return #spec.filters > 0
+  return #M.user_filters(spec) > 0
 end
 
 --- Human-readable filter summary (full clauses, no truncation).
@@ -215,19 +243,23 @@ function M.filter_summary(spec)
   return "filters: " .. table.concat(parts, "  \xC2\xB7  ")
 end
 
---- Replace all filters with a single clause (for loading presets).
+--- Replace the user's filters with a single clause (for loading presets).
+--- Pinned filters are kept and stay first, so a preset narrows the FK context
+--- instead of escaping it.
 function M.set_filters(spec, clause)
   local new = deep_copy(spec)
-  new.filters = { { clause = clause } }
+  new.filters = pinned_filters(new)
+  table.insert(new.filters, { clause = clause })
   new.page = 1
   return new
 end
 
---- Reset all modifiers: clear sorts, filters, page back to 1.
+--- Reset all modifiers: clear sorts and user filters, page back to 1.
+--- Pinned filters survive, same rationale as clear_filters.
 function M.reset(spec)
   local new = deep_copy(spec)
   new.sorts = {}
-  new.filters = {}
+  new.filters = pinned_filters(new)
   new.page = 1
   return new
 end
@@ -259,6 +291,16 @@ end
 
 -- ── SQL composition ──────────────────────────────────────────────────────
 
+--- "WHERE (a) AND (b)" for a list of filter entries; nil when the list is empty.
+local function where_clause(filters)
+  if #filters == 0 then return nil end
+  local parts = {}
+  for _, f in ipairs(filters) do
+    table.insert(parts, "(" .. f.clause .. ")")
+  end
+  return "WHERE " .. table.concat(parts, " AND ")
+end
+
 --- Build the data query SQL from a spec.
 function M.build_sql(spec)
   local parts = {}
@@ -273,14 +315,9 @@ function M.build_sql(spec)
 
   table.insert(parts, "SELECT * FROM " .. from)
 
-  -- WHERE clause
-  if #spec.filters > 0 then
-    local where_parts = {}
-    for _, f in ipairs(spec.filters) do
-      table.insert(where_parts, "(" .. f.clause .. ")")
-    end
-    table.insert(parts, "WHERE " .. table.concat(where_parts, " AND "))
-  end
+  -- WHERE clause: pinned and user filters alike
+  local where = where_clause(spec.filters)
+  if where then table.insert(parts, where) end
 
   -- ORDER BY clause
   if #spec.sorts > 0 then
@@ -312,13 +349,8 @@ function M.build_count_sql(spec)
 
   table.insert(parts, "SELECT COUNT(*) AS _grip_count FROM " .. from)
 
-  if #spec.filters > 0 then
-    local where_parts = {}
-    for _, f in ipairs(spec.filters) do
-      table.insert(where_parts, "(" .. f.clause .. ")")
-    end
-    table.insert(parts, "WHERE " .. table.concat(where_parts, " AND "))
-  end
+  local where = where_clause(spec.filters)
+  if where then table.insert(parts, where) end
 
   return table.concat(parts, " ")
 end
@@ -326,15 +358,23 @@ end
 --- Return the user-visible SQL for a spec (no pagination wrapper).
 --- Use this to pre-fill the query pad. build_sql() is for DB execution only.
 --- For raw specs returns spec.base_sql; for table specs returns
---- 'SELECT * FROM "table"'. The identifier is quoted the same way build_sql
---- quotes it, so the prefilled query runs as-is against case-sensitive or
---- reserved-word tables (unquoted, Postgres folds "Organization" → organization).
+--- 'SELECT * FROM "table"' plus the WHERE of any pinned filters. The identifier is
+--- quoted the same way build_sql quotes it, so the prefilled query runs as-is
+--- against case-sensitive or reserved-word tables (unquoted, Postgres folds
+--- "Organization" → organization).
+--- Pinned filters are included because they define which rows the grid is showing
+--- (FK navigation): without them the pad would advertise a query returning a
+--- different result set than the grid below it. User filters, sorts and pagination
+--- are excluded — those are transient view state, and rewriting the pad on every
+--- f/s/H keypress would clobber whatever the user is composing there.
 function M.clean_sql(spec)
   if spec.is_raw then
     return spec.base_sql
-  else
-    return "SELECT * FROM " .. sql_mod.quote_ident(spec.table_name or "")
   end
+  local out = "SELECT * FROM " .. sql_mod.quote_ident(spec.table_name or "")
+  local where = where_clause(pinned_filters(spec))
+  if where then out = out .. " " .. where end
+  return out
 end
 
 return M

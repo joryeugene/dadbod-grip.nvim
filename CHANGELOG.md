@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`F` and `X` dropped you out of an FK context without saying so.** An FK jump (`gf`, `gm`)
+  scopes the grid with a WHERE clause of its own — `"categoryId" = 15` for "the CategoryVersion
+  rows referencing Category 15". That clause lived in `query_spec.filters` indistinguishable from
+  a filter the user typed, so `clear_filters`/`reset` wiped it: `F` in an FK-navigated grid
+  silently replaced 5 referencing rows with the whole table, while the breadcrumb still claimed
+  `Organization > Category > CategoryVersion` and `<C-o>` popped back into a state that never
+  existed. FK clauses are now *pinned* (`query.add_filter(spec, clause, { pinned = true })`):
+  `build_sql`/`build_count_sql` still apply them, `clear_filters`/`reset`/`set_filters` keep them,
+  and `has_filters` — hence the `[filtered]` badge and the `F`/`X`/`gP` guards — ignores them. The
+  badge no longer claims you filtered something you didn't, and `gP` no longer bakes a clause
+  bound to one parent row into a reusable preset. `query.user_filters(spec)` is the new accessor.
+- **The query pad kept advertising the table you started from after an FK jump.** `sync_query`
+  ran only from `init.open()`, and FK navigation swaps the spec *inside* an existing grid, so
+  three hops into `Organization > Category > CategoryVersion` the pad still read
+  `SELECT * FROM "Organization"` — a query returning a different result set than the grid below
+  it. `gf`, `gm` and `<C-o>` now sync through the new `view._sync_pad()`, and `clean_sql` includes
+  pinned filters so the synced SQL actually describes the rows on screen
+  (`SELECT * FROM "CategoryVersion" WHERE ("categoryId" = 15)`). Sorts, user filters and
+  pagination stay out of the pad, as before — those are transient, and rewriting the pad on every
+  `f`/`s`/`H` keypress would clobber whatever you are composing there. `sync_query`'s docblock
+  had listed FK navigation as a caller all along; now it is one. It also learned to write nothing
+  when the pad already ends with the query being synced, so the round trip "run a query from the
+  pad → `gf` away → `<C-o>` back" leaves that query in the pad once rather than twice, and the
+  block it deduplicates onto stays the user's — a later jump appends below it instead of
+  overwriting it.
+
 - **`ga`, `gF` and filter-IS-NULL resolved the wrong column from the type row.** Four handlers
   open-coded "column under the cursor" by pairing `view._snap_col` with a byte-position map, and
   three of them passed `hdr_byte_positions` unconditionally. The rows do not share byte offsets:

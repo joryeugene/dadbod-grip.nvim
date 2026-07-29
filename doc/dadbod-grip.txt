@@ -565,10 +565,10 @@ SORT / FILTER / PAGINATION ~
   gn              Filter: column under cursor IS NULL
   gF              Filter builder (=, !=, >, <, LIKE, IN, IS NULL/NOT NULL)
   <C-f>           Freeform WHERE clause filter
-  F               Clear all filters
+  F               Clear the filters you applied
   gp              Load saved filter preset for current table
   gP              Save current filter as named preset
-  X               Reset view (clear sort, filter, and page)
+  X               Reset view (clear sort, your filters, and page)
   H / L           Previous / next page
   ]p / [p         Previous / next page (alternate)
   ]P / [P         Last / first page
@@ -789,6 +789,11 @@ Press `gF` to open the filter builder: choose an operator (=, !=, >,
 are passed unquoted; all others are single-quoted with escaping.
 Press `<C-f>` to enter a freeform WHERE clause. Multiple filters are
 AND-ed together. Press `F` to clear all filters.
+
+An FK jump (`gf`, `gm`) scopes the grid with a WHERE clause of its own.
+That clause is pinned: it is what the grid IS, not something you filtered,
+so `F` and `X` leave it alone, the `[filtered]` badge ignores it, and `gP`
+never bakes it into a preset. Use `<C-o>` to leave an FK context.
 
 Filter presets ~
 Press `gP` to save the current active filters as a named preset for the
