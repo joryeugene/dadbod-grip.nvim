@@ -459,6 +459,144 @@ test("clean_sql: raw query returns base_sql verbatim", function()
   eq(query.clean_sql(spec), "SELECT * FROM whatever")
 end)
 
+-- ── pinned filters (FK navigation context) ──────────────────────────────────
+-- FK navigation (gf/gm) replaces the grid's spec with one carrying a WHERE that
+-- IS the identity of the new grid ("the CategoryVersion rows referencing Category
+-- 15"), not a view modifier the user applied. Such a filter is pinned:
+--   • F (clear filters) and X (reset view) must not drop it — otherwise the grid
+--     silently widens to the whole table while the breadcrumb still claims an FK
+--     context, and <C-o> pops back into a state that never existed;
+--   • the [filtered] badge and gP (save preset) must ignore it — the user did not
+--     filter anything, and the FK clause has no business in a saved preset;
+--   • build_sql/build_count_sql must still apply it — it is a real WHERE.
+
+test("add_filter: filters are unpinned by default", function()
+  local spec = query.add_filter(query.new_table("t", 100), "a = 1")
+  eq(spec.filters[1].pinned, nil)
+end)
+
+test("add_filter: pinned option marks the filter", function()
+  local spec = query.add_filter(query.new_table("t", 100), "a = 1", { pinned = true })
+  eq(spec.filters[1].pinned, true)
+  eq(spec.filters[1].clause, "a = 1")
+end)
+
+test("clear_filters: keeps pinned filters, drops user filters", function()
+  local spec = query.add_filter(query.new_table("t", 100), "fk = 15", { pinned = true })
+  spec = query.add_filter(spec, "name = 'x'")
+  local cleared = query.clear_filters(spec)
+  eq(#cleared.filters, 1, "only the pinned filter survives")
+  eq(cleared.filters[1].clause, "fk = 15")
+  eq(cleared.filters[1].pinned, true, "stays pinned after clearing")
+end)
+
+test("clear_filters: still drops everything when nothing is pinned", function()
+  local spec = query.add_filter(query.new_table("t", 100), "name = 'x'")
+  eq(#query.clear_filters(spec).filters, 0)
+end)
+
+test("reset: keeps pinned filters", function()
+  local spec = query.add_filter(query.new_table("t", 100), "fk = 15", { pinned = true })
+  spec = query.add_filter(spec, "name = 'x'")
+  spec = query.toggle_sort(spec, "id")
+  spec = query.set_page(spec, 3)
+  local r = query.reset(spec)
+  eq(#r.filters, 1, "pinned FK context survives a view reset")
+  eq(r.filters[1].clause, "fk = 15")
+  eq(#r.sorts, 0, "sorts still cleared")
+  eq(r.page, 1, "page still reset")
+end)
+
+test("set_filters: preset replaces user filters but keeps pinned", function()
+  local spec = query.add_filter(query.new_table("t", 100), "fk = 15", { pinned = true })
+  spec = query.add_filter(spec, "name = 'x'")
+  local loaded = query.set_filters(spec, "age > 30")
+  eq(#loaded.filters, 2, "pinned + preset clause")
+  eq(loaded.filters[1].clause, "fk = 15", "pinned filter comes first")
+  eq(loaded.filters[1].pinned, true)
+  eq(loaded.filters[2].clause, "age > 30", "preset clause replaces the user filter")
+  eq(loaded.filters[2].pinned, nil, "a preset is a user filter")
+end)
+
+test("has_filters: false when only pinned filters exist", function()
+  local spec = query.add_filter(query.new_table("t", 100), "fk = 15", { pinned = true })
+  eq(query.has_filters(spec), false, "FK context is not a user filter")
+end)
+
+test("has_filters: true when a user filter joins a pinned one", function()
+  local spec = query.add_filter(query.new_table("t", 100), "fk = 15", { pinned = true })
+  spec = query.add_filter(spec, "name = 'x'")
+  eq(query.has_filters(spec), true)
+end)
+
+test("user_filters: returns only the unpinned filters", function()
+  local spec = query.add_filter(query.new_table("t", 100), "fk = 15", { pinned = true })
+  spec = query.add_filter(spec, "name = 'x'")
+  spec = query.add_filter(spec, "age > 30")
+  local uf = query.user_filters(spec)
+  eq(#uf, 2)
+  eq(uf[1].clause, "name = 'x'")
+  eq(uf[2].clause, "age > 30")
+end)
+
+test("user_filters: empty list when every filter is pinned", function()
+  local spec = query.add_filter(query.new_table("t", 100), "fk = 15", { pinned = true })
+  eq(#query.user_filters(spec), 0)
+end)
+
+test("build_sql: ANDs pinned and user filters together", function()
+  local spec = query.add_filter(query.new_table("t", 100), "fk = 15", { pinned = true })
+  spec = query.add_filter(spec, "name = 'x'")
+  eq(query.build_sql(spec),
+    'SELECT * FROM "t" WHERE (fk = 15) AND (name = \'x\') LIMIT 100')
+end)
+
+test("build_count_sql: includes pinned filters", function()
+  local spec = query.add_filter(query.new_table("t", 100), "fk = 15", { pinned = true })
+  contains(query.build_count_sql(spec), "(fk = 15)",
+    "the pagination count must be scoped to the FK context")
+end)
+
+test("clean_sql: includes a pinned filter as WHERE", function()
+  local spec = query.add_filter(query.new_table("CategoryVersion", 100),
+    '"categoryId" = 15', { pinned = true })
+  eq(query.clean_sql(spec),
+    'SELECT * FROM "CategoryVersion" WHERE ("categoryId" = 15)')
+end)
+
+test("clean_sql: ANDs multiple pinned filters", function()
+  local spec = query.add_filter(query.new_table("t", 100), "a = 1", { pinned = true })
+  spec = query.add_filter(spec, "b = 2", { pinned = true })
+  eq(query.clean_sql(spec), 'SELECT * FROM "t" WHERE (a = 1) AND (b = 2)')
+end)
+
+test("clean_sql: omits user filters, sorts and pagination", function()
+  local spec = query.add_filter(query.new_table("t", 100), "name = 'x'")
+  spec = query.toggle_sort(spec, "id")
+  spec = query.set_page(spec, 4)
+  eq(query.clean_sql(spec), 'SELECT * FROM "t"',
+    "the pad shows the query you opened, not transient view state")
+end)
+
+test("clean_sql: raw spec returns base_sql even with a pinned filter", function()
+  local spec = query.add_filter(query.new_raw("SELECT 1", 100), "a = 1", { pinned = true })
+  eq(query.clean_sql(spec), "SELECT 1",
+    "raw specs are user-authored text: never rewritten")
+end)
+
+test("clean_sql: pinned output is runnable as-is (matches build_sql prefix)", function()
+  local spec = query.add_filter(query.new_table("Organization", 100),
+    '"id" = 7', { pinned = true })
+  contains(query.build_sql(spec), query.clean_sql(spec),
+    "build_sql must extend exactly what the pad shows")
+end)
+
+test("immutability: add_filter with pinned does not mutate original", function()
+  local spec = query.new_table("t", 100)
+  query.add_filter(spec, "a = 1", { pinned = true })
+  eq(#spec.filters, 0)
+end)
+
 -- ── summary ─────────────────────────────────────────────────────────────────
 print(string.format("\nquery_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

@@ -716,29 +716,55 @@ local function _trailing_block_range(lines)
   return s, e
 end
 
---- Silently sync the query pad with the SQL from the just-opened grid.
---- Called automatically when a table or query opens from outside the pad (sidebar,
---- table picker, FK navigation). No-op if the pad buffer doesn't exist yet.
+--- Silently sync the query pad with the SQL of the grid the user is now looking at.
+--- Two callers, both passing query.clean_sql(spec):
+---   • init.open() — a table or query opened from outside the pad (sidebar, table
+---     picker, :Grip); skipped when the query came from the pad itself;
+---   • view._sync_pad() — FK navigation swapped the spec inside an existing grid
+---     (gf, gm, <C-o> back), which never reaches init.open().
+--- No-op if the pad buffer doesn't exist yet.
 --- Behaviour:
 ---   • empty/hint-only pad → populate it;
 ---   • trailing block is the query we auto-synced last (user didn't touch it) →
 ---     replace it, so plain table-hopping doesn't pile up SELECTs;
 ---   • trailing block was edited or authored by the user → append below it, so
----     real queries are never clobbered.
+---     real queries are never clobbered;
+---   • the pad already ends with this exact query → write nothing. An FK round trip
+---     (run a query from the pad, gf away, <C-o> back) syncs that query a second
+---     time; restating it would leave the pad holding it twice.
 function M.sync_query(sql_text)
   if not _pad_bufnr or not vim.api.nvim_buf_is_valid(_pad_bufnr) then return end
   if not sql_text or sql_text:match("^%s*$") then return end
   local lines = vim.api.nvim_buf_get_lines(_pad_bufnr, 0, -1, false)
   local sql_lines = vim.split(sql_text, "\n")
   vim.bo[_pad_bufnr].modifiable = true
+  -- Whether the block we leave behind is ours to replace next time. False when we
+  -- deduplicate onto a block the user authored: that one stays theirs.
+  local ours = true
   if not _has_real_content(lines) then
     vim.api.nvim_buf_set_lines(_pad_bufnr, 0, -1, false, sql_lines)
   else
     local ts, te = _trailing_block_range(lines)
     local trailing = ts and table.concat(vim.list_slice(lines, ts, te), "\n") or nil
-    if _last_synced ~= nil and trailing == _last_synced then
-      -- Untouched auto-synced query: replace it in place (keep everything above).
-      vim.api.nvim_buf_set_lines(_pad_bufnr, ts - 1, -1, false, sql_lines)
+    -- The block above the trailing one, if any: where a dedup would land.
+    local above_start, above_end
+    local above = (ts and ts > 1) and vim.list_slice(lines, 1, ts - 1) or nil
+    if above then above_start, above_end = _trailing_block_range(above) end
+    local above_text = above_start
+      and table.concat(vim.list_slice(above, above_start, above_end), "\n") or nil
+
+    if trailing == sql_text then
+      -- Already the last thing in the pad (user's own or ours): nothing to write.
+      ours = _last_synced ~= nil and trailing == _last_synced
+    elseif _last_synced ~= nil and trailing == _last_synced then
+      if above_text == sql_text then
+        -- Round trip: the query is right above our stale block. Drop the block.
+        vim.api.nvim_buf_set_lines(_pad_bufnr, above_end, -1, false, {})
+        ours = false
+      else
+        -- Untouched auto-synced query: replace it in place (keep everything above).
+        vim.api.nvim_buf_set_lines(_pad_bufnr, ts - 1, -1, false, sql_lines)
+      end
     else
       -- User content in the trailing block: append a new block below it.
       local append = { "" }
@@ -749,7 +775,7 @@ function M.sync_query(sql_text)
     local win = vim.fn.bufwinid(_pad_bufnr)
     if win ~= -1 then pcall(vim.api.nvim_win_set_cursor, win, { total, 0 }) end
   end
-  _last_synced = sql_text
+  _last_synced = ours and sql_text or nil
   vim.bo[_pad_bufnr].modified = false
 end
 

@@ -195,9 +195,11 @@ function M.setup(bufnr, ctx)
       vim.notify("No active filters to save", vim.log.levels.INFO)
       return
     end
-    -- Combine all active filters into one clause
+    -- Combine the user's filters into one clause. Pinned filters are excluded:
+    -- an FK-navigation clause is bound to one parent row, so baking it into a
+    -- reusable preset would silently scope every later load to that row.
     local clauses = {}
-    for _, f in ipairs(session_fp.query_spec.filters) do
+    for _, f in ipairs(qmod.user_filters(session_fp.query_spec)) do
       table.insert(clauses, "(" .. f.clause .. ")")
     end
     local combined = table.concat(clauses, " AND ")
@@ -301,7 +303,9 @@ function M.setup(bufnr, ctx)
     local session_x = ctx.session()
     if not session_x or not session_x.query_spec then return end
     local spec = session_x.query_spec
-    if #spec.sorts == 0 and #spec.filters == 0 and spec.page == 1 then
+    -- Pinned filters are the grid's baseline (FK context), not something a reset
+    -- clears — a grid holding only those IS at its defaults.
+    if #spec.sorts == 0 and not qmod.has_filters(spec) and spec.page == 1 then
       vim.notify("View already at defaults", vim.log.levels.INFO)
       return
     end

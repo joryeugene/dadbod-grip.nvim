@@ -189,7 +189,7 @@ work without credentials.
 
 ### Query and Navigation
 - **Sort, filter, and pagination** using `s`/`S` to sort, `f`/`<C-f>`/`F` to filter, `gp`/`gP` for saved filter presets, and `H`/`L` to page (or `]p`/`[p`).
-- **Foreign key navigation** via `gf` to follow a FK to its referenced row, and `<C-o>` to go back.
+- **Foreign key navigation** via `gf` to follow a FK to its referenced row, and `<C-o>` to go back. The clause scoping the grid to the referenced row is pinned: `F` and `X` clear the filters *you* applied without dropping you out of the FK context, and the query pad follows each hop.
 - **Reverse FK navigation** via `gm` to open the rows in other tables that reference the current row (e.g. `orders.user_id ← users`). One referencing table opens directly; several show a picker of `child_table.fk_column`. Hops chain: users → orders → order_items.
 - **Query history** via `gh` or `:GripHistory` browsing all executed queries with timestamp and SQL preview, stored in `.grip/history.jsonl`.
 - **Data profiling** via `gR` or `:GripProfile` showing sparkline distributions, completeness, cardinality, and top values per column.
@@ -336,12 +336,12 @@ No selection needed for whole-page edits: `gU` in normal mode stages the same va
 | `S` | Stack secondary sort on column |
 | `f` | Quick filter by cell value |
 | `<C-f>` | Freeform WHERE clause filter |
-| `F` | Clear all filters |
+| `F` | Clear the filters you applied (an FK-navigation scope is kept) |
 | `gp` | Load saved filter preset |
 | `gP` | Save current filter as preset |
 | `gn` | Filter: column IS NULL |
 | `gF` | Filter builder (=, !=, >, <, LIKE, IN, IS NULL/NOT NULL) |
-| `X` | Reset view (clear sort/filter/page) |
+| `X` | Reset view (clear sort/your filters/page) |
 | `H` / `L` | Previous / next page |
 | `]p` / `[p` | Previous / next page (alternate) |
 | `]P` / `[P` | Last / first page |

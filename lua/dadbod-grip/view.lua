@@ -1935,6 +1935,19 @@ function M.switch_view(bufnr, view_name)
   end
 end
 
+-- ── in-place navigation: query pad sync ───────────────────────────────────
+--- Sync the query pad with a spec the grid just switched to.
+--- init.open() syncs the pad for grids that open from outside it (sidebar, table
+--- picker, :Grip). FK navigation instead swaps the spec inside an existing grid
+--- and never goes through init.open(), so each in-place jump must sync itself —
+--- otherwise the pad keeps advertising the table you started from, three FK hops
+--- ago. clean_sql() keeps this honest: the pinned FK clause is included (the pad
+--- describes the rows on screen) while sorts, user filters and pagination are not.
+function M._sync_pad(spec)
+  if not spec then return end
+  require("dadbod-grip.query_pad").sync_query(qmod.clean_sql(spec))
+end
+
 -- ── reverse FK navigation ─────────────────────────────────────────────────
 --- Jump from the current row to the rows in other tables that reference it.
 --- Mirror of grid_fk_follow: same nav stack, query-spec, and render machinery.
@@ -2025,8 +2038,12 @@ function M._fk_referencing(bufnr)
     -- Build query for the referencing rows
     local page_size = session.query_spec and session.query_spec.page_size or 100
     local ref_spec = qmod.new_table(ref.table, page_size)
+    -- Pinned: this clause is what the grid IS ("the rows referencing that row"),
+    -- so F/X must not drop it and the [filtered] badge must not claim the user
+    -- filtered anything.
     ref_spec = qmod.add_filter(ref_spec,
-      sql.quote_ident(ref.column) .. " = " .. sql.quote_value(src_val))
+      sql.quote_ident(ref.column) .. " = " .. sql.quote_value(src_val),
+      { pinned = true })
     local ref_sql = qmod.build_sql(ref_spec)
 
     local result, err = db.query(ref_sql, session.state.url)
@@ -2064,6 +2081,7 @@ function M._fk_referencing(bufnr)
     session.query_spec = ref_spec
     session.total_rows = row_count
     M.render(bufnr, new_state)
+    M._sync_pad(ref_spec)
     vim.notify(
       ref.table .. "." .. ref.column .. " ← " .. tbl ..
       " (" .. row_count .. (row_count == 1 and " row)" or " rows)"),
