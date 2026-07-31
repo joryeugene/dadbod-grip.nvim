@@ -46,6 +46,24 @@ jobs:
       # is not redundant with GRIP_REQUIRE_DUCKDB below: this one names the cause.
       - name: Verify DuckDB is on PATH
         run: duckdb --version
+      # The ATTACH prefix the adapter prepends to a query carries "INSTALL
+      # sqlite_scanner" with it, so on a runner with an empty ~/.duckdb the fetch
+      # from extensions.duckdb.org has to fit inside the 10s query timeout. When it
+      # doesn't, duckdb dies with code 124 and duckdb_federation_spec reports 11
+      # failures that have nothing to do with the commit under test. Installing it
+      # here leaves that in-query INSTALL a local no-op; the retries stop one slow
+      # fetch from failing the run, and a genuinely unreachable extension repo fails
+      # in this step, where the message says so.
+      - name: Pre-install the DuckDB sqlite scanner
+        run: |
+          for attempt in 1 2 3; do
+            if duckdb -c "INSTALL sqlite_scanner; LOAD sqlite_scanner;"; then
+              exit 0
+            fi
+            echo "sqlite_scanner install failed (attempt $attempt of 3)"
+            sleep 5
+          done
+          exit 1
       - name: Run unit tests
         # Turns a missing duckdb/sqlite3 into a failure instead of a silent skip,
         # so removing the step above can't quietly take those 66 assertions with it.
