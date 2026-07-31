@@ -941,9 +941,16 @@ Connections are deduplicated by URL across all sources. The order is:
   5. $DATABASE_URL
   6. g:db / b:db
 
-The first hit for a URL wins and later duplicates are dropped whole rather
-than merged. Because the files are read before `g:dbs`, an entry may keep
-its URL in `g:dbs` while its `color` and `mode` live in connections.json.
+The first hit for a URL wins. Because the files are read before `g:dbs`, an
+entry may keep its URL in `g:dbs` while its `color` and `mode` live in
+connections.json.
+
+One case merges rather than discards: a discovered container colliding with
+a connections.json entry keeps the container's name and adopts the file
+entry's `type`, `env_file`, `mode`, `color` and `attachments`. Discovery
+contributes liveness, the file contributes configuration -- without this, a
+connection saved as `"mode": "ro"` would connect writable whenever its
+Docker stack happened to be up.
 
 Connection scope ~
 
