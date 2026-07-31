@@ -11,7 +11,9 @@ demo/*.db
 assets/*.png
 assets/*.gif
 docs/plans
+docs/superpowers/
 .claude
+.superpowers/
 
-# Внутренний протокол код-ревью — держим локально, не в публичном репо
+# Internal review notes and working documents — kept local, out of the public repo
 CODE_REVIEW.md
