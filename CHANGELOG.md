@@ -43,6 +43,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cursor on the type row those three could aggregate, filter or build a filter against a
   neighbouring column. All four now call `ctx.cursor_column()`, which resolves through
   `resolve_row_bp` — the row-type-aware path the fourth copy (`=`, column width) already used.
+- **The first attach of a scanner-backed database could time out and report itself as a broken
+  DSN.** Attaching a `postgres:`/`mysql:`/`sqlite:`/`md:` database makes DuckDB fetch the matching
+  scanner extension from `extensions.duckdb.org`, and that download had to fit inside the ordinary
+  10-second query budget — together with the query itself. When it did not, `duckdb` was killed at
+  code 124 and the failure surfaced as `Failed to attach database`, blaming a DSN that was
+  perfectly good; on an already-attached connection the same 10 seconds covered a first query,
+  a first DML statement or the completion pre-warm, whose budget is shorter still. A call whose
+  `INSTALL` may actually have to fetch something now gets the same 60-second allowance an `httpfs`
+  query has always had, across all four paths that spawn the CLI. The allowance is deliberately
+  not unconditional: a warm `INSTALL` is a local no-op, so it is spent once per extension per
+  session, and an attached database that has gone unreachable still fails in 10 seconds rather
+  than 60. This is the same fetch that made CI's `test (stable)` leg fail 13 assertions about
+  catalogs that were never attached, while the `v0.10.0` leg passed the same specs.
 - **`s`, `S` and `gS` refused to work off a data row.** Sorting and column statistics are
   column-scoped, so pressing them with the cursor on the header — the most natural place to reach
   for a sort — did nothing but print "Move cursor to a column". `_snap_col`'s own docblock names
@@ -136,6 +149,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DuckDB minors; a bump should be a deliberate commit. The three specs still skip locally when
   `duckdb` is absent, but CI sets `GRIP_REQUIRE_DUCKDB=1`, which turns a missing binary into a
   failure so the install step cannot be dropped without the suite going red.
+
+- **CI installs the DuckDB sqlite scanner before the suite runs.** The runner unzips a fresh CLI
+  into `RUNNER_TEMP` each job, so `~/.duckdb` starts empty and the first federated query paid for
+  the extension download inside its own timeout — which is how `test (stable)` went red on a
+  commit that had nothing to do with it while `test (v0.10.0)`, on a different runner, passed.
+  The install is now its own step, retried up to three times, so a slow fetch costs seconds
+  instead of a spurious failure and an unreachable extension repository fails in a step that says
+  so rather than as thirteen assertions about missing catalogs.
 
 - **luacheck now covers `tests/` too, and the specs it flagged were fixed rather than silenced.**
   Excluding the suite from the gate in 3.9.0 left 15 warnings unexamined; read individually, most
