@@ -16,14 +16,108 @@ local function split_table_name(table_name)
   return sql_util.split_table_name(table_name, "public")
 end
 
+--- Percent-decode a password component. libpq decodes URI percent-escapes
+--- itself when a password is embedded in the connection string; once
+--- strip_password below pulls the password out of the URL and hands it to
+--- psql via PGPASSWORD instead, this restores that same decoding so libpq
+--- still sees the password it would have seen (sql.lua:80-82 documents that
+--- URLs otherwise go to CLI clients verbatim -- this is the one exception).
+local function percent_decode(s)
+  return (s:gsub("%%(%x%x)", function(hex)
+    return string.char(tonumber(hex, 16))
+  end))
+end
+
+--- Split url into (url-with-password-removed, percent-encoded-password-or-nil).
+--- Same authority-parsing rule as sql_util.redact_url: the authority runs up
+--- to the next "/", and inside it the split is on the LAST "@" so a password
+--- that itself contains "@" is not mistaken for the host separator.
+local function strip_password(url)
+  local scheme, rest = url:match("^(%w+://)(.*)$")
+  if not scheme then return url, nil end
+  local authority, tail = rest:match("^([^/]*)(/.*)$")
+  if not authority then authority, tail = rest, "" end
+
+  local at = nil
+  for i = #authority, 1, -1 do
+    if authority:sub(i, i) == "@" then at = i; break end
+  end
+  if not at then return url, nil end
+
+  local userpass, host = authority:sub(1, at - 1), authority:sub(at + 1)
+  local colon = userpass:find(":", 1, true)
+  if not colon then return url, nil end
+
+  local user, pass = userpass:sub(1, colon - 1), userpass:sub(colon + 1)
+  if pass == "" then return scheme .. user .. "@" .. host .. tail, nil end
+  return scheme .. user .. "@" .. host .. tail, pass
+end
+
 --- argv for one psql invocation. Split out from psql() so the blocking and
---- non-blocking spawns run byte-identical command lines.
+--- non-blocking spawns run byte-identical command lines. The password never
+--- appears here: strip_password removes it from the URL, and psql_env below
+--- delivers it via PGPASSWORD instead, so it never shows up in a `ps` listing.
 local function psql_args(url, sql_str)
-  return { "psql", url, "-X", "--no-password", "--csv", "-c", sql_str }
+  local stripped_url = strip_password(url)
+  return { "psql", stripped_url, "-X", "--no-password", "--csv", "-c", sql_str }
+end
+
+--- opts.env for one psql invocation.
+---
+--- PGPASSWORD carries whatever strip_password pulled out of the URL, decoded
+--- exactly once (see percent_decode above). It is omitted -- an empty table,
+--- not an empty PGPASSWORD key -- when the URL has no password, so
+--- --no-password falls through to ~/.pgpass instead of authenticating with an
+--- empty password.
+---
+--- PGOPTIONS puts the session in read-only mode when opts.readonly is set.
+--- Not spliced into the URL as "?options=...": psql rejects that outright
+--- ('extra key/value separator "=" in URI query parameter'), and the
+--- percent-encoded form would mean decode-append-re-encode whenever a URL
+--- already carries its own options=. Caveat of using the env var instead: an
+--- options= already in the URL wins over PGOPTIONS, so such a connection is
+--- not put into read-only mode by this.
+--- @param url string
+--- @param opts table|nil  { readonly = boolean }
+local function psql_env(url, opts)
+  local env = {}
+  local _, pass = strip_password(url)
+  if pass then env.PGPASSWORD = percent_decode(pass) end
+  if opts and opts.readonly then
+    env.PGOPTIONS = "-c default_transaction_read_only=on"
+  end
+  return env
+end
+
+--- Why the read-only session guard does not take on this URL, or nil when it
+--- does. See adapters.readonly_caveat for the dispatcher and the contract.
+---
+--- libpq prefers a connection string's own `options` keyword over PGOPTIONS --
+--- it does not merge the two -- so the env var psql_env sets above is simply
+--- ignored for such a URL and the session opens writable. The caveat is
+--- documented, but a connection marked "mode": "ro" whose server would still
+--- accept a DELETE is worth saying out loud at connect time: the RO badge and
+--- the DDL refusals key off the entry, so this connection looks *more*
+--- protected than an ordinary one, not less.
+---
+--- An explicitly empty `options=` counts. libpq falls back to PGOPTIONS only
+--- when the keyword is absent altogether, so `?options=` defeats it too.
+--- @param url string  a resolved (expanded) postgres URL
+--- @return string|nil
+function M.readonly_caveat(url)
+  local query = (url or ""):match("^[^#]*%?([^#]*)")
+  if not query then return nil end
+  for _, pair in ipairs(vim.split(query, "&", { plain = true })) do
+    if pair == "options" or pair:match("^options=") then
+      return "the URL carries its own options= parameter, which overrides PGOPTIONS"
+    end
+  end
+  return nil
 end
 
 local function psql(url, sql_str, timeout_ms)
-  return adapters.run_cmd(psql_args(url, sql_str), timeout_ms or DEFAULT_TIMEOUT)
+  return adapters.run_cmd(psql_args(url, sql_str), timeout_ms or DEFAULT_TIMEOUT,
+    { env = psql_env(url, adapters.session_opts()) })
 end
 
 local function split_routine_name(routine_name)
@@ -279,7 +373,7 @@ function M.get_schema_batch_async(url, callback)
   adapters.run_cmd_async(psql_args(url, SCHEMA_BATCH_SQL), DEFAULT_TIMEOUT, function(stdout, _, code)
     if code ~= 0 then callback(nil); return end
     callback(parse_schema_batch(stdout))
-  end)
+  end, { env = psql_env(url, adapters.session_opts()) })
 end
 
 function M.explain(sql_str, url)
@@ -555,9 +649,12 @@ end
 --- Ping the server by running SELECT 1. Returns true on success, false on any error.
 function M.ping(url)
   if vim.fn.executable("psql") == 0 then return false end
-  local _, _, code = adapters.run_cmd(
-    { "psql", url, "-X", "--no-password", "--csv", "-c", "SELECT 1" }, 5000)
+  local _, _, code = adapters.run_cmd(psql_args(url, "SELECT 1"), 5000,
+    { env = psql_env(url, adapters.session_opts()) })
   return code == 0
 end
+
+M._psql_args = psql_args
+M._psql_env = psql_env
 
 return M

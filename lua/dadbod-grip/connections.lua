@@ -4,17 +4,35 @@
 
 local paths = require("dadbod-grip.paths")
 local ui = require("dadbod-grip.ui")
+local secrets = require("dadbod-grip.secrets")
 
 local M = {}
 
 -- Session-scoped connection health state (never persisted).
--- Values: "ok" | "fail" | "unknown" (default when absent)
+-- Values: "ok" | "fail" | "unresolved" | "unknown" (default when absent).
+-- "unresolved" is distinct from "fail": the connection was never attempted --
+-- its ${VAR} placeholder(s) couldn't be expanded (missing .env, still
+-- git-crypt-locked, renamed variable), so a scheme/network failure would be
+-- a meaningless report.
 local _health = {}
+
+-- Session-scoped read/write mode overrides, keyed by connection URL as stored
+-- (the template -- the same key entries live under on disk). Set only by
+-- M.switch(url, ..., { mode = ... }), which the picker's r:ro/rw action uses
+-- to connect once in the mode opposite to the entry's default.
+--
+-- Deliberately never written to connections.json: the entry's own `mode` is
+-- the user's standing decision about that database, and a keypress in a
+-- picker is not a request to rewrite their file. Every ordinary switch of a
+-- connection clears its override again, so the override lasts exactly from
+-- one connect to the next.
+local _mode_override = {}
 
 local function health_char(url)
   local s = _health[url] or "unknown"
-  if s == "ok"   then return "*" end
-  if s == "fail" then return "x" end
+  if s == "ok"         then return "*" end
+  if s == "fail"       then return "x" end
+  if s == "unresolved" then return "?" end
   return " "
 end
 
@@ -182,6 +200,9 @@ local function read_json_connections(path, source)
                   type = entry.type, source = source or "file" }
       if entry.attachments then c.attachments = entry.attachments end
       if entry.last_used then c.last_used = entry.last_used end
+      if entry.env_file then c.env_file = entry.env_file end
+      if entry.mode then c.mode = entry.mode end
+      if entry.color then c.color = entry.color end
       table.insert(result, c)
     end
   end
@@ -213,6 +234,121 @@ local function read_file_connections()
   return result
 end
 
+-- ── secret expansion ──────────────────────────────────────────────────────
+
+--- Find the saved entry for a connection URL, or nil when the URL is not a
+--- saved connection (an ad-hoc :GripConnect URL, a g:dbs entry, ...).
+---
+--- Exists so db.lua can reach an entry's env_file without knowing where
+--- connections are stored. Deliberately reads the JSON files directly rather
+--- than going through M.list(): list() also runs Docker discovery, and this
+--- sits on the query path -- db.resolve() calls it for every templated URL.
+--- @param url string|nil
+--- @return table|nil entry
+function M.entry_for(url)
+  if type(url) ~= "string" or url == "" then return nil end
+  for _, c in ipairs(read_file_connections()) do
+    if c.url == url then return c end
+  end
+  return nil
+end
+
+--- The read/write mode of a connection: "ro" or "rw", never nil.
+---
+--- "ro" only when the saved entry explicitly says `"mode": "ro"`. No entry
+--- (an ad-hoc URL, a g:dbs entry), no `mode` field, or any other value all
+--- mean "rw", so every connections.json written before this option existed
+--- keeps behaving exactly as it did.
+---
+--- Called with no argument -- the adapters and the mode badge do -- it asks
+--- about the connection currently in vim.b.db / vim.g.db, via the same
+--- precedence db.get_url() uses. That is deliberately the *template* URL:
+--- entries are keyed by the template on disk, so looking up an expanded
+--- "${VAR}" URL would find nothing and silently downgrade a ro connection to
+--- rw. Callers that already hold a stored URL (db.is_readonly) pass it in.
+--- A session override set by the picker's r:ro/rw action wins over the stored
+--- field, for that connection only and only until it is switched to again.
+--- @param url string|nil  a stored (templated) URL; defaults to the current connection
+--- @return string  "ro" or "rw"
+function M.current_mode(url)
+  -- Lazy require: db.lua reaches back into this module for expand_url.
+  local conn = require("dadbod-grip.db").get_url(url)
+  local override = conn and _mode_override[conn]
+  if override then return override end
+  local entry = M.entry_for(conn)
+  return (entry and entry.mode == "ro") and "ro" or "rw"
+end
+
+--- Refuse a schema-modifying action on a connection saved with "mode": "ro".
+--- Returns true when the caller must stop.
+---
+--- This is the layer that refuses *before* the prompt: every DDL path in the
+--- plugin opens an interactive form or a typed confirmation first, and walking
+--- a user through one only to have it fail at the end is a worse answer than
+--- declining up front.
+---
+--- It is a guard, not a boundary, and the difference matters. The adapters do
+--- put the CLI session itself in read-only mode, which usually means the
+--- server would refuse the statement even if this returned false -- but not
+--- always: a postgres URL that already carries its own `options=` overrides
+--- PGOPTIONS (see psql_env), and sqlite/duckdb pointed at a not-yet-existing
+--- file get no `-readonly` at all, by design. Treat this as the thing that
+--- keeps a read-only connection honest in ordinary use, not as something a
+--- caller may rely on to make a write impossible.
+---
+--- Lives here rather than in init.lua because the DDL entry points are spread
+--- across the command layer, the schema sidebar, the properties float and the
+--- grid's inspect keymaps; one wording for all of them is the point.
+---
+--- The message names the mode and never the URL -- it can carry a password.
+--- @param label string  the command or action name to prefix the message with
+--- @param url string|nil  defaults to the current connection
+--- @return boolean
+function M.deny_if_readonly(label, url)
+  if M.current_mode(url) ~= "ro" then return false end
+  vim.notify(label .. ": Connection is read-only (mode = ro)", vim.log.levels.WARN)
+  return true
+end
+
+--- Resolve the ${VAR} placeholders in a connection URL against the env_file
+--- of its saved entry (falling back to the process environment).
+---
+--- The expanded URL carries the live password, so it exists in exactly two
+--- kinds of place: the argv/env of the database CLI, and the local variable
+--- that got it there. vim.g.db, vim.b.db, connections.json and the query
+--- history all keep the *template* -- db.resolve() calls this at the single
+--- point where a URL is handed to an adapter, which is why no write path in
+--- the plugin can spill a secret. Do not push the expansion outward.
+---
+--- A URL with no placeholder is returned unchanged without touching the
+--- filesystem, so ordinary literal connections cost exactly what they did
+--- before.
+--- @param url string|nil
+--- @return string|nil expanded  nil only when expansion failed
+--- @return string|nil err
+function M.expand_url(url)
+  if type(url) ~= "string" or not secrets.has_template(url) then return url end
+  return secrets.expand(url, M.entry_for(url))
+end
+
+--- Resolve the ${VAR} placeholders in a persisted DuckDB attachment DSN.
+---
+--- Attachment DSNs are stored templated (see M.save_attachments), so the
+--- password of an attached postgres/mysql database never lands in
+--- connections.json either. Variables resolve against the attached
+--- connection's own entry when the stored string is itself a saved
+--- connection URL -- how the `a:attach` picker action stores it -- and
+--- otherwise against the entry of the DuckDB connection the attachment hangs
+--- off, which is what a DSN typed straight into :GripAttach gets.
+--- @param dsn string|nil
+--- @param host_url string|nil the DuckDB connection URL, as stored (templated)
+--- @return string|nil expanded
+--- @return string|nil err
+function M.expand_dsn(dsn, host_url)
+  if type(dsn) ~= "string" or not secrets.has_template(dsn) then return dsn end
+  return secrets.expand(dsn, M.entry_for(dsn) or M.entry_for(host_url))
+end
+
 --- Write connections to .grip/connections.json.
 --- Deduplicates by URL before writing, keeping the entry with the highest
 --- last_used timestamp. This self-heals files bloated by historical bugs.
@@ -236,6 +372,9 @@ local function write_file_connections(conns)
     if c.type then entry.type = c.type end
     if c.attachments and #c.attachments > 0 then entry.attachments = c.attachments end
     if c.last_used then entry.last_used = c.last_used end
+    if c.env_file then entry.env_file = c.env_file end
+    if c.mode then entry.mode = c.mode end
+    if c.color then entry.color = c.color end
     table.insert(data, entry)
   end
   local json = vim.fn.json_encode(data)
@@ -328,6 +467,9 @@ function M.list()
     for _, gc in ipairs(global_existing) do
       local gentry = { name = gc.name, url = gc.url }
       if gc.type then gentry.type = gc.type end
+      if gc.env_file then gentry.env_file = gc.env_file end
+      if gc.mode then gentry.mode = gc.mode end
+      if gc.color then gentry.color = gc.color end
       table.insert(gdata, gentry)
     end
     vim.fn.writefile({ vim.fn.json_encode(gdata) }, global_connections_path())
@@ -419,7 +561,7 @@ function M.set_health(url, status)
   _health[url] = status
 end
 
---- Return the current session health for a URL: "ok" | "fail" | "unknown".
+--- Return the current session health for a URL: "ok" | "fail" | "unresolved" | "unknown".
 function M.get_health(url)
   return _health[url] or "unknown"
 end
@@ -496,10 +638,32 @@ end
 --- Switch active connection. Routes file connections through grip.open(),
 --- DB connections through vim.g.db + workspace open.
 --- Auto-saves to .grip/connections.json if not already persisted.
---- opts: { write = bool, watch_ms = number }: session-only, never persisted.
+--- opts: { write = bool, watch_ms = number, mode = "ro"|"rw" }: session-only,
+--- never persisted.
+--- @return boolean committed  false when the switch aborted and nothing changed
 function M.switch(url, name, conn_type, opts)
   -- Strip session-only flags: they must never reach the connection registry
   url = strip_flags(url)
+
+  -- Resolve ${VAR} placeholders up front, before anything is mutated or
+  -- written: a connection whose .env is missing or still git-crypt-locked
+  -- must fail cleanly instead of leaving a half-switched session behind.
+  -- `url` itself stays the template -- that is what gets persisted, what
+  -- vim.g.db holds, and what every later lookup keys on. conn_url is only
+  -- needed by the DuckDB attachment paths below, which bypass db.resolve().
+  local conn_url, secret_err = M.expand_url(url)
+  if not conn_url then
+    -- Same distinct marker T:test sets, for the same reason: the picker has
+    -- to say "this one could not resolve its secret" rather than the generic
+    -- "x" of a database that is genuinely unreachable. Connecting is how most
+    -- people meet this failure, so the attempt has to record it too --
+    -- otherwise the user presses <CR>, reads an error, reopens the picker and
+    -- finds nothing to show for it.
+    M.set_health(url, "unresolved")
+    vim.notify("Grip: " .. (secret_err or "could not resolve connection secrets"),
+      vim.log.levels.ERROR)
+    return false
+  end
 
   -- Single read of the local file; everything below (type resolution,
   -- rename/insert, MRU touch) mutates this same in-memory list, and it is
@@ -547,13 +711,62 @@ function M.switch(url, name, conn_type, opts)
     write_file_connections(local_conns)
   end
 
+  -- The one place a mode override is set or cleared. Connecting the ordinary
+  -- way always returns a connection to the mode its entry asks for, so an
+  -- override taken by mistake is undone by reconnecting rather than by
+  -- editing connections.json.
+  --
+  -- Below the expansion check above, deliberately: a switch that aborted did
+  -- not happen, and must leave the mode of that URL exactly as it found it.
+  -- Set any earlier and an `r` on an entry whose ${VAR} does not resolve
+  -- would flip a read-only connection the user is still on to writable, with
+  -- only a "could not resolve secrets" message to go on.
+  _mode_override[url] = nil
+  if opts and (opts.mode == "ro" or opts.mode == "rw") then
+    _mode_override[url] = opts.mode
+  end
+
+  -- Say so, once per connect, when this particular connection cannot keep the
+  -- read-only promise the rest of the UI is about to make for it. Everything
+  -- downstream -- the RO badge, the DDL refusals -- reads the entry rather
+  -- than what the server was actually told, so silence here leaves the one
+  -- connection with a writable session looking the most protected of all.
+  --
+  -- Below the override, so an `r`-toggle to ro warns and a toggle to rw does
+  -- not. Asked of conn_url, not the template: the `options=` can arrive inside
+  -- a ${VAR}. Lazy require -- adapters reaches back into this module.
+  if M.current_mode(url) == "ro" then
+    local caveat = require("dadbod-grip.adapters").readonly_caveat(conn_url)
+    if caveat then
+      vim.notify("Grip: read-only is not enforced on this connection -- " .. caveat,
+        vim.log.levels.WARN)
+    end
+  end
+
+  -- Re-tint the accent groups for the connection being switched to. Read
+  -- after the write above so a just-added entry is found, and passed
+  -- unconditionally: an entry with no `color` (or no entry at all) has to
+  -- restore the default look, not inherit the previous connection's.
+  local view = require("dadbod-grip.view")
+  local switched_entry = M.entry_for(url)
+  view.set_connection_accent(switched_entry and switched_entry.color)
+  -- A switch changes what current_mode() answers, so every grid still open
+  -- has to ask again. Their badges are cached per session precisely because
+  -- the winbar is rebuilt on every cursor move; a switch is the one other
+  -- moment the cached answer can be wrong.
+  view.invalidate_mode_cache()
+
   if resolved_type == "file" then
     vim.notify("Grip: opening " .. (name or url), vim.log.levels.INFO)
     M.set_health(url, "ok")
     -- Compute the DuckDB connection that will actually run queries against this file.
     -- Mirrors the logic in init.lua so the query pad is wired to the same connection.
+    -- The scheme test needs the resolved URL (a whole-URL template hides it);
+    -- the pad is still bound to the template, which db.resolve() expands.
     local active = vim.g.db
-    local db_url = (active and active:match("^duckdb:")) and active or "duckdb::memory:"
+    local active_resolved = active and (M.expand_url(active) or active)
+    local db_url = (active_resolved and active_resolved:match("^duckdb:")) and active
+      or "duckdb::memory:"
     vim.schedule(function()
       -- No reuse_win: let find_content_win() place the grid correctly.
       -- Passing cur_win risks putting the grid in the sidebar if that window was focused.
@@ -572,7 +785,7 @@ function M.switch(url, name, conn_type, opts)
         require("dadbod-grip.query_pad").open(db_url)
       end)
     end)
-    return
+    return true
   end
 
   -- Regular DB connection: set vim.g.db and open full workspace
@@ -580,7 +793,12 @@ function M.switch(url, name, conn_type, opts)
 
   -- Restore persisted attachments for DuckDB connections (local file only;
   -- attachments are always saved to local by M.save_attachments).
-  if url:find("^duckdb:") then
+  --
+  -- One of the four paths that bypass db.resolve(), so it expands by hand:
+  -- the adapter's attachment registry is keyed by the URL the adapter is
+  -- called with, which is the *expanded* one on every query, and the stored
+  -- DSNs are templates that only become connectable here.
+  if conn_url:find("^duckdb:") then
     local stored_atts
     for _, c in ipairs(local_conns) do
       if c.url == url and c.attachments then
@@ -589,7 +807,28 @@ function M.switch(url, name, conn_type, opts)
       end
     end
     if stored_atts then
-      require("dadbod-grip.adapters.duckdb").load_attachments(url, stored_atts)
+      local live_atts = {}
+      for _, a in ipairs(stored_atts) do
+        local stored_dsn = type(a) == "table" and a.dsn or nil
+        if type(stored_dsn) ~= "string" then
+          -- Nothing to expand: hand the record on exactly as it was read and
+          -- let load_attachments deal with whatever shape it is, as before.
+          table.insert(live_atts, a)
+        else
+          local dsn, dsn_err = M.expand_dsn(stored_dsn, url)
+          if dsn then
+            -- template is carried through so the next save_attachments()
+            -- writes the placeholder back, not what it resolved to.
+            table.insert(live_atts, {
+              dsn = dsn, alias = a.alias, template = dsn ~= stored_dsn and stored_dsn or nil,
+            })
+          else
+            vim.notify(string.format("Skipped attachment '%s': %s", a.alias, dsn_err),
+              vim.log.levels.WARN)
+          end
+        end
+      end
+      require("dadbod-grip.adapters.duckdb").load_attachments(conn_url, live_atts)
     end
   end
 
@@ -625,6 +864,7 @@ function M.switch(url, name, conn_type, opts)
     end)
 
   end)
+  return true
 end
 
 --- Get current connection info.
@@ -646,6 +886,16 @@ end
 
 --- Persist attachments for a DuckDB connection URL.
 --- Called after attach/detach to update .grip/connections.json.
+---
+--- `url` is the connection URL as stored (templated), since that is the key
+--- the entry lives under on disk; the live adapter registry is keyed by the
+--- expanded URL, so callers pass the two separately.
+---
+--- Each record is persisted as `a.template or a.dsn`: a live attachment
+--- record carries the expanded, password-bearing DSN, and writing that here
+--- would put the password on disk through a field nothing else covers. The
+--- template is resolved again on replay by M.switch/expand_dsn. Records with
+--- no template (a literal DSN) round-trip byte-identically, as before.
 function M.save_attachments(url, attachments)
   local file_conns = read_local_connections()
   local found = false
@@ -654,7 +904,7 @@ function M.save_attachments(url, attachments)
       c.attachments = attachments and #attachments > 0 and {} or nil
       if attachments then
         for _, a in ipairs(attachments) do
-          table.insert(c.attachments, { dsn = a.dsn, alias = a.alias })
+          table.insert(c.attachments, { dsn = a.template or a.dsn, alias = a.alias })
         end
       end
       found = true
@@ -667,6 +917,26 @@ function M.save_attachments(url, attachments)
 end
 
 --- Prompt user to enter a new connection URL + name, then switch to it.
+--- True when the picker's `r` (ro/rw) action applies to this row.
+---
+--- Shared by the action's `when` and its `fn`: grip_picker fires `fn`
+--- regardless of `when`, so both need the same answer, and a second
+--- hand-written copy of these conditions is how the two drift apart.
+--- @param c table picker item
+--- @return boolean
+local function ro_toggle_applies(c)
+  if c._new or c._temp or c._section_header or c._local_file then return false end
+  -- A file connection has no server session to put in read-only mode;
+  -- !:write is the flag that matters there.
+  if c.type == "file" or (not c.type and is_file_url(c.url)) then return false end
+  -- SQL Server is read-only at the adapter (adapters/sqlserver.lua:9), so
+  -- offering to toggle its mode would promise a write path that does not
+  -- exist. Resolved first: a whole-URL template hides the scheme, and an
+  -- unresolvable one falls back to the template, which simply does not match.
+  local target = M.expand_url(c.url) or c.url
+  return not target:find("^sqlserver:")
+end
+
 local function prompt_new_connection()
   local url = ui.input({ prompt = "Connection URL, file path, or s3://: " })
   if not url then
@@ -733,6 +1003,11 @@ function M.pick(opts)
   local new_sentinel  = { name = "+ New connection...",          url = "", _new  = true }
   local temp_sentinel = { name = "~ Connect once (no save)...", url = "", _temp = true }
 
+  -- Does any listed entry default to read-only? Set by build_picker_items and
+  -- read by display: the RO column only exists when something is in it, so a
+  -- picker with no ro entry renders byte-identically to how it always has.
+  local any_ro = false
+
   -- Build the full item list with scope sections.
   -- When at least one global connection exists and connections_path is not set,
   -- connections are grouped under "global" and "project" section headers so the
@@ -787,6 +1062,10 @@ function M.pick(opts)
     end
     table.insert(out, new_sentinel)
     table.insert(out, temp_sentinel)
+    any_ro = false
+    for _, c in ipairs(out) do
+      if c.mode == "ro" then any_ro = true; break end
+    end
     return out
   end
 
@@ -813,7 +1092,17 @@ function M.pick(opts)
       local dot = health_char(c.url)
       local pad = string.rep(" ", max_name - vim.fn.strdisplaywidth(c.name))
       local url_display = show_pass[c.url] and c.url or short_url(c.url)
-      return dot .. " " .. c.name .. pad .. "  " .. url_display
+      -- The entry's stored default, not what r:ro/rw may have overridden for
+      -- this session: this row answers "how does this connection open", and
+      -- the winbar answers "how is it open right now".
+      --
+      -- Its own column, ahead of the URL, because it is a property of the
+      -- entry like the health dot -- and because grip_picker truncates a row
+      -- that overruns the float, which ate the marker outright when it
+      -- trailed the URL: long production names and long hosts are exactly the
+      -- rows most likely to be read-only, and M:mask lengthens them further.
+      local ro = any_ro and (c.mode == "ro" and "RO " or "   ") or ""
+      return dot .. " " .. c.name .. pad .. "  " .. ro .. url_display
     end,
     on_select = function(c)
       if c._section_header then return end
@@ -912,18 +1201,39 @@ function M.pick(opts)
         close_on_select = true,
         when           = function(c)
           if c._new or c._temp or c._section_header or c._local_file then return false end
-          -- Show on non-DuckDB connections when current connection is DuckDB
+          -- Show on non-DuckDB connections when current connection is DuckDB.
+          -- Both URLs are resolved first: a whole-URL template hides the
+          -- scheme, and without this the action is hidden on a templated
+          -- DuckDB connection even though its fn below handles one.
           local cur = vim.g.db
-          return cur and cur:find("^duckdb:") and not c.url:find("^duckdb:")
+          cur = cur and (M.expand_url(cur) or cur)
+          local target = M.expand_url(c.url) or c.url
+          if not (cur and cur:find("^duckdb:")) or target:find("^duckdb:") then return false end
+          -- Hide it outright for databases DuckDB has no scanner for (SQL
+          -- Server, Oracle, ...) rather than offering an action that can only
+          -- fail. M.attach refuses those too, for the :GripAttach path.
+          local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
+          return duckdb_adapter._unsupported_attach_scheme(duckdb_adapter.url_to_dsn(target)) == nil
         end,
         fn             = function(c)
           if c._new or c._temp or c._section_header or c._local_file then return end
           -- Guard: grip_picker fires fn regardless of `when` predicate label
+          -- url is the active connection as stored (templated: the key on
+          -- disk); conn_url is what the adapter registry is keyed by. One of
+          -- the four paths that bypass db.resolve(), so both the DuckDB URL
+          -- and the target's URL are expanded by hand here.
           local url = vim.g.db
-          if not url or not url:find("^duckdb:") then
+          local conn_url = M.expand_url(url)
+          if not conn_url or not conn_url:find("^duckdb:") then
             vim.notify(
               "Attach requires an active DuckDB connection. Switch to DuckDB with gc first.",
               vim.log.levels.WARN)
+            return
+          end
+          local target_url, target_err = M.expand_url(c.url)
+          if not target_url then
+            vim.notify("Attach failed: " .. (target_err or "unresolved connection secrets"),
+              vim.log.levels.ERROR)
             return
           end
           local default_alias = c.name:lower():gsub("[^%w_]", "_"):gsub("_+", "_"):gsub("^_", ""):gsub("_$", "")
@@ -931,13 +1241,17 @@ function M.pick(opts)
           if not alias then return end
           local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
           local schema_mod = require("dadbod-grip.schema")
-          local dsn = duckdb_adapter.url_to_dsn(c.url)
-          local err = duckdb_adapter.attach(url, dsn, alias)
+          local dsn = duckdb_adapter.url_to_dsn(target_url)
+          -- Persist the connection's own URL template, not the DSN derived
+          -- from it: M.expand_dsn() finds this entry's env_file by that URL,
+          -- and load_attachments() runs url_to_dsn() again on replay.
+          local template = target_url ~= c.url and c.url or nil
+          local err = duckdb_adapter.attach(conn_url, dsn, alias, template)
           if err then
             vim.notify("Attach failed: " .. err, vim.log.levels.ERROR)
             return
           end
-          M.save_attachments(url, duckdb_adapter.get_attachments(url))
+          M.save_attachments(url, duckdb_adapter.get_attachments(conn_url))
           schema_mod.refresh(url)
           vim.notify(string.format("Attached '%s' as %s", c.name, alias), vim.log.levels.INFO)
         end,
@@ -950,10 +1264,31 @@ function M.pick(opts)
         when  = function(c) return not (c._new or c._temp or c._section_header) end,
         fn    = function(c)
           if c._new or c._temp or c._section_header then return end
-          if is_testable_locally(c) then
-            local path = extract_local_path(c.url)
+          -- A templated entry must report *why* it can't be tested, not a
+          -- meaningless "Unsupported database scheme: ${VAR}" from handing
+          -- the literal placeholder to the adapter.
+          local conn_url, secret_err = M.expand_url(c.url)
+          if not conn_url then
+            M.set_health(c.url, "unresolved")
+            vim.notify("Grip: " .. (secret_err or "could not resolve connection secrets"),
+              vim.log.levels.ERROR)
+            return
+          end
+          -- Scheme detection (is_testable_locally) needs the resolved URL for
+          -- a whole-URL template, same reasoning as a:attach above.
+          local test_target = conn_url == c.url and c
+            or vim.tbl_extend("force", {}, c, { url = conn_url })
+          if is_testable_locally(test_target) then
+            local path = extract_local_path(conn_url)
             M.set_health(c.url, vim.fn.filereadable(path) == 1 and "ok" or "fail")
           else
+            -- db.ping is given the URL *as stored*, not the expansion above:
+            -- it resolves internally, and everything else it consults keys on
+            -- the template. Handing it the expanded URL made
+            -- current_mode(expanded) find no entry and report "rw", so a
+            -- connection saved "mode": "ro" got pinged with a writable
+            -- session -- the one place in this feature that looked a
+            -- connection up by anything but the template.
             local ok = require("dadbod-grip.db").ping(c.url)
             M.set_health(c.url, ok and "ok" or "fail")
           end
@@ -982,15 +1317,48 @@ function M.pick(opts)
               return
             end
           end
-          table.insert(global_conns, { name = c.name, url = c.url })
+          local promoted = { name = c.name, url = c.url, type = c.type,
+                              env_file = c.env_file, mode = c.mode, color = c.color }
+          table.insert(global_conns, promoted)
           local gdata = {}
           for _, gc in ipairs(global_conns) do
             local entry = { name = gc.name, url = gc.url }
             if gc.type then entry.type = gc.type end
+            if gc.env_file then entry.env_file = gc.env_file end
+            if gc.mode then entry.mode = gc.mode end
+            if gc.color then entry.color = gc.color end
             table.insert(gdata, entry)
           end
           vim.fn.writefile({ vim.fn.json_encode(gdata) }, global_path)
           vim.notify("'" .. c.name .. "' saved to ~/.grip/connections.json", vim.log.levels.INFO)
+        end,
+      },
+      {
+        -- r: connect in the mode opposite to the entry's default -- a ro entry
+        -- opened writable for one fix, a rw entry opened read-only before
+        -- poking at production. Session-only: nothing is written to
+        -- connections.json, and selecting the connection normally afterwards
+        -- puts it back on its own mode (see _mode_override).
+        key            = "r",
+        label          = "r:ro/rw",
+        close_on_select = true,
+        when           = function(c)
+          return ro_toggle_applies(c)
+        end,
+        fn             = function(c)
+          -- grip_picker fires fn regardless of the `when` predicate (see the
+          -- same guard on a:attach), so this is the check that actually
+          -- prevents an override being set on an entry the action was hidden
+          -- for -- not a restatement of the line above.
+          if not ro_toggle_applies(c) then return end
+          local mode = c.mode == "ro" and "rw" or "ro"
+          -- Only claim the override on a switch that committed: one that
+          -- aborted (unresolvable ${VAR}) leaves the connection exactly as it
+          -- was, and has already said why.
+          if M.switch(c.url, c.name, c.type, { mode = mode }) then
+            vim.notify("Grip: connected " .. (mode == "ro" and "read-only" or "writable")
+              .. " for this session (mode = " .. mode .. ")", vim.log.levels.INFO)
+          end
         end,
       },
       {

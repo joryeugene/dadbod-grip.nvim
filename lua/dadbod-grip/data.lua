@@ -82,11 +82,16 @@ local function edit_copy(state)
 end
 
 -- M.new(query_result) → State
--- query_result = { rows, columns, primary_keys, table_name, url, sql }
+-- query_result = { rows, columns, primary_keys, table_name, url, sql, readonly }
+-- query_result.readonly is the caller saying so outright (a read-only adapter,
+-- a connection saved with "mode": "ro"). Those callers also hand over an empty
+-- primary_keys, which already produced a read-only state on its own -- this
+-- makes the reason explicit instead of leaving it to be inferred from the
+-- absence of a key, so a future PK-less-but-editable grid cannot undo it.
 function M.new(query_result)
   local pks = query_result.primary_keys or {}
   local table_name = query_result.table_name
-  local readonly = (#pks == 0) or (table_name == nil)
+  local readonly = (#pks == 0) or (table_name == nil) or query_result.readonly == true
   return {
     rows = deep_copy(query_result.rows or {}),
     columns = deep_copy(query_result.columns or {}),

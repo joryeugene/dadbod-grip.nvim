@@ -268,6 +268,13 @@ function M.open(table_name, url, grip_win)
     return col_line_map[row]
   end
 
+  -- The four DDL keymaps below decline on a read-only connection (see
+  -- connections.deny_if_readonly) rather than closing the float, opening a
+  -- prompt and letting the statement fail at the end of it. The float stays
+  -- open: nothing happened. The guard sits after each keymap's own
+  -- precondition, so "move the cursor to a column row" still wins where that
+  -- is the actual problem.
+
   -- R: rename column under cursor
   vim.keymap.set("n", "R", function()
     local col_name = cursor_column()
@@ -275,6 +282,7 @@ function M.open(table_name, url, grip_win)
       vim.notify("Move cursor to a column row", vim.log.levels.INFO)
       return
     end
+    if require("dadbod-grip.connections").deny_if_readonly("Rename column", url) then return end
     -- close() (not a bare nvim_win_close) so the buffer is gone before the
     -- blocking ddl prompt below opens: WinLeave's own deferred cleanup runs
     -- via vim.schedule, which a blocking prompt can starve until it returns,
@@ -292,6 +300,7 @@ function M.open(table_name, url, grip_win)
 
   -- +: add column
   vim.keymap.set("n", "+", function()
+    if require("dadbod-grip.connections").deny_if_readonly("Add column", url) then return end
     -- See the R handler above for why close() replaces a bare nvim_win_close.
     close()
     local ddl = require("dadbod-grip.ddl")
@@ -303,6 +312,7 @@ function M.open(table_name, url, grip_win)
 
   -- T: rename table
   vim.keymap.set("n", "T", function()
+    if require("dadbod-grip.connections").deny_if_readonly("Rename table", url) then return end
     -- See the R handler above for why close() replaces a bare nvim_win_close.
     close()
     if vim.api.nvim_win_is_valid(caller_win) then
@@ -321,6 +331,7 @@ function M.open(table_name, url, grip_win)
       vim.notify("Move cursor to a column row", vim.log.levels.INFO)
       return
     end
+    if require("dadbod-grip.connections").deny_if_readonly("Drop column", url) then return end
     -- See the R handler above for why close() replaces a bare nvim_win_close.
     close()
     local ddl = require("dadbod-grip.ddl")

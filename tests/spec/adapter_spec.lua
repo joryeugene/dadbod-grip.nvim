@@ -65,6 +65,24 @@ local function capture_system_args(stdout, fn)
   return captured
 end
 
+--- Same as capture_system_args but also returns the opts vim.system was
+--- called with, so a test can inspect opts.env (e.g. a password delivered
+--- via the environment instead of argv).
+local function capture_system_call(stdout, fn)
+  local captured_args, captured_opts
+  local orig = vim.system
+  vim.system = function(args, opts, cb)
+    captured_args = args
+    captured_opts = opts
+    local r = { stdout = stdout or "", stderr = "", code = 0 }
+    if cb then cb(r) else return { wait = function() return r end } end
+  end
+  local ok, err = pcall(fn)
+  vim.system = orig
+  if not ok then error(err) end
+  return captured_args, captured_opts
+end
+
 local function with_executable(fn)
   local orig = vim.fn.executable
   vim.fn.executable = function() return 1 end
@@ -410,15 +428,18 @@ end)
 
 test("sqlserver query: builds sqlcmd args for non-interactive use", function()
   with_executable(function()
-    local args = capture_system_args("id\n--\n1\n", function()
+    local args, opts = capture_system_call("id\n--\n1\n", function()
       sqlserver.query("SELECT 1", "sqlserver://sa:pw@localhost:1433/grip_test")
     end)
     has_arg(args, "sqlcmd", "uses sqlcmd")
     has_arg(args, "-S", "sets server")
     has_arg(args, "-d", "sets database")
     has_arg(args, "-U", "sets user")
-    has_arg(args, "-P", "sets password")
     has_arg(args, "-Q", "sets query")
+    for _, a in ipairs(args) do
+      assert(not tostring(a):find("pw", 1, true), "password in argv: " .. tostring(a))
+    end
+    eq(opts.env.SQLCMDPASSWORD, "pw", "password delivered via env instead")
   end)
 end)
 

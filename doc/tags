@@ -22,6 +22,7 @@
 :GripTables	dadbod-grip.txt	/*:GripTables*
 :GripToggle	dadbod-grip.txt	/*:GripToggle*
 dadbod-grip.txt	dadbod-grip.txt	/*dadbod-grip.txt*
+grip-accent	dadbod-grip.txt	/*grip-accent*
 grip-adapters	dadbod-grip.txt	/*grip-adapters*
 grip-advanced	dadbod-grip.txt	/*grip-advanced*
 grip-ai	dadbod-grip.txt	/*grip-ai*
@@ -58,10 +59,12 @@ grip-picker	dadbod-grip.txt	/*grip-picker*
 grip-pinned-max	dadbod-grip.txt	/*grip-pinned-max*
 grip-profiling	dadbod-grip.txt	/*grip-profiling*
 grip-query-pad	dadbod-grip.txt	/*grip-query-pad*
+grip-readonly	dadbod-grip.txt	/*grip-readonly*
 grip-requirements	dadbod-grip.txt	/*grip-requirements*
 grip-s3-files	dadbod-grip.txt	/*grip-s3-files*
 grip-saved-queries	dadbod-grip.txt	/*grip-saved-queries*
 grip-schema	dadbod-grip.txt	/*grip-schema*
+grip-secrets	dadbod-grip.txt	/*grip-secrets*
 grip-sort-filter	dadbod-grip.txt	/*grip-sort-filter*
 grip-sort-filter-page	dadbod-grip.txt	/*grip-sort-filter-page*
 grip-sticky-header	dadbod-grip.txt	/*grip-sticky-header*

@@ -240,6 +240,27 @@ Note: explain query plan is accessible via `gQ` (removed from tab system).
 | `4` | ER diagram float |
 | `5-9` | Open table under cursor in that view (5=Stats, 6=Columns, 7=FK, 8=Indexes, 9=Constraints) |
 
+## Connection Picker (`:GripConnect`, `gC`, `<C-g>`)
+
+Actions on the entry under the cursor. Each is shown in the picker's footer only
+when it applies to that entry.
+
+| Key | Action |
+|-----|--------|
+| `<CR>` | Connect |
+| `r` | Connect in the opposite mode (ro ↔ rw) for this session only; the file is not modified |
+| `!` | Connect a file-backed database in write mode (apply overwrites the file) |
+| `W` | Connect with watch mode on (auto-refresh every 5s) |
+| `M` | Toggle password masking in the picker row |
+| `a` | Attach this database to the current DuckDB connection |
+| `T` | Retest connection health |
+| `G` | Promote a project connection to global (`~/.grip/connections.json`) |
+| `s` | Save the local file under the cursor as a named connection |
+
+Entries default to read-only when their connections.json entry has `"mode": "ro"`;
+those rows show `RO`. `r` inverts that default for one session. See
+`:help grip-readonly`.
+
 ## Free `g` Keymaps (as of v1.5)
 
 Available for future features. Check this list before assigning a new `g` keymap:

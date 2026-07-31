@@ -113,6 +113,13 @@ local function resolve_target(cmd_opts, cmd_name, no_table_msg)
   return table_name, url
 end
 
+--- Shorthand for the shared read-only guard; see connections.deny_if_readonly.
+--- @param cmd_name string
+--- @param url string|nil  defaults to the current connection
+local function deny_if_readonly(cmd_name, url)
+  return require("dadbod-grip.connections").deny_if_readonly(cmd_name, url)
+end
+
 -- Decide the query spec for a given :Grip argument.
 -- Returns (spec, table_name, file_path) or (nil, err_string).
 local function resolve_query(arg, page_size)
@@ -488,7 +495,8 @@ local function do_refresh(bufnr, url, query_sql, table_name)
   end
 
   -- Re-fetch primary keys
-  if table_name and not db.is_readonly(url) then
+  result.readonly = db.is_readonly(url)
+  if table_name and not result.readonly then
     local pks, pk_err = db.get_primary_keys(table_name, url)
     result.primary_keys = (pk_err == nil) and pks or {}
   else
@@ -751,7 +759,8 @@ function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
   end
 
   -- Fetch PKs
-  local pks = db.is_readonly(url) and {} or (db.get_primary_keys(table_name, url) or {})
+  result.readonly = db.is_readonly(url)
+  local pks = result.readonly and {} or (db.get_primary_keys(table_name, url) or {})
   result.primary_keys = pks
   result.table_name = table_name
   result.url = url
@@ -933,8 +942,12 @@ function M.open(arg, url, opts)
   -- File-as-table: use the active DuckDB connection so ATTACHed databases
   -- remain accessible. Fall back to duckdb::memory: when no DuckDB session exists.
   if file_path then
+    -- The scheme test needs the resolved URL (a whole-URL template hides it),
+    -- but `conn` stays the template: everything downstream of here expands via
+    -- db.resolve(), and history/view must not record the expansion.
     local active = vim.g.db
-    conn = (active and active:match("^duckdb:")) and active or "duckdb::memory:"
+    local resolved = db.resolved_url(active)
+    conn = (resolved and resolved:match("^duckdb:")) and active or "duckdb::memory:"
   end
 
   if not conn or conn == "" then
@@ -971,7 +984,8 @@ function M.open(arg, url, opts)
   end
 
   -- Fetch primary keys if we have a table name
-  if table_name_arg and not db.is_readonly(conn) then
+  result.readonly = db.is_readonly(conn)
+  if table_name_arg and not result.readonly then
     local pks, _ = db.get_primary_keys(table_name_arg, conn)
     result.primary_keys = pks or {}
   else
@@ -1898,6 +1912,7 @@ function M.setup(opts)
 
   -- Register :GripCreate command
   vim.api.nvim_create_user_command("GripCreate", function()
+    if deny_if_readonly("GripCreate") then return end
     local url = db.get_url()
     if not url then
       vim.notify("GripCreate: no database connection. Use :GripConnect.", vim.log.levels.WARN)
@@ -1918,6 +1933,7 @@ function M.setup(opts)
 
   -- Register :GripDrop command
   vim.api.nvim_create_user_command("GripDrop", function(cmd_opts)
+    if deny_if_readonly("GripDrop") then return end
     local table_name, url = resolve_target(cmd_opts, "GripDrop", "provide a table name")
     if not table_name then return end
     local ddl_mod = require("dadbod-grip.ddl")
@@ -1948,6 +1964,11 @@ function M.setup(opts)
       vim.notify("GripRename: no database connection", vim.log.levels.WARN)
       return
     end
+    -- Guarded on the URL the ALTER below actually runs against, not on the
+    -- ambient one: this command is the only one whose action reads
+    -- session.url, and guarding the ambient connection instead let a rename
+    -- through against a ro connection whenever the two had drifted apart.
+    if deny_if_readonly("GripRename", url) then return end
 
     local ddl_mod = require("dadbod-grip.ddl")
     if #args >= 2 then
@@ -2015,8 +2036,13 @@ function M.setup(opts)
     local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
     local schema_mod = require("dadbod-grip.schema")
 
+    -- url is the active connection as stored (templated: the key its entry
+    -- lives under in connections.json); conn_url is the expanded form the
+    -- adapter's attachment registry is keyed by. This command bypasses
+    -- db.resolve(), so it expands by hand.
     local url = vim.g.db
-    if not url or not url:find("^duckdb:") then
+    local conn_url = connections.expand_url(url)
+    if not conn_url or not conn_url:find("^duckdb:") then
       vim.notify("GripAttach: requires a DuckDB connection. Use :GripConnect to switch.", vim.log.levels.WARN)
       return
     end
@@ -2035,12 +2061,19 @@ function M.setup(opts)
       alias = a
     end
 
-    local err = duckdb_adapter.attach(url, dsn, alias)
+    -- A hand-typed DSN may reference ${VAR} too; resolve it against the
+    -- active connection's env_file and keep the placeholder for persistence.
+    local live_dsn, dsn_err = connections.expand_dsn(dsn, url)
+    if not live_dsn then
+      vim.notify("GripAttach: " .. (dsn_err or "unresolved secrets in DSN"), vim.log.levels.ERROR)
+      return
+    end
+    local err = duckdb_adapter.attach(conn_url, live_dsn, alias, live_dsn ~= dsn and dsn or nil)
     if err then
       vim.notify("GripAttach: " .. err, vim.log.levels.ERROR)
       return
     end
-    connections.save_attachments(url, duckdb_adapter.get_attachments(url))
+    connections.save_attachments(url, duckdb_adapter.get_attachments(conn_url))
     require("dadbod-grip.completion").invalidate(url)
     schema_mod.refresh(url)
     -- Pre-warm completion cache after manual attach (M.attach no longer does this).
@@ -2059,15 +2092,17 @@ function M.setup(opts)
     local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
     local schema_mod = require("dadbod-grip.schema")
 
+    -- Same template/expanded split as :GripAttach above.
     local url = vim.g.db
-    if not url or not url:find("^duckdb:") then
+    local conn_url = connections.expand_url(url)
+    if not conn_url or not conn_url:find("^duckdb:") then
       vim.notify("GripDetach: requires a DuckDB connection.", vim.log.levels.WARN)
       return
     end
 
     local alias = vim.trim(cmd_opts.args or "")
     if alias == "" then
-      local atts = duckdb_adapter.get_attachments(url)
+      local atts = duckdb_adapter.get_attachments(conn_url)
       if #atts == 0 then
         vim.notify("GripDetach: no databases attached.", vim.log.levels.INFO)
         return
@@ -2079,8 +2114,8 @@ function M.setup(opts)
       alias = val
     end
 
-    duckdb_adapter.detach(url, alias)
-    connections.save_attachments(url, duckdb_adapter.get_attachments(url))
+    duckdb_adapter.detach(conn_url, alias)
+    connections.save_attachments(url, duckdb_adapter.get_attachments(conn_url))
     require("dadbod-grip.completion").invalidate(url)
     schema_mod.refresh(url)
     vim.notify(string.format("Detached '%s'", alias), vim.log.levels.INFO)
@@ -2224,6 +2259,13 @@ function M.setup(opts)
 
   -- :GripFill [N]: stage N AI-generated realistic rows (default 1, max 50)
   vim.api.nvim_create_user_command("GripFill", function(cmd_opts)
+    -- do_fill_rows works on the session's connection, so guard on that one and
+    -- not on the ambient one, which can be a different connection entirely
+    -- after a :GripConnect. With no session there is nothing to fill and no
+    -- URL to check; nil falls back to the ambient connection so the refusal
+    -- still names the mode rather than the missing session.
+    local fill_session = view._sessions[vim.api.nvim_get_current_buf()]
+    if deny_if_readonly("GripFill", fill_session and fill_session.url) then return end
     local n = math.max(1, math.min(50, tonumber(cmd_opts.args) or 1))
     M.do_fill_rows(n)
   end, { nargs = "?", desc = "Stage N AI-generated rows for current table (default 1, max 50)" })
@@ -2274,6 +2316,10 @@ function M.do_fill_rows(n)
 
   -- Build single-table DDL so the AI knows exactly what to fill.
   local db_mod = require("dadbod-grip.db")
+  -- Checked here too, not only in :GripFill: the AI keymap calls this
+  -- directly, and the adapter check below would refuse a read-only *connection*
+  -- with the wrong reason when its adapter is perfectly writable.
+  if deny_if_readonly("GripFill", db_url) then return end
   if db_mod.is_readonly(db_url) then
     vim.notify("GripFill: this adapter is read-only", vim.log.levels.WARN)
     return
@@ -2285,8 +2331,10 @@ function M.do_fill_rows(n)
   local ddl     = ai_mod._format_ddl_line(tbl, cols or {}, pks or {}, fks)
 
   -- Detect adapter for value-format hints. SQLite stays the fallback for
-  -- URLs no adapter claims (its value syntax is the most permissive).
-  local adapter = require("dadbod-grip.adapters").display_name(db_url) or "SQLite"
+  -- URLs no adapter claims (its value syntax is the most permissive) -- which
+  -- is why a "${VAR}" template is resolved first: the generated rows are
+  -- executed, so falling back to the wrong dialect is not a cosmetic miss.
+  local adapter = require("dadbod-grip.adapters").display_name(db_mod.resolved_url(db_url)) or "SQLite"
 
   ui.blocking("Generating " .. n .. " row(s)...", function()
     local done = false
