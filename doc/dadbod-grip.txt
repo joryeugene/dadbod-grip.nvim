@@ -932,7 +932,18 @@ Add a new connection: >
 Or run `:GripConnect` with no arguments to pick from known connections
 or add a new one interactively.
 
-Connections are deduplicated by URL across all sources.
+Connections are deduplicated by URL across all sources. The order is:
+
+  1. discovered Docker containers
+  2. .grip/connections.json          (project)
+  3. ~/.grip/connections.json        (global)
+  4. g:dbs
+  5. $DATABASE_URL
+  6. g:db / b:db
+
+The first hit for a URL wins and later duplicates are dropped whole rather
+than merged. Because the files are read before `g:dbs`, an entry may keep
+its URL in `g:dbs` while its `color` and `mode` live in connections.json.
 
 Connection scope ~
 
@@ -983,6 +994,10 @@ Beyond `name` and `url`, an entry in either connections.json may carry:
              (green, orange, red, blue, violet, yellow) or "#rrggbb"
 
 All three are optional. An entry without them behaves exactly as before.
+
+These fields exist only in a connections.json entry. `g:dbs` is read as the
+vim-dadbod-ui format -- name and url and nothing else -- so a `color`,
+`mode`, `env_file` or `type` written there is discarded on read.
 
                                                           *grip-secrets*
 Secrets: ${VAR} in a connection URL ~
@@ -1062,7 +1077,7 @@ transaction read write; ...` is enough. If a connection must not be able to
 write, give it a database role that cannot. That is the boundary; `mode` is
 the seatbelt.
 
-Two further limits:
+Three further limits:
 
 - An `options=` already present in a postgres url wins over PGOPTIONS, so
   such a connection reports `RO` while its session is not read-only.
@@ -1072,6 +1087,16 @@ Two further limits:
   `duckdb::memory:` and a not-yet-created sqlite file connect normally: the
   flag aborts the former outright and turns "create it" into an error for
   the latter.
+- A connection pooler refuses the option outright. Pgbouncer-compatible
+  poolers reject unknown startup parameters, so PGOPTIONS does not degrade
+  the session, it fails the connection: >
+
+    FATAL: unsupported startup parameter in options:
+    default_transaction_read_only
+<
+  Unlike the two above, this is not an overstated `RO` badge -- there is no
+  session at all. Point a `mode: "ro"` entry at the direct port rather than
+  the pooled one.
 
                                                           *grip-accent*
 Connection colour ~
