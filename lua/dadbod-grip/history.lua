@@ -2,6 +2,7 @@
 -- Stores in .grip/history.jsonl. Picker uses grip_picker (zero external deps).
 
 local paths = require("dadbod-grip.paths")
+local sql_util = require("dadbod-grip.sql")
 
 local M = {}
 
@@ -23,9 +24,10 @@ local function ensure_dir()
 end
 
 --- Redact password from connection URL. Mockable via M._redact_url.
+--- Delegates to sql.redact_url, the single copy of this pattern shared with
+--- the adapters' error messages.
 function M._redact_url(url)
-  if not url then return "" end
-  return url:gsub("://([^:]+):[^@]+@", "://%1:***@")
+  return sql_util.redact_url(url)
 end
 
 --- Read all history entries from disk. Mockable via M._read_all.

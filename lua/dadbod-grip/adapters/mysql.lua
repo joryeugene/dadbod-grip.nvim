@@ -46,9 +46,6 @@ local function mysql_args(parsed, sql_str)
     args[#args + 1] = "-u"
     args[#args + 1] = parsed.user
   end
-  if parsed.pass and parsed.pass ~= "" then
-    args[#args + 1] = "-p" .. parsed.pass
-  end
   if parsed.dbname then
     args[#args + 1] = parsed.dbname
   end
@@ -57,23 +54,28 @@ local function mysql_args(parsed, sql_str)
   return args
 end
 
---- Strip the known password-on-CLI warning mysql writes to stderr on every run.
-local function scrub_stderr(stderr)
-  return (stderr:gsub("mysql: %[Warning%][^\n]*command line interface can be insecure%.?\n?", ""))
+--- opts.env for one mysql invocation: MYSQL_PWD carrying the password so it
+--- never appears in argv (visible via `ps`). No percent-decoding -- sql.lua's
+--- parse_dadbod_url hands mysql URLs to the CLI verbatim, and MYSQL_PWD is
+--- just the argv `-p<pass>` this replaces, so it gets the same verbatim value.
+--- Returns an empty table -- not a MYSQL_PWD key -- when there is no password,
+--- matching mysql_args' old behavior of omitting -p entirely (falls through
+--- to any password configured in a defaults file).
+local function mysql_env(parsed)
+  if not parsed.pass or parsed.pass == "" then return {} end
+  return { MYSQL_PWD = parsed.pass }
 end
 
 --- Run a statement, blocking.
 local function mysql_query(parsed, sql_str, timeout_ms)
-  local stdout, stderr, code = adapters.run_cmd(mysql_args(parsed, sql_str), timeout_ms or DEFAULT_TIMEOUT)
-  return stdout, scrub_stderr(stderr), code
+  return adapters.run_cmd(mysql_args(parsed, sql_str), timeout_ms or DEFAULT_TIMEOUT,
+    { env = mysql_env(parsed) })
 end
 
---- Run a statement without blocking; same argv and same stderr scrub as mysql_query.
+--- Run a statement without blocking; same argv and same env as mysql_query.
 local function mysql_query_async(parsed, sql_str, timeout_ms, callback)
-  adapters.run_cmd_async(mysql_args(parsed, sql_str), timeout_ms or DEFAULT_TIMEOUT,
-    function(stdout, stderr, code)
-      callback(stdout, scrub_stderr(stderr), code)
-    end)
+  adapters.run_cmd_async(mysql_args(parsed, sql_str), timeout_ms or DEFAULT_TIMEOUT, callback,
+    { env = mysql_env(parsed) })
 end
 
 function M.query(sql_str, url)
@@ -82,7 +84,7 @@ function M.query(sql_str, url)
   end
 
   local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid MySQL URL: " .. url end
+  if not parsed then return nil, "Invalid MySQL URL: " .. sql_util.redact_url(url) end
 
   local stdout, stderr, code = mysql_query(parsed, sql_str)
   if code ~= 0 then
@@ -102,7 +104,7 @@ end
 
 function M.get_primary_keys(table_name, url)
   local parsed = parse_url(url)
-  if not parsed then return {}, "Invalid MySQL URL: " .. url end
+  if not parsed then return {}, "Invalid MySQL URL: " .. sql_util.redact_url(url) end
 
   local schema, tbl = split_table_name(table_name, parsed.dbname)
 
@@ -134,7 +136,7 @@ end
 
 function M.get_column_info(table_name, url)
   local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid MySQL URL: " .. url end
+  if not parsed then return nil, "Invalid MySQL URL: " .. sql_util.redact_url(url) end
 
   local schema, tbl = split_table_name(table_name, parsed.dbname)
 
@@ -185,7 +187,7 @@ end
 
 function M.get_foreign_keys(table_name, url)
   local parsed = parse_url(url)
-  if not parsed then return {}, "Invalid MySQL URL: " .. url end
+  if not parsed then return {}, "Invalid MySQL URL: " .. sql_util.redact_url(url) end
 
   local schema, tbl = split_table_name(table_name, parsed.dbname)
 
@@ -225,7 +227,7 @@ end
 --- Returns { {table, column, ref_column, composite?}, ... }, err.
 function M.get_referencing_foreign_keys(table_name, url)
   local parsed_url = parse_url(url)
-  if not parsed_url then return {}, "Invalid MySQL URL: " .. url end
+  if not parsed_url then return {}, "Invalid MySQL URL: " .. sql_util.redact_url(url) end
 
   local schema, tbl = split_table_name(table_name, parsed_url.dbname)
 
@@ -323,7 +325,7 @@ end
 
 function M.explain(sql_str, url)
   local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid MySQL URL: " .. url end
+  if not parsed then return nil, "Invalid MySQL URL: " .. sql_util.redact_url(url) end
 
   -- Try FORMAT=TREE (MySQL 8.0.16+), fallback to plain EXPLAIN. This stderr is
   -- dropped on purpose: a failure here only means the server predates 8.0.16, and
@@ -358,7 +360,7 @@ end
 
 function M.list_tables(url)
   local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid MySQL URL: " .. url end
+  if not parsed then return nil, "Invalid MySQL URL: " .. sql_util.redact_url(url) end
   local sql_str = [[
     SELECT table_name,
       CASE table_type WHEN 'BASE TABLE' THEN 'table' ELSE 'view' END AS table_type
@@ -381,7 +383,7 @@ end
 
 function M.get_indexes(table_name, url)
   local parsed_url = parse_url(url)
-  if not parsed_url then return {}, "Invalid MySQL URL: " .. url end
+  if not parsed_url then return {}, "Invalid MySQL URL: " .. sql_util.redact_url(url) end
 
   local schema, tbl = split_table_name(table_name, parsed_url.dbname)
 
@@ -425,7 +427,7 @@ end
 
 function M.get_constraints(table_name, url)
   local parsed = parse_url(url)
-  if not parsed then return {}, "Invalid MySQL URL: " .. url end
+  if not parsed then return {}, "Invalid MySQL URL: " .. sql_util.redact_url(url) end
 
   local schema, tbl = split_table_name(table_name, parsed.dbname)
 
@@ -476,7 +478,7 @@ end
 
 function M.get_table_stats(table_name, url)
   local parsed_url = parse_url(url)
-  if not parsed_url then return nil, "Invalid MySQL URL: " .. url end
+  if not parsed_url then return nil, "Invalid MySQL URL: " .. sql_util.redact_url(url) end
 
   local schema, tbl = split_table_name(table_name, parsed_url.dbname)
 
@@ -508,7 +510,7 @@ function M.execute(sql_str, url)
   end
 
   local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid MySQL URL: " .. url end
+  if not parsed then return nil, "Invalid MySQL URL: " .. sql_util.redact_url(url) end
 
   -- MySQL doesn't support DEFAULT VALUES; rewrite for compatibility
   sql_str = sql_str:gsub("DEFAULT VALUES", "() VALUES ()")
@@ -552,5 +554,7 @@ end
 
 -- Exposed for testing
 M._parse_url = parse_url
+M._mysql_args = mysql_args
+M._mysql_env = mysql_env
 
 return M

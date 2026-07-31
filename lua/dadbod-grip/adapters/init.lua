@@ -25,9 +25,12 @@ M._exit_grace_ms = 3000
 ---
 --- @param args  string[]   argv for vim.system
 --- @param timeout_ms number|nil  process timeout in ms (default 30000)
---- @param opts table|nil  { stdin = string } to feed the process on stdin; the
----   sqlserver adapter needs it for GO-separated batches, which cannot be
----   expressed as a single command-line statement.
+--- @param opts table|nil  { stdin = string, env = table<string,string> } stdin
+---   to feed the process; the sqlserver adapter needs it for GO-separated
+---   batches, which cannot be expressed as a single command-line statement.
+---   env is merged into the inherited environment (vim.system's default
+---   behavior when clear_env is not set) -- used to pass secrets like
+---   PGPASSWORD without putting them on the command line.
 --- @return string stdout
 --- @return string stderr
 --- @return number exit_code
@@ -38,7 +41,12 @@ function M.run_cmd(args, timeout_ms, opts)
   -- vim.system() raises on spawn failure (ENOENT when the CLI is not installed).
   -- Adapters promise never to throw, and only query/execute/ping pre-check
   -- vim.fn.executable(), so swallow it here and report it like a failed exit.
-  local sys_opts = { text = true, timeout = t, stdin = opts and opts.stdin or nil }
+  local sys_opts = {
+    text = true,
+    timeout = t,
+    stdin = opts and opts.stdin or nil,
+    env = opts and opts.env or nil,
+  }
   local ok, err = pcall(vim.system, args, sys_opts, function(r)
     out = r
     done = true
@@ -73,7 +81,9 @@ end
 --- @param args  string[]   argv for vim.system
 --- @param timeout_ms number|nil  process timeout in ms (default 30000)
 --- @param callback fun(stdout: string, stderr: string, code: number)
-function M.run_cmd_async(args, timeout_ms, callback)
+--- @param opts table|nil  { env = table<string,string> } merged into the
+---   inherited environment, same contract as M.run_cmd's opts.env.
+function M.run_cmd_async(args, timeout_ms, callback, opts)
   local t = timeout_ms or 30000
   local watchdog
   local delivered = false
@@ -94,7 +104,8 @@ function M.run_cmd_async(args, timeout_ms, callback)
     deliver(TIMED_OUT.stdout, TIMED_OUT.stderr, TIMED_OUT.code)
   end, t + M._exit_grace_ms)
 
-  local ok, err = pcall(vim.system, args, { text = true, timeout = t }, function(r)
+  local sys_opts = { text = true, timeout = t, env = opts and opts.env or nil }
+  local ok, err = pcall(vim.system, args, sys_opts, function(r)
     vim.schedule(function()
       deliver(r.stdout or "", r.stderr or "", r.code)
     end)

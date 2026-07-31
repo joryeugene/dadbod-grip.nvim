@@ -62,8 +62,6 @@ local function sqlcmd_args(parsed, sql_str, opts)
   end
 
   if parsed.user and parsed.user ~= "" then
-    table.insert(args, 4, parsed.pass or "")
-    table.insert(args, 4, "-P")
     table.insert(args, 4, parsed.user)
     table.insert(args, 4, "-U")
   else
@@ -73,16 +71,29 @@ local function sqlcmd_args(parsed, sql_str, opts)
   return args
 end
 
+--- opts.env for one sqlcmd invocation: SQLCMDPASSWORD carrying the password so
+--- it never appears in argv (visible via `ps`) -- the env-var equivalent of the
+--- -P flag this replaces. No percent-decoding, same verbatim contract as
+--- sqlcmd_args. Set (even to "") whenever a user is given, mirroring the old
+--- -P/-P "" pairing with -U; empty when there is no user, since that means
+--- -E integrated auth, which ignores any password.
+local function sqlcmd_env(parsed)
+  if not parsed.user or parsed.user == "" then return {} end
+  return { SQLCMDPASSWORD = parsed.pass or "" }
+end
+
 --- Build and run the sqlcmd command, blocking.
 local function sqlcmd(parsed, sql_str, timeout_ms, opts)
-  return adapters.run_cmd(sqlcmd_args(parsed, sql_str, opts), timeout_ms or DEFAULT_TIMEOUT)
+  return adapters.run_cmd(sqlcmd_args(parsed, sql_str, opts), timeout_ms or DEFAULT_TIMEOUT,
+    { env = sqlcmd_env(parsed) })
 end
 
 --- Run GO-separated batches by feeding them to sqlcmd on stdin. `-Q` can only
 --- carry one batch, and SET SHOWPLAN_TEXT has to be alone in its own.
 local function sqlcmd_batch(parsed, batches, timeout_ms)
   local script = table.concat(batches, "\nGO\n") .. "\nGO\n"
-  return adapters.run_cmd(sqlcmd_args(parsed, nil), timeout_ms or DEFAULT_TIMEOUT, { stdin = script })
+  return adapters.run_cmd(sqlcmd_args(parsed, nil), timeout_ms or DEFAULT_TIMEOUT,
+    { stdin = script, env = sqlcmd_env(parsed) })
 end
 
 --- Message for a non-zero sqlcmd exit. With -b the server's "Msg 208, ..." text
@@ -150,7 +161,7 @@ local function run_query(sql_str, url, timeout_ms)
   end
 
   local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid SQL Server URL: " .. url end
+  if not parsed then return nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url) end
 
   local stdout, stderr, code = sqlcmd(parsed, sql_str, timeout_ms)
   if code ~= 0 then
@@ -175,7 +186,7 @@ local function run_query_async(sql_str, url, timeout_ms, callback)
 
   local parsed = parse_url(url)
   if not parsed then
-    vim.schedule(function() callback(nil, "Invalid SQL Server URL: " .. url) end)
+    vim.schedule(function() callback(nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url)) end)
     return
   end
 
@@ -186,7 +197,7 @@ local function run_query_async(sql_str, url, timeout_ms, callback)
         return
       end
       callback(parse_sqlcmd_table(stdout), nil)
-    end)
+    end, { env = sqlcmd_env(parsed) })
 end
 
 function M.query(sql_str, url)
@@ -204,7 +215,7 @@ function M.execute(sql_str, url)
     return nil, "sqlcmd not found. Install Microsoft sqlcmd tools."
   end
   local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid SQL Server URL: " .. url end
+  if not parsed then return nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url) end
   local stdout, stderr, code = sqlcmd(parsed, sql_str, nil, { nocount = false })
   if code ~= 0 then
     return nil, sqlcmd_error(stdout, stderr, code)
@@ -528,7 +539,7 @@ function M.explain(sql_str, url)
     return nil, "sqlcmd not found. Install Microsoft sqlcmd tools."
   end
   local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid SQL Server URL: " .. url end
+  if not parsed then return nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url) end
 
   local stdout, stderr, code = sqlcmd_batch(parsed, { "SET SHOWPLAN_TEXT ON", sql_str })
   if code ~= 0 then
@@ -549,5 +560,7 @@ end
 
 M._parse_url = parse_url
 M._parse_sqlcmd_table = parse_sqlcmd_table
+M._sqlcmd_args = sqlcmd_args
+M._sqlcmd_env = sqlcmd_env
 
 return M

@@ -72,6 +72,47 @@ function M.split_table_name(table_name, default_schema)
   return M.unquote_ident(schema), M.unquote_ident(tbl)
 end
 
+--- Mask the password in a connection URL for display in logs, errors, notifications.
+--- The authority component is captured up to the next "/" (so this never
+--- reaches into the path or query — a "/" always ends the search). Inside
+--- that component, the split is on the LAST "@", mirroring
+--- parse_dadbod_url's own rule below: a password may itself contain "@",
+--- and splitting on the first one would leave the rest of the password —
+--- everything between that first "@" and the real one before the host — in
+--- cleartext right next to the mask. See redact_spec.lua for both cases.
+---
+--- Callers also feed this whatever the user typed as a URL even after it has
+--- failed to parse (e.g. "Invalid MySQL URL: " .. redact_url(url)), so a
+--- string with no "://" at all still needs a pass: fall back to masking any
+--- "ident:secret@" run found anywhere in it, as long as neither side contains
+--- whitespace. A real URL never has unescaped whitespace, so that costs
+--- nothing on the input this fallback is actually for; it exists to keep the
+--- fallback from treating an entire free-form sentence as one giant
+--- credential (see redact_spec.lua). It is still just a heuristic scan, not
+--- authority-aware like the "://" branch above: an incidental
+--- whitespace-free "word:word@word" inside non-URL text can still get
+--- masked. Callers should feed it a URL argument, not a full error message
+--- built from other text.
+--- @param url string|nil
+--- @return string
+function M.redact_url(url)
+  if not url then return "" end
+  if url:find("://", 1, true) then
+    return (url:gsub("://([^/]*)", function(authority)
+      local at = nil
+      for i = #authority, 1, -1 do
+        if authority:sub(i, i) == "@" then at = i; break end
+      end
+      if not at then return "://" .. authority end
+      local userpass, host = authority:sub(1, at - 1), authority:sub(at + 1)
+      local colon = userpass:find(":", 1, true)
+      if not colon then return "://" .. authority end
+      return "://" .. userpass:sub(1, colon - 1) .. ":***@" .. host
+    end))
+  end
+  return (url:gsub("([^:/@%s]+):([^@%s]*)@", "%1:***@"))
+end
+
 -- Parse a dadbod-style connection URL into its components.
 -- "scheme://user:pass@host:port/dbname" → {user, pass, host, port, dbname}
 -- The auth part is matched greedily up to the last @ so passwords may contain @.
