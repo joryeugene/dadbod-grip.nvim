@@ -218,6 +218,68 @@ local function duckdb_exec(db_path, sql_str, timeout_ms, url)
   return adapters.run_cmd(args, timeout_ms or DEFAULT_TIMEOUT)
 end
 
+--- Statement kinds a subquery can hold. Everything else -- DESCRIBE (db.describe_file
+--- and schema.lua's file-column probe both send one through M.query), SET, PRAGMA,
+--- INSTALL -- runs unwrapped.
+local WRAPPABLE_HEAD = {
+  SELECT = true, WITH = true, FROM = true, VALUES = true, TABLE = true,
+}
+
+--- Strip leading whitespace and SQL comments so the first keyword is reachable.
+local function strip_leading_noise(s)
+  while true do
+    local t = (s:gsub("^%s+", ""))
+    if t:sub(1, 2) == "--" then
+      t = (t:gsub("^%-%-[^\n]*\n?", ""))
+    elseif t:sub(1, 2) == "/*" then
+      local close = t:find("*/", 3, true)
+      if not close then return t end
+      t = t:sub(close + 2)
+    end
+    if t == s then return s end
+    s = t
+  end
+end
+
+--- In CSV mode DuckDB serialises STRUCT/LIST/MAP/UNION/ARRAY with its own literal
+--- syntax -- single-quoted keys and *unquoted* string values: {'k': v}, and MAPs as
+--- {a=1}. That is not JSON, and it cannot be recovered by parsing, because an
+--- unquoted string may itself contain , { } ' -- so the answer has to come from
+--- DuckDB. This rewrites the statement to route every nested column through
+--- to_json(), which is what makes gK's tree, gB's pretty-printer and JSON export
+--- see a real document instead of an unparsable literal.
+---
+--- COLUMNS('(.*)') AS "\1" expands positionally over the subquery's columns and
+--- restores each original name, so no DESCRIBE round-trip is needed to learn the
+--- types: typeof() picks the nested ones out per column. Positional expansion also
+--- means duplicate column names cannot become an ambiguous reference.
+--- The ELSE branch casts to VARCHAR only because both CASE arms must share a type;
+--- CSV output is text either way and the rendering is byte-identical -- verified
+--- across DOUBLE/REAL/DECIMAL/TIMESTAMP/TIMESTAMPTZ/TIME/DATE/INTERVAL/BLOB/
+--- HUGEINT/inf/nan/NULL/embedded-comma-and-newline VARCHAR on duckdb 1.5.5, and
+--- the whole rewrite also runs on 1.0.0 and 0.10.2.
+--- Returns nil when the statement is not a wrappable query, in which case the
+--- caller runs it unchanged.
+local NESTED_JSON_TEMPLATE = [[
+SELECT CASE WHEN regexp_matches(typeof(COLUMNS('(.*)')), '^(STRUCT|MAP|UNION)\(|\]$')
+            THEN to_json(COLUMNS('(.*)'))::VARCHAR
+            ELSE COLUMNS('(.*)')::VARCHAR
+       END AS "\1"
+FROM (
+%s
+) AS _grip_json]]
+
+local function nested_json_sql(sql_str)
+  if type(sql_str) ~= "string" then return nil end
+  -- A trailing semicolon would land inside the subquery parens and fail to parse.
+  -- Only trailing ones are touched: a ; inside a string literal is data.
+  local body = (sql_str:gsub("[%s;]+$", ""))
+  if body == "" then return nil end
+  local head = strip_leading_noise(body):match("^(%a+)")
+  if not head or not WRAPPABLE_HEAD[head:upper()] then return nil end
+  return string.format(NESTED_JSON_TEMPLATE, body)
+end
+
 function M.query(sql_str, url)
   if vim.fn.executable("duckdb") == 0 then
     return nil, "duckdb not found. Install duckdb."
@@ -226,7 +288,18 @@ function M.query(sql_str, url)
   local db_path = extract_path(url)
   if not db_path then return nil, "Invalid DuckDB URL: " .. url end
 
-  local stdout, stderr, code = duckdb(db_path, sql_str, nil, url)
+  local wrapped = nested_json_sql(sql_str)
+  local stdout, stderr, code
+  if wrapped then
+    stdout, stderr, code = duckdb(db_path, wrapped, nil, url)
+  end
+  -- The rewrite is an enhancement, never a new failure mode: a DuckDB too old for
+  -- COLUMNS(...) AS "\1", or a statement the subquery cannot hold after all, falls
+  -- back to the original query -- and to its own error message, so a genuinely
+  -- broken user query still reports what is wrong with it, not with the wrapper.
+  if not wrapped or code ~= 0 then
+    stdout, stderr, code = duckdb(db_path, sql_str, nil, url)
+  end
   if code ~= 0 then
     local msg = stderr ~= "" and stderr or ("duckdb exited with code " .. code)
     -- Surface actionable hint for httpfs / remote URL failures
@@ -999,5 +1072,6 @@ M._detect_extension = detect_extension
 M._attach_unchecked = store_attachment
 M._make_schema_batch_sql = _make_schema_batch_sql
 M._main_catalog_name = main_catalog_name
+M._nested_json_sql = nested_json_sql
 
 return M
