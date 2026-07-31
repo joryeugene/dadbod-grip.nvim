@@ -57,9 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reaches `~/.grip/connections.json`. This is arranged so that no write path *can* leak it rather
   than by scrubbing the ones that exist today: `vim.g.db` holds the template, and expansion happens
   at the single dispatch point `db.resolve()`, so nothing that persists, logs, or displays a URL
-  ever holds the expanded one. An unresolved placeholder is always an error, never an empty
-  substitution — a URL quietly missing its password either connects somewhere unintended or hangs
-  on a prompt; such an entry shows `?` in the picker and names the variable it wanted. `.env`
+  ever holds the expanded one. A placeholder that cannot be resolved is an error, and so is one
+  that resolves to an empty value: a bare `KEY=` is the usual shape of a committed `.env` template,
+  and substituting it would hand `psql` a URL with no password, which falls through to `~/.pgpass`
+  and may connect with a *different* credential instead of failing. Either way the entry shows `?`
+  in the picker and names the variable. A literal password containing `${WORD}` is written
+  `$${WORD}`. `.env`
   contents are memoized on the file's mtime, so a rotated password is picked up on the next query,
   and failed reads are deliberately never cached, so `git-crypt unlock` takes effect on the very
   next connect with no restart — a still-locked file is reported as locked rather than as a parse
@@ -149,13 +152,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **Database passwords no longer travel in the CLI's argv, and no longer appear in error
-  messages.** `psql -P`-style argv is readable by any user on the machine via `ps -eo args`, so the
-  password now reaches the client through its environment instead: `PGPASSWORD` (percent-decoded,
-  as libpq expects), `MYSQL_PWD` and `SQLCMDPASSWORD` (both verbatim — `parse_dadbod_url`
-  deliberately does not decode, and decoding those would break existing passwords containing `%`).
-  To be plain about the limit: this protects against *other users*, not against a process running
-  as you, which can read your environment just as easily as your argv. Separately, URLs in error
+- **`psql`, `mysql` and `sqlcmd` passwords no longer travel in argv, and URLs no longer appear
+  unredacted in error messages.** `psql -P`-style argv is readable by any user on the machine via
+  `ps -eo args`, so the password now reaches those three clients through their environment instead:
+  `PGPASSWORD` (percent-decoded, as libpq expects), `MYSQL_PWD` and `SQLCMDPASSWORD` (both verbatim
+  — `parse_dadbod_url` deliberately does not decode, and decoding those would break existing
+  passwords containing `%`). Two limits, both worth stating plainly. This protects against *other
+  users*, not against a process running as you, which can read your environment just as easily as
+  your argv. And it does **not** cover DuckDB federation: `ATTACH` inlines the attached database's
+  DSN into the SQL string, which grip passes to `duckdb -c`, so an attachment's password is in `ps`
+  output for the lifetime of every query against that connection. Closing that needs DuckDB's
+  secrets manager (`CREATE SECRET`) and is tracked separately. Separately, URLs in error
   text are now redacted through the shared `sql.redact_url`, including the case where the password
   itself contains an `@` — the authority is split on the last `@`, not the first, which previously
   left `p@ssw0rd` masked as `***@ssw0rd`. DuckDB's federation path got the same treatment the hard

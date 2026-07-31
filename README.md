@@ -135,13 +135,19 @@ resolved when you connect, from the `.env` file the entry points at:
 with `url` written as `postgresql://api:${DEV_DB_PASSWORD}@dev.internal:5432/app?sslmode=require`.
 
 Values come from `env_file` first and fall back to the process environment, so `${PGPASSWORD}`
-alone works with no `env_file` at all. An unresolved placeholder is an error, never an empty
-substitution — a URL quietly missing its password either connects somewhere unintended or hangs
-on a prompt. Such an entry shows as `?` in the picker and reports the missing variable when you
-try to connect.
+alone works with no `env_file` at all. A placeholder that cannot be resolved is an error, and so is
+one that resolves to an *empty* value — a bare `KEY=` is the usual shape of a committed `.env`
+template, and substituting it would hand `psql` a URL with no password, which falls through to
+`~/.pgpass` and may connect with a different credential instead of failing. Either way the entry
+shows as `?` in the picker and names the variable when you try to connect.
+
+If a literal password happens to contain `${WORD}`, write `$${WORD}` — a doubled dollar produces
+the literal text and resolves nothing. The escape is only special immediately before `{NAME}`, so
+`pa$$word` is left alone.
 
 The `.env` file is parsed for `KEY=value` and `export KEY=value` lines, one pair of surrounding
-quotes is stripped, `#` comments and blank lines are ignored. It is read at connect time and
+quotes is stripped, whole-line `#` comments and blank lines are ignored. A `#` *within* a value is
+part of the value, not the start of a comment — a password may legitimately contain one. It is read at connect time and
 memoized on the file's mtime, so a password a teammate rotates mid-session is picked up on the
 next query. If the file is still git-crypt-locked, grip says so by name instead of failing with a
 parse error, and — because failed reads are never cached — `git-crypt unlock` takes effect on the
@@ -150,8 +156,14 @@ very next connect, with no restart.
 What this buys you: the secret lives in exactly one place you already control, and
 `~/.grip/connections.json` never receives it. `vim.g.db` holds the *template*, and expansion
 happens at a single point on the way to the database client, so no code path that writes to disk
-ever sees the expanded URL. Passwords also travel to the client process in its environment rather
-than in `argv`, so they do not show up in another user's `ps`.
+ever sees the expanded URL. Passwords also travel to `psql`, `mysql` and `sqlcmd` in the process
+environment rather than in `argv`, so they do not show up in another user's `ps`.
+
+**The exception is DuckDB federation.** `ATTACH` inlines the attached database's DSN into the SQL
+string, and grip passes that string to `duckdb -c`, so an attachment's password *is* visible in
+`ps` for the lifetime of every query against that connection — including one that came from
+`${VAR}`. If that matters to you, do not attach a credentialed database into DuckDB until this is
+moved onto DuckDB's secrets manager.
 
 **One limit, stated plainly:** a templated URL in `vim.g.db` is grip-only. vim-dadbod's `:DB`
 command and any statusline that reads that variable will see the literal `${NAME}`. If you rely on

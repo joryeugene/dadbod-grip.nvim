@@ -147,6 +147,92 @@ test("has_template detects placeholders", function()
   eq(secrets.has_template("postgresql://u:p@h/db"), false, "literal")
 end)
 
+-- ── an empty value is not a resolution ────────────────────────────────────
+-- `KEY=` with nothing after it is the usual shape of a committed .env
+-- template. Substituting it produced postgresql://u:@h/db, which is not a
+-- failure anywhere downstream: strip_password sees an empty password, sets no
+-- PGPASSWORD, and psql falls through to ~/.pgpass -- so the connection can
+-- succeed against a *different* credential. Vim's getenv() already reports an
+-- empty process variable as unset; this is the .env path agreeing with it.
+
+test("an empty .env value is an error, not an empty substitution", function()
+  with_env_file("PW=\n", function(path)
+    local url, err = secrets.expand("postgresql://u:${PW}@h/db", { env_file = path })
+    eq(url, nil, "no URL is produced")
+    assert(err and err:find("${PW}", 1, true), "names the variable: " .. tostring(err))
+    assert(err:find("empty", 1, true), "says it is empty, not that it is missing: " .. err)
+    assert(err:find(path, 1, true), "names the file it came from: " .. err)
+  end)
+end)
+
+test("a quoted-empty .env value is an error too", function()
+  with_env_file('PW=""\n', function(path)
+    local url, err = secrets.expand("postgresql://u:${PW}@h/db", { env_file = path })
+    eq(url, nil, 'PW="" is the same nothing as PW=')
+    assert(err and err:find("empty", 1, true), tostring(err))
+  end)
+end)
+
+test("an empty process variable is an error as well", function()
+  vim.fn.setenv("GRIP_SPEC_EMPTY_VAR", "")
+  local url, err = secrets.expand("postgresql://u:${GRIP_SPEC_EMPTY_VAR}@h/db", {})
+  vim.fn.setenv("GRIP_SPEC_EMPTY_VAR", vim.NIL)
+  eq(url, nil, "no URL is produced")
+  assert(err and err:find("GRIP_SPEC_EMPTY_VAR", 1, true), tostring(err))
+end)
+
+test("a non-empty value alongside an empty one still fails as a whole", function()
+  with_env_file("USER_NAME=api\nPW=\n", function(path)
+    local url, err = secrets.expand("postgresql://${USER_NAME}:${PW}@h/db", { env_file = path })
+    eq(url, nil, "one empty variable fails the whole URL")
+    assert(err and err:find("${PW}", 1, true), "and names the empty one: " .. tostring(err))
+  end)
+end)
+
+test("a value that is only whitespace is still a value", function()
+  -- Deliberately not treated as empty: " " is a legal password, and
+  -- guessing which whitespace was meant is worse than substituting it.
+  with_env_file('PW=" "\n', function(path)
+    eq(secrets.expand("u:${PW}@h", { env_file = path }), "u: @h", "substituted verbatim")
+  end)
+end)
+
+-- ── $${NAME}: the escape ──────────────────────────────────────────────────
+-- Without it a literal password containing ${WORD} became an unresolvable
+-- template the moment this feature shipped, with no way out but rotating the
+-- password.
+
+test("$${NAME} produces a literal ${NAME} and resolves nothing", function()
+  eq(secrets.expand("postgresql://u:pa$${X9}ss@h/db", {}),
+    "postgresql://u:pa${X9}ss@h/db", "the escape is consumed, the placeholder is not")
+end)
+
+test("an escaped placeholder still reaches the expander", function()
+  -- has_template gates expansion; if it said false here the URL would be
+  -- handed to the CLI with the "$$" still in it.
+  eq(secrets.has_template("postgresql://u:pa$${X9}ss@h/db"), true,
+    "an escape is a template as far as the gate is concerned")
+end)
+
+test("an escape does not need the variable to exist", function()
+  local url, err = secrets.expand("u:$${NO_SUCH_VAR_AT_ALL}@h", {})
+  eq(err, nil, "no lookup happens for an escaped placeholder")
+  eq(url, "u:${NO_SUCH_VAR_AT_ALL}@h", "left as literal text")
+end)
+
+test("escaped and real placeholders coexist in one URL", function()
+  with_env_file("PW=hunter2\n", function(path)
+    eq(secrets.expand("postgresql://u:${PW}@h/db?tag=$${PW}", { env_file = path }),
+      "postgresql://u:hunter2@h/db?tag=${PW}", "one resolved, one left alone")
+  end)
+end)
+
+test("a lone $$ that is not followed by a placeholder is untouched", function()
+  eq(secrets.has_template("postgresql://u:pa$$word@h/db"), false, "not a template")
+  eq(secrets.expand("postgresql://u:pa$$word@h/db", {}), "postgresql://u:pa$$word@h/db",
+    "the escape is only special immediately before {NAME}")
+end)
+
 test("a missing env_file is an error naming the path", function()
   local _, err = secrets.expand("${X}", { env_file = "/nonexistent/path/.env" })
   assert(err and err:find("/nonexistent/path/.env", 1, true), "names the path")

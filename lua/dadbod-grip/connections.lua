@@ -653,6 +653,13 @@ function M.switch(url, name, conn_type, opts)
   -- needed by the DuckDB attachment paths below, which bypass db.resolve().
   local conn_url, secret_err = M.expand_url(url)
   if not conn_url then
+    -- Same distinct marker T:test sets, for the same reason: the picker has
+    -- to say "this one could not resolve its secret" rather than the generic
+    -- "x" of a database that is genuinely unreachable. Connecting is how most
+    -- people meet this failure, so the attempt has to record it too --
+    -- otherwise the user presses <CR>, reads an error, reopens the picker and
+    -- finds nothing to show for it.
+    M.set_health(url, "unresolved")
     vim.notify("Grip: " .. (secret_err or "could not resolve connection secrets"),
       vim.log.levels.ERROR)
     return false
@@ -1258,7 +1265,14 @@ function M.pick(opts)
             local path = extract_local_path(conn_url)
             M.set_health(c.url, vim.fn.filereadable(path) == 1 and "ok" or "fail")
           else
-            local ok = require("dadbod-grip.db").ping(conn_url)
+            -- db.ping is given the URL *as stored*, not the expansion above:
+            -- it resolves internally, and everything else it consults keys on
+            -- the template. Handing it the expanded URL made
+            -- current_mode(expanded) find no entry and report "rw", so a
+            -- connection saved "mode": "ro" got pinged with a writable
+            -- session -- the one place in this feature that looked a
+            -- connection up by anything but the template.
+            local ok = require("dadbod-grip.db").ping(c.url)
             M.set_health(c.url, ok and "ok" or "fail")
           end
         end,

@@ -649,6 +649,161 @@ test("T:test reports the expansion error and marks it distinctly, not a bogus fa
   end)
 end)
 
+-- ── connecting marks it too, not just T:test ──────────────────────────────
+-- set_health("unresolved") had one call site, the T:test action. Connecting
+-- is how most people meet this failure: press <CR>, read an error, reopen the
+-- picker -- and, before this, find nothing to show for it.
+
+test("a connect attempt that cannot resolve marks the entry unresolved", function()
+  with_real_file(function(local_grip, env_path)
+    vim.fn.writefile({ "SOMETHING_ELSE=1" }, env_path)
+    vim.fn.writefile({ vim.fn.json_encode({
+      { name = "dev", url = "${MISSING_URL}", env_file = env_path },
+    }) }, local_grip .. "/connections.json")
+    eq(connections.get_health("${MISSING_URL}"), "unknown", "nothing known before the attempt")
+
+    eq(connections.switch("${MISSING_URL}", "dev"), false, "the switch aborted")
+
+    eq(connections.get_health("${MISSING_URL}"), "unresolved",
+      "the connect attempt recorded why, distinctly from a database that is down")
+
+    -- And the picker actually renders it, which is the whole point.
+    local grip_picker = require("dadbod-grip.grip_picker")
+    local orig_open, captured = grip_picker.open, nil
+    grip_picker.open = function(opts) captured = opts end
+    connections.pick()
+    grip_picker.open = orig_open
+    local dev
+    for _, item in ipairs(captured.items) do
+      if item.name == "dev" then dev = item end
+    end
+    eq(captured.display(dev):sub(1, 1), "?", "'?' in the picker, not the 'x' of an unreachable db")
+  end)
+end)
+
+test("fixing the .env and reconnecting clears the unresolved marker", function()
+  with_real_file(function(local_grip, env_path)
+    -- The sequence a user actually walks: connect, get the error, unlock or
+    -- fix the .env, connect again. A marker that stuck would leave the entry
+    -- reading "?" forever on a connection that now works.
+    local url = "${SEED_URL}"
+    vim.fn.writefile({ "SOMETHING_ELSE=1" }, env_path)
+    vim.fn.writefile({ vim.fn.json_encode({
+      { name = "dev", url = url, env_file = env_path },
+    }) }, local_grip .. "/connections.json")
+    eq(connections.switch(url, "dev"), false, "aborted while the variable is missing")
+    eq(connections.get_health(url), "unresolved", "marked")
+
+    vim.fn.writefile({ "SEED_URL=sqlite:" .. SEED_DB }, env_path)
+    vim.fn.system({ "touch", "-t", "203001010000", env_path })  -- beat the mtime cache
+    secrets.clear_cache()
+
+    eq(connections.switch(url, "dev"), true, "the switch now commits")
+    eq(connections.get_health(url), "ok", "and the marker is gone, not stuck at '?'")
+  end)
+end)
+
+-- ── an empty .env value refuses to connect ────────────────────────────────
+-- PW= substituted empty produced postgresql://u:@h/db, which psql does not
+-- refuse: with no password it falls through to ~/.pgpass and can authenticate
+-- as somebody else entirely. The expansion has to fail instead.
+
+test("an empty value in .env aborts the connection instead of dropping the password", function()
+  with_real_file(function(local_grip, env_path)
+    vim.fn.writefile({ "DEV_DB_PASSWORD=" }, env_path)
+    local url = "postgresql://u:${DEV_DB_PASSWORD}@h/db"
+    vim.fn.writefile({ vim.fn.json_encode({
+      { name = "dev", url = url, env_file = env_path },
+    }) }, local_grip .. "/connections.json")
+    vim.g.db = nil
+
+    local msgs = {}
+    local harness_notify = vim.notify
+    vim.notify = function(m) table.insert(msgs, tostring(m)) end
+    local committed = connections.switch(url, "dev")
+    vim.notify = harness_notify
+
+    eq(committed, false, "the switch aborted")
+    eq(vim.g.db, nil, "no connection activated")
+    assert(msgs[1] and msgs[1]:find("${DEV_DB_PASSWORD}", 1, true),
+      "and the message names the empty variable: " .. tostring(msgs[1]))
+    eq(connections.expand_url(url), nil, "expansion refuses rather than returning u:@h")
+  end)
+end)
+
+-- ── T:test looks the connection up by its template ────────────────────────
+
+test("T:test pings a ro templated connection with a read-only session", function()
+  with_real_file(function(local_grip, env_path)
+    local url = seed_templated_conn(local_grip, env_path, "PG_URL",
+      "postgresql://u:hunter2@db.internal:5432/app", { mode = "ro" })
+
+    local grip_picker = require("dadbod-grip.grip_picker")
+    local orig_open, captured = grip_picker.open, nil
+    grip_picker.open = function(opts) captured = opts end
+    connections.pick()
+    grip_picker.open = orig_open
+    local test_action, dev
+    for _, a in ipairs(captured.actions) do
+      if a.label == "T:test" then test_action = a end
+    end
+    for _, item in ipairs(captured.items) do
+      if item.name == "dev" then dev = item end
+    end
+    assert(test_action and dev, "T:test and the entry are both present")
+
+    -- Only the process spawn is stubbed: db.ping -> resolve -> via_adapter
+    -- (which publishes the mode) -> adapter.ping is the real path, and what
+    -- the adapter reads through session_opts() is the assertion.
+    local pg = require("dadbod-grip.adapters.postgresql")
+    local orig_ping, seen = pg.ping, nil
+    pg.ping = function(u)
+      seen = { url = u, readonly = require("dadbod-grip.adapters").session_opts().readonly }
+      return true
+    end
+    test_action.fn(dev)
+    pg.ping = orig_ping
+
+    assert(seen, "the adapter's ping was reached")
+    eq(seen.readonly, true,
+      "the mode is looked up by the stored template; the expanded URL matches no entry and reads rw")
+    eq(seen.url, "postgresql://u:hunter2@db.internal:5432/app",
+      "while the adapter itself still receives the resolved URL")
+    eq(connections.get_health(url), "ok", "and the health it records is keyed on the template")
+  end)
+end)
+
+test("T:test pings a rw templated connection writable", function()
+  with_real_file(function(local_grip, env_path)
+    seed_templated_conn(local_grip, env_path, "PG_URL",
+      "postgresql://u:hunter2@db.internal:5432/app")
+
+    local grip_picker = require("dadbod-grip.grip_picker")
+    local orig_open, captured = grip_picker.open, nil
+    grip_picker.open = function(opts) captured = opts end
+    connections.pick()
+    grip_picker.open = orig_open
+    local test_action, dev
+    for _, a in ipairs(captured.actions) do
+      if a.label == "T:test" then test_action = a end
+    end
+    for _, item in ipairs(captured.items) do
+      if item.name == "dev" then dev = item end
+    end
+
+    local pg = require("dadbod-grip.adapters.postgresql")
+    local orig_ping, seen = pg.ping, nil
+    pg.ping = function()
+      seen = require("dadbod-grip.adapters").session_opts().readonly
+      return true
+    end
+    test_action.fn(dev)
+    pg.ping = orig_ping
+
+    eq(seen, false, "an entry with no mode is pinged writable, as before")
+  end)
+end)
+
 -- ── templates resolve where the *scheme* is what matters ─────────────────
 
 test("db.resolved_url gives dialect-sensitive callers a real scheme", function()

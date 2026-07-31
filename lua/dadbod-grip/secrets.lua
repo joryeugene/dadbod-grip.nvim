@@ -138,11 +138,21 @@ function M.parse_env_file(path)
   return vars
 end
 
+-- One placeholder, escaped or not: "$" then an optional second "$" (the
+-- escape), then {NAME}. M.expand is the only reader; M.has_template shares
+-- the pattern so the two can never disagree about what a template is.
+local PLACEHOLDER = "%$(%$?){([%w_]+)}"
+
 --- True when `url` contains at least one ${NAME} placeholder.
+---
+--- The escaped form `$${NAME}` counts too, even though it resolves to
+--- nothing: it still has to reach M.expand, which is what turns the `$$`
+--- back into a single `$`. A URL that skipped expansion would connect with
+--- the escape still in it.
 --- @param url string
 --- @return boolean
 function M.has_template(url)
-  return url:find("%${[%w_]+}") ~= nil
+  return url:find(PLACEHOLDER) ~= nil
 end
 
 --- Resolve every ${NAME} placeholder in `url`.
@@ -150,7 +160,17 @@ end
 --- Values come from `entry.env_file` (if set) first, falling back to the
 --- process environment. An unresolved placeholder is always an error --
 --- never an empty substitution, since a URL quietly missing its password
---- either connects somewhere unintended or hangs on a prompt.
+--- either connects somewhere unintended or hangs on a prompt. "Unresolved"
+--- includes a variable that exists but is empty (`KEY=` with nothing after
+--- it, the usual shape of a committed .env template): substituting it
+--- leaves a URL with no password, and psql/mysql then fall through to
+--- ~/.pgpass or a defaults file and may authenticate as somebody else.
+--- Vim's getenv() already reports an empty *process* variable as unset, so
+--- this only makes the .env path agree with it.
+---
+--- `$${NAME}` is the escape: it produces the literal text `${NAME}` and
+--- resolves nothing, for the connection whose password genuinely contains
+--- `${WORD}`.
 --- @param url string
 --- @param entry table connection entry; may carry `env_file`
 --- @return string|nil resolved
@@ -168,15 +188,18 @@ function M.expand(url, entry)
   end
 
   local first_err
-  local resolved = url:gsub("%${([%w_]+)}", function(name)
+  local resolved = url:gsub(PLACEHOLDER, function(escape, name)
+    if escape == "$" then
+      return "${" .. name .. "}"
+    end
     if first_err then
       return ""
     end
-    local value = vars and vars[name]
+    local value, source = vars and vars[name], entry.env_file
     if value == nil then
       local env_value = vim.fn.getenv(name)
       if env_value ~= vim.NIL then
-        value = env_value
+        value, source = env_value, "the process environment"
       end
     end
     if value == nil then
@@ -185,6 +208,11 @@ function M.expand(url, entry)
         .. "} (checked"
         .. (entry.env_file and (" " .. entry.env_file .. " and") or "")
         .. " the process environment)"
+      return ""
+    end
+    if value == "" then
+      first_err = "secrets: ${" .. name .. "} is empty in " .. tostring(source)
+        .. " (an empty value is never substituted)"
       return ""
     end
     return value
