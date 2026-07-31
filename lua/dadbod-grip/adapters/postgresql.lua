@@ -89,6 +89,32 @@ local function psql_env(url, opts)
   return env
 end
 
+--- Why the read-only session guard does not take on this URL, or nil when it
+--- does. See adapters.readonly_caveat for the dispatcher and the contract.
+---
+--- libpq prefers a connection string's own `options` keyword over PGOPTIONS --
+--- it does not merge the two -- so the env var psql_env sets above is simply
+--- ignored for such a URL and the session opens writable. The caveat is
+--- documented, but a connection marked "mode": "ro" whose server would still
+--- accept a DELETE is worth saying out loud at connect time: the RO badge and
+--- the DDL refusals key off the entry, so this connection looks *more*
+--- protected than an ordinary one, not less.
+---
+--- An explicitly empty `options=` counts. libpq falls back to PGOPTIONS only
+--- when the keyword is absent altogether, so `?options=` defeats it too.
+--- @param url string  a resolved (expanded) postgres URL
+--- @return string|nil
+function M.readonly_caveat(url)
+  local query = (url or ""):match("^[^#]*%?([^#]*)")
+  if not query then return nil end
+  for _, pair in ipairs(vim.split(query, "&", { plain = true })) do
+    if pair == "options" or pair:match("^options=") then
+      return "the URL carries its own options= parameter, which overrides PGOPTIONS"
+    end
+  end
+  return nil
+end
+
 local function psql(url, sql_str, timeout_ms)
   return adapters.run_cmd(psql_args(url, sql_str), timeout_ms or DEFAULT_TIMEOUT,
     { env = psql_env(url, adapters.session_opts()) })

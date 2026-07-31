@@ -1066,6 +1066,8 @@ Two further limits:
 
 - An `options=` already present in a postgres url wins over PGOPTIONS, so
   such a connection reports `RO` while its session is not read-only.
+  Connecting it read-only warns once: it is the one case where the `RO`
+  badge claims more than the server was actually told.
 - `-readonly` is applied only to a database file that already exists.
   `duckdb::memory:` and a not-yet-created sqlite file connect normally: the
   flag aborts the former outright and turns "create it" into an error for

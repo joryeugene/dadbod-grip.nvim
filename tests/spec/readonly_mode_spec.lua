@@ -1146,6 +1146,109 @@ test("a failed ordinary reconnect does not clear an override either", function()
   end)
 end)
 
+-- ── the connection whose read-only session is not read-only ───────────────
+-- libpq prefers a URL's own `options` keyword over PGOPTIONS instead of
+-- merging them, so exactly one shape of postgres URL takes the ro flag and
+-- opens writable anyway. Verified against a live server: a URL with
+-- `?options=-c%20statement_timeout%3D5s` reports
+-- `default_transaction_read_only = off` with PGOPTIONS set. The badge and the
+-- DDL refusals read the entry, not the server, so this connection looks the
+-- most protected of all -- hence a warning rather than a comment in the docs.
+
+test("readonly_caveat names the options= that beats PGOPTIONS", function()
+  local pg = require("dadbod-grip.adapters.postgresql")
+  assert(pg.readonly_caveat("postgresql://u:p@h/db?options=-c%20statement_timeout%3D5s"),
+    "the case reproduced live is caught")
+  assert(pg.readonly_caveat("postgresql://u:p@h/db?sslmode=require&options=-cx"),
+    "and when it is not the first parameter")
+  assert(pg.readonly_caveat("postgresql://u:p@h/db?options="),
+    "an empty options= counts: libpq falls back to PGOPTIONS only when the keyword is absent")
+  assert(pg.readonly_caveat("postgresql://u:p@h/db?options"),
+    "as does the valueless form, which parses to the same empty value")
+end)
+
+test("readonly_caveat is silent for a URL the guard does hold on", function()
+  local pg = require("dadbod-grip.adapters.postgresql")
+  eq(pg.readonly_caveat("postgresql://u:p@h/db"), nil, "no query string at all")
+  eq(pg.readonly_caveat("postgresql://u:p@h/db?sslmode=require"), nil, "an unrelated parameter")
+  -- The naive check -- find("options=") -- fires on all three of these, and
+  -- crying wolf on an ordinary connection is how a warning gets ignored on
+  -- the one that matters.
+  eq(pg.readonly_caveat("postgresql://u:p@h/db?myoptions=x"), nil,
+    "a parameter merely ending in options")
+  eq(pg.readonly_caveat("postgresql://u:p@h/options=db"), nil,
+    "the text appearing in the path rather than the query")
+  eq(pg.readonly_caveat("postgresql://u:p@h/db#options=x"), nil,
+    "or in a fragment, which libpq never reads as a parameter")
+end)
+
+test("the caveat can be shown to the user without leaking the password", function()
+  local pg = require("dadbod-grip.adapters.postgresql")
+  local caveat = pg.readonly_caveat("postgresql://u:s3cr3t@h/db?options=-cx")
+  assert(caveat, "there is a caveat to show")
+  assert(not caveat:find("s3cr3t", 1, true), "and it does not carry the password: " .. caveat)
+  assert(not caveat:find("postgresql://", 1, true), "nor the URL: " .. caveat)
+end)
+
+test("the caveat dispatch only answers for adapters that declare one", function()
+  local adapters = require("dadbod-grip.adapters")
+  assert(adapters.readonly_caveat("postgresql://u:p@h/db?options=-cx"),
+    "postgres declares one and it reaches the dispatcher")
+  eq(adapters.readonly_caveat("mysql://u:p@h/db?options=-cx"), nil,
+    "mysql sets its mode through --init-command, which no URL parameter displaces")
+  eq(adapters.readonly_caveat("sqlite:/tmp/x.sqlite?options=-cx"), nil,
+    "sqlite takes -readonly in argv, likewise undisplaceable")
+  eq(adapters.readonly_caveat("nosuchscheme://h/db?options=-cx"), nil,
+    "an unknown scheme resolves to no adapter and must not throw")
+  eq(adapters.readonly_caveat(nil), nil, "nor must a nil URL")
+end)
+
+test("connecting read-only to such a URL says so once", function()
+  with_switchable(nil, function(connections)
+    local url = "postgresql://u:p@h/opts_db?options=-c%20statement_timeout%3D5s"
+    local msgs = {}
+    vim.notify = function(m) table.insert(msgs, tostring(m)) end
+
+    eq(connections.switch(url, "opts-db", "postgresql", { mode = "ro" }), true,
+      "the switch committed")
+
+    local warned = 0
+    for _, m in ipairs(msgs) do
+      if m:find("read%-only is not enforced") then warned = warned + 1 end
+    end
+    eq(warned, 1, "warned exactly once: " .. table.concat(msgs, " / "))
+    for _, m in ipairs(msgs) do
+      assert(not m:find("opts_db", 1, true) or not m:find("read%-only is not enforced"),
+        "and the warning names no URL: " .. m)
+    end
+  end)
+end)
+
+test("it stays quiet when the promise is one the connection can keep", function()
+  with_switchable(nil, function(connections)
+    local opts_url  = "postgresql://u:p@h/opts_db?options=-cx"
+    local plain_url = "postgresql://u:p@h/plain_db"
+    local function switch_and_collect(url, name, mode)
+      local msgs = {}
+      vim.notify = function(m) table.insert(msgs, tostring(m)) end
+      connections.switch(url, name, "postgresql", mode and { mode = mode } or nil)
+      for _, m in ipairs(msgs) do
+        if m:find("read%-only is not enforced") then return true end
+      end
+      return false
+    end
+
+    eq(switch_and_collect(opts_url, "opts-db", "rw"), false,
+      "a writable connection was never promised anything to break")
+    eq(switch_and_collect(plain_url, "plain-db", "ro"), false,
+      "and a ro connection whose PGOPTIONS does take must not be second-guessed")
+    -- The r:ro/rw action routes through the same switch(), so the toggle into
+    -- read-only is the other way a user meets this and has to warn too.
+    eq(switch_and_collect(opts_url, "opts-db", "ro"), true,
+      "toggling that same connection into ro does warn")
+  end)
+end)
+
 -- ── summary ─────────────────────────────────────────────────────────────────
 
 print(string.format("\nreadonly_mode_spec: %d passed, %d failed", pass, fail))

@@ -188,7 +188,9 @@ cannot — that is the boundary; `mode` is the seatbelt.
 Two more limits worth knowing:
 
 - If the postgres URL already carries its own `options=` parameter, that wins over `PGOPTIONS`, so
-  the session is not actually read-only even though grip shows it as `RO`.
+  the session is not actually read-only even though grip shows it as `RO`. Connecting such an entry
+  read-only warns you once, since this is the one case where the `RO` badge overstates what the
+  server was told.
 - `-readonly` is applied only to a database file that already exists. `duckdb::memory:` and a
   not-yet-created sqlite file connect normally — the flag would abort the former outright and turn
   "create it" into an error for the latter.

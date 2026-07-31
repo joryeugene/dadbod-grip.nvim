@@ -81,8 +81,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **This is a guard against accidents, not a security boundary** — every mechanism above is
   reversible from the query pad, and the actual boundary is a database role that cannot write. Two
   limits worth knowing: an `options=` already in a postgres URL beats `PGOPTIONS`, so such a
-  connection reports `RO` while its session is not read-only; and sqlserver is unaffected because it
-  was already read-only. New: `connections.current_mode()`, `connections.deny_if_readonly()`.
+  connection reports `RO` while its session is not read-only — connecting it read-only warns once,
+  because that badge otherwise claims more than the server was told; and sqlserver is unaffected
+  because it was already read-only. New: `connections.current_mode()`,
+  `connections.deny_if_readonly()`, `adapters.readonly_caveat()`.
 
 - **A per-connection accent colour.** `"color"` on an entry takes a palette name (`green`,
   `orange`, `red`, `blue`, `violet`, `yellow`) or `#rrggbb`, and tints the window borders, the grid

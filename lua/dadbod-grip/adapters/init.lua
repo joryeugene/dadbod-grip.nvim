@@ -168,6 +168,25 @@ function M.session_opts()
   return { readonly = require("dadbod-grip.connections").current_mode() == "ro" }
 end
 
+--- Why this URL's session would not actually be read-only, or nil when the
+--- guard takes. The string completes the sentence "read-only is not enforced
+--- on this connection -- ..." and must never contain the URL, which can carry
+--- a password.
+---
+--- Optional per adapter: an adapter without a `readonly_caveat` has none, so
+--- an unknown scheme and a fully-guarded one answer the same. Only postgres
+--- defines one today. sqlite and duckdb have a comparable hole -- no
+--- `-readonly` for a file that does not exist yet -- but a database that has
+--- never existed has nothing to protect, so warning there would only teach
+--- people to ignore the warning.
+--- @param url string  a resolved (expanded) URL
+--- @return string|nil
+function M.readonly_caveat(url)
+  local adapter = M.resolve(url)
+  if not adapter or type(adapter.readonly_caveat) ~= "function" then return nil end
+  return adapter.readonly_caveat(url)
+end
+
 --- Resolve the adapter module for a given connection URL.
 --- @param url string
 --- @return table|nil adapter module

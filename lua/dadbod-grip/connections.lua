@@ -726,6 +726,23 @@ function M.switch(url, name, conn_type, opts)
     _mode_override[url] = opts.mode
   end
 
+  -- Say so, once per connect, when this particular connection cannot keep the
+  -- read-only promise the rest of the UI is about to make for it. Everything
+  -- downstream -- the RO badge, the DDL refusals -- reads the entry rather
+  -- than what the server was actually told, so silence here leaves the one
+  -- connection with a writable session looking the most protected of all.
+  --
+  -- Below the override, so an `r`-toggle to ro warns and a toggle to rw does
+  -- not. Asked of conn_url, not the template: the `options=` can arrive inside
+  -- a ${VAR}. Lazy require -- adapters reaches back into this module.
+  if M.current_mode(url) == "ro" then
+    local caveat = require("dadbod-grip.adapters").readonly_caveat(conn_url)
+    if caveat then
+      vim.notify("Grip: read-only is not enforced on this connection -- " .. caveat,
+        vim.log.levels.WARN)
+    end
+  end
+
   -- Re-tint the accent groups for the connection being switched to. Read
   -- after the write above so a just-added entry is found, and passed
   -- unconditionally: an entry with no `color` (or no entry at all) has to
