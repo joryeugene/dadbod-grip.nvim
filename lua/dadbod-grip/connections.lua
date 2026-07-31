@@ -423,17 +423,41 @@ function M.list()
   local all = {}
   local seen = {}  -- keyed by URL; URL is the canonical identifier
 
+  -- Read the files once: the discovery loop below needs them to enrich a
+  -- colliding entry, and the loop after it needs them to add the rest.
+  local file_conns = read_file_connections()
+  local file_by_url = {}
+  for _, c in ipairs(file_conns) do
+    if not file_by_url[c.url] then file_by_url[c.url] = c end
+  end
+
   -- Discovered connections first: live containers beat hand-edited static.
   -- A user spinning up `just up` expects to see that stack at the top.
+  --
+  -- On a URL collision the discovered entry wins the *identity* -- its name is
+  -- the running container's, which is what the user is looking for in the
+  -- picker -- but the file entry still owns the settings the user configured.
+  -- Dropping it whole used to take `mode` with it, so a connection saved as
+  -- read-only connected writable whenever its stack happened to be up.
   for _, c in ipairs(read_discovered_connections()) do
     if not seen[c.url] then
       seen[c.url] = true
+      local filed = file_by_url[c.url]
+      if filed then
+        -- Copy before writing: docker_localdb.fetch() memoizes its table for
+        -- a 2s TTL, and mutating it would leak these settings into a later
+        -- fetch whose file entry no longer carries them.
+        c = vim.tbl_extend("force", {}, c)
+        for _, field in ipairs({ "type", "env_file", "mode", "color", "attachments" }) do
+          if c[field] == nil then c[field] = filed[field] end
+        end
+      end
       table.insert(all, c)
     end
   end
 
   -- File connections second (user-managed, sorted by last_used in pick())
-  for _, c in ipairs(read_file_connections()) do
+  for _, c in ipairs(file_conns) do
     if not seen[c.url] then
       seen[c.url] = true
       table.insert(all, c)

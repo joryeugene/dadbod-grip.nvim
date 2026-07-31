@@ -134,8 +134,11 @@ Beyond `name` and `url`, what an entry can carry depends on where it lives:
 read — those belong in `.grip/connections.json` or `~/.grip/connections.json`.
 
 Sources are deduplicated by URL in this order: discovered Docker containers, project file, global
-file, `g:dbs`, `$DATABASE_URL`, `g:db`. The first hit wins and later duplicates are dropped whole,
-so an entry can keep its URL in `g:dbs` while its `color` and `mode` live in the JSON file.
+file, `g:dbs`, `$DATABASE_URL`, `g:db`. The first hit wins, so an entry can keep its URL in `g:dbs`
+while its `color` and `mode` live in the JSON file. One case merges rather than discards: a
+discovered container colliding with a `connections.json` entry keeps the container's name and
+adopts the file entry's `type`, `env_file`, `mode`, `color` and `attachments` — discovery
+contributes liveness, the file contributes configuration.
 
 ### Keeping the password out of the connection file
 
