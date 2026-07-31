@@ -41,12 +41,26 @@ end
 
 --- argv for one sqlite3 invocation. Split out from sqlite3() so the blocking
 --- and non-blocking spawns run byte-identical command lines.
-local function sqlite3_args(db_path, sql_str)
-  return { "sqlite3", "-init", "", "-csv", "-header", db_path, sql_str }
+---
+--- -readonly is added for opts.readonly, but only when the file is already
+--- there: sqlite3 creates a missing database on open, and -readonly turns
+--- that into a hard "unable to open database file" instead. A connection
+--- pointing at a not-yet-created file therefore behaves exactly as it does in
+--- rw mode -- there is nothing to protect in a database that does not exist.
+--- @param opts table|nil  { readonly = boolean }
+local function sqlite3_args(db_path, sql_str, opts)
+  local args = { "sqlite3", "-init", "", "-csv", "-header" }
+  if opts and opts.readonly and vim.fn.filereadable(db_path) == 1 then
+    args[#args + 1] = "-readonly"
+  end
+  args[#args + 1] = db_path
+  args[#args + 1] = sql_str
+  return args
 end
 
 local function sqlite3(db_path, sql_str, timeout_ms)
-  return adapters.run_cmd(sqlite3_args(db_path, sql_str), timeout_ms or DEFAULT_TIMEOUT)
+  return adapters.run_cmd(sqlite3_args(db_path, sql_str, adapters.session_opts()),
+    timeout_ms or DEFAULT_TIMEOUT)
 end
 
 function M.query(sql_str, url)
@@ -259,10 +273,11 @@ function M.get_schema_batch_async(url, callback)
   -- be able to tell a bad URL from a spawn failure by that timing difference.
   if not db_path then vim.schedule(function() callback(nil) end); return end
 
-  adapters.run_cmd_async(sqlite3_args(db_path, SCHEMA_BATCH_SQL), DEFAULT_TIMEOUT, function(stdout, _, code)
-    if code ~= 0 then callback(nil); return end
-    callback(parse_schema_batch(stdout))
-  end)
+  adapters.run_cmd_async(sqlite3_args(db_path, SCHEMA_BATCH_SQL, adapters.session_opts()),
+    DEFAULT_TIMEOUT, function(stdout, _, code)
+      if code ~= 0 then callback(nil); return end
+      callback(parse_schema_batch(stdout))
+    end)
 end
 
 function M.explain(sql_str, url)
@@ -458,5 +473,6 @@ end
 
 -- Exposed for testing
 M._extract_path = extract_path
+M._sqlite3_args = sqlite3_args
 
 return M

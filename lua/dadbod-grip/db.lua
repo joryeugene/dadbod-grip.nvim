@@ -262,30 +262,75 @@ local function resolve(url)
   return adapter, conn, nil
 end
 
+--- Publish `url`'s read/write mode to the adapter layer, run the adapter
+--- call, and unpublish it again.
+---
+--- This is the only correct place for that decision. The mode lives on the
+--- connection *entry*, which is keyed by the template URL; resolve() above
+--- hands the adapter the *expanded* one, from which the entry can no longer
+--- be found. Reading vim.g.db down in the adapter instead is what this
+--- replaces, and it was wrong in both directions: a query against an
+--- explicitly passed ro URL spawned without the read-only flag whenever the
+--- ambient connection was a different one, and -- worse -- an unrelated rw
+--- connection was spawned read-only whenever the ambient one happened to be
+--- ro. Both are ordinary sequences: :GripConnect with a grid or sidebar still
+--- open, whose closures captured the URL they were opened with.
+---
+--- `url` is passed through exactly as the caller gave it, nil included:
+--- current_mode falls back to vim.b.db/vim.g.db through the same get_url()
+--- resolve() uses, so the two always agree on which connection this is.
+---
+--- Restores the previous value rather than clearing to nil, and does so on the
+--- error path too. Both halves are load-bearing:
+---
+---   * Nesting is real. run_cmd blocks in vim.wait, which pumps the main loop,
+---     so a scheduled db.* call (init.lua's column-info auto-fetch, view.lua's
+---     on_refresh) runs *inside* an adapter call that is between two spawns.
+---     Clearing to nil on the way out of the inner one left every later spawn
+---     of the outer one falling back to the ambient connection -- the same
+---     defect this function exists to fix, just harder to see.
+---   * "Adapters return (result, err)" is a statement about their return
+---     convention, not a promise that no Lua error is ever raised inside one;
+---     init.lua:2329 pcalls a db_mod call for exactly that reason. Without the
+---     pcall here a throw would strand the published value, and with a bare
+---     save/restore it would strand the *inner* frame's value, which is worse.
+---     So the restore runs either way and the error is re-raised unchanged --
+---     error(err, 0) adds no position of its own, so nothing is hidden.
+---
+--- Two values because that is the adapters' whole contract.
+local function via_adapter(url, fn, ...)
+  local previous = adapters.set_call_readonly(
+    require("dadbod-grip.connections").current_mode(url) == "ro")
+  local ok, result, err = pcall(fn, ...)
+  adapters.set_call_readonly(previous)
+  if not ok then error(result, 0) end
+  return result, err
+end
+
 -- ── public interface (unchanged signatures) ───────────────────────────────
 
 function M.query(sql, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
-  return adapter.query(sql, conn)
+  return via_adapter(url, adapter.query, sql, conn)
 end
 
 function M.get_primary_keys(table_name, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return {}, err end
-  return adapter.get_primary_keys(table_name, conn)
+  return via_adapter(url, adapter.get_primary_keys, table_name, conn)
 end
 
 function M.get_column_info(table_name, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
-  return adapter.get_column_info(table_name, conn)
+  return via_adapter(url, adapter.get_column_info, table_name, conn)
 end
 
 function M.execute(sql, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
-  return adapter.execute(sql, conn)
+  return via_adapter(url, adapter.execute, sql, conn)
 end
 
 --- Ping a connection. Returns true on success, false on any error.
@@ -293,7 +338,7 @@ end
 function M.ping(url)
   local adapter, conn = resolve(url)
   if not adapter then return false end
-  if adapter.ping then return adapter.ping(conn) end
+  if adapter.ping then return via_adapter(url, adapter.ping, conn) end
   return false
 end
 
@@ -301,14 +346,14 @@ function M.get_foreign_keys(table_name, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return {}, err end
   if not adapter.get_foreign_keys then return {}, "Adapter does not support FK lookup" end
-  return adapter.get_foreign_keys(table_name, conn)
+  return via_adapter(url, adapter.get_foreign_keys, table_name, conn)
 end
 
 function M.list_tables(url)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
   if not adapter.list_tables then return nil, "Adapter does not support list_tables" end
-  return adapter.list_tables(conn)
+  return via_adapter(url, adapter.list_tables, conn)
 end
 
 --- Reverse FK lookup: which tables have FKs pointing at table_name?
@@ -321,29 +366,33 @@ function M.get_referencing_foreign_keys(table_name, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return {}, err end
   if adapter.get_referencing_foreign_keys then
-    return adapter.get_referencing_foreign_keys(table_name, conn)
+    return via_adapter(url, adapter.get_referencing_foreign_keys, table_name, conn)
   end
   if not (adapter.list_tables and adapter.get_foreign_keys) then
     return {}, "Adapter does not support FK lookup"
   end
-  local tables, terr = adapter.list_tables(conn)
-  if not tables then return {}, terr end
-  local bare_target = table_name:match("([^.]+)$")
-  local refs = {}
-  for _, t in ipairs(tables) do
-    if t.type ~= "view" then
-      local fks = adapter.get_foreign_keys(t.name, conn)
-      for _, fk in ipairs(fks or {}) do
-        local bare_ref = (fk.ref_table or ""):match("([^.]+)$")
-        if fk.ref_table == table_name or bare_ref == bare_target then
-          table.insert(refs, {
-            table = t.name, column = fk.column, ref_column = fk.ref_column,
-          })
+  -- The fallback spawns the CLI once per table, so the whole scan goes inside
+  -- one via_adapter rather than each call getting its own.
+  return via_adapter(url, function()
+    local tables, terr = adapter.list_tables(conn)
+    if not tables then return {}, terr end
+    local bare_target = table_name:match("([^.]+)$")
+    local refs = {}
+    for _, t in ipairs(tables) do
+      if t.type ~= "view" then
+        local fks = adapter.get_foreign_keys(t.name, conn)
+        for _, fk in ipairs(fks or {}) do
+          local bare_ref = (fk.ref_table or ""):match("([^.]+)$")
+          if fk.ref_table == table_name or bare_ref == bare_target then
+            table.insert(refs, {
+              table = t.name, column = fk.column, ref_column = fk.ref_column,
+            })
+          end
         end
       end
     end
-  end
-  return refs, nil
+    return refs, nil
+  end)
 end
 
 --- Fetch all table columns in a single batch query (adapter-specific optimisation).
@@ -353,7 +402,7 @@ function M.get_schema_batch(url)
   local adapter, conn = resolve(url)
   if not adapter then return nil end
   if not adapter.get_schema_batch then return nil end
-  return adapter.get_schema_batch(conn)
+  return via_adapter(url, adapter.get_schema_batch, conn)
 end
 
 --- Async variant of get_schema_batch. Calls callback(tables) when done, or callback(nil) on error.
@@ -361,41 +410,48 @@ end
 function M.get_schema_batch_async(url, callback)
   local adapter, conn = resolve(url)
   if not adapter or not adapter.get_schema_batch_async then callback(nil); return end
-  adapter.get_schema_batch_async(conn, callback)
+  via_adapter(url, adapter.get_schema_batch_async, conn, callback)
 end
 
 function M.get_indexes(table_name, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return {}, err end
   if not adapter.get_indexes then return {}, "Adapter does not support get_indexes" end
-  return adapter.get_indexes(table_name, conn)
+  return via_adapter(url, adapter.get_indexes, table_name, conn)
 end
 
 function M.get_table_stats(table_name, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
   if not adapter.get_table_stats then return nil, "Adapter does not support get_table_stats" end
-  return adapter.get_table_stats(table_name, conn)
+  return via_adapter(url, adapter.get_table_stats, table_name, conn)
 end
 
 function M.explain(sql_str, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
   if not adapter.explain then return nil, "Adapter does not support EXPLAIN" end
-  return adapter.explain(sql_str, conn)
+  return via_adapter(url, adapter.explain, sql_str, conn)
 end
 
 function M.get_constraints(table_name, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return {}, err end
   if not adapter.get_constraints then return {}, "Adapter does not support get_constraints" end
-  return adapter.get_constraints(table_name, conn)
+  return via_adapter(url, adapter.get_constraints, table_name, conn)
 end
 
---- Returns true when an adapter intentionally exposes read-only grids.
+--- Returns true when the grid must not be editable: either the adapter
+--- intentionally exposes read-only grids (sqlserver), or the connection is
+--- saved with `"mode": "ro"`.
+---
+--- `url` is passed through as given -- the stored, possibly templated form --
+--- because that is the key connection entries live under; see
+--- connections.current_mode.
 function M.is_readonly(url)
   local adapter = resolve(url)
-  return adapter and adapter.readonly == true or false
+  if adapter and adapter.readonly == true then return true end
+  return require("dadbod-grip.connections").current_mode(url) == "ro"
 end
 
 --- List database routines for schema browsers.
@@ -404,7 +460,7 @@ function M.list_routines(url)
   local adapter, conn, err = resolve(url)
   if not adapter then return {}, err end
   if not adapter.list_routines then return {}, nil end
-  return adapter.list_routines(conn)
+  return via_adapter(url, adapter.list_routines, conn)
 end
 
 --- Fetch a routine's source/definition text. Unsupported adapters return an error.
@@ -412,7 +468,7 @@ function M.get_routine_source(routine_name, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
   if not adapter.get_routine_source then return nil, "Adapter does not support routine source" end
-  return adapter.get_routine_source(routine_name, conn)
+  return via_adapter(url, adapter.get_routine_source, routine_name, conn)
 end
 
 --- Describe the columns of a local/remote file via DuckDB DESCRIBE.

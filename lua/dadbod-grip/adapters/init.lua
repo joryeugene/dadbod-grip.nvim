@@ -126,6 +126,48 @@ local SCHEME_MAP = {
   ["mssql://"]      = "dadbod-grip.adapters.sqlserver",
 }
 
+--- The read-only decision for the db.* call currently in flight, or nil when
+--- there is none.
+---
+--- An adapter cannot work its own mode out. It is handed the *expanded* URL,
+--- while a connection's mode lives on its saved entry, which is keyed by the
+--- *template* -- and several adapters do not even carry the URL down to their
+--- argv builder (sqlite and duckdb pass a bare path). So db.lua decides it in
+--- the last frame that still holds the template and publishes it here for
+--- exactly the duration of the adapter call; see db.lua's via_adapter.
+---
+--- nil does not mean "rw": it means no db.* call is in flight -- a module
+--- reaching into an adapter directly -- and session_opts falls back to the
+--- ambient connection, which is the only guess available at that point.
+local _call_readonly = nil
+
+--- Publish `readonly`, and return whatever it displaced.
+---
+--- Returning the old value is what lets db.lua's via_adapter restore the
+--- frame it interrupted instead of clearing to nil. That is not theoretical
+--- nesting: run_cmd blocks in vim.wait, which pumps the main loop, so any
+--- scheduled db.* call runs *inside* an adapter call that is mid-spawn. A
+--- clear-to-nil there silently un-published the outer call's mode for every
+--- spawn it had left to make.
+--- @param readonly boolean|nil
+--- @return boolean|nil  the previously published value
+function M.set_call_readonly(readonly)
+  local previous = _call_readonly
+  _call_readonly = readonly
+  return previous
+end
+
+--- The per-spawn options every CLI adapter passes to its argv/env builder.
+--- Today that is only `readonly`.
+---
+--- Returned as a table rather than a boolean so a second flag does not change
+--- five signatures, and kept here rather than duplicated in four adapters.
+--- @return table  { readonly = boolean }
+function M.session_opts()
+  if _call_readonly ~= nil then return { readonly = _call_readonly } end
+  return { readonly = require("dadbod-grip.connections").current_mode() == "ro" }
+end
+
 --- Resolve the adapter module for a given connection URL.
 --- @param url string
 --- @return table|nil adapter module

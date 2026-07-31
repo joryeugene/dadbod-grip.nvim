@@ -968,9 +968,119 @@ Each saved connection shows a session-scoped status indicator:
   *   connected this session (set automatically on successful switch)
       unknown (no indicator shown; not yet connected this session)
   x   failed (last attempt did not succeed)
+  ?   unresolved (the entry's ${VAR} could not be expanded; see below)
 
 Press `T` on any file-based connection in the picker to retest it instantly.
 The indicator updates in place. Health state is session-only and never persisted.
+
+Entry fields ~
+
+Beyond `name` and `url`, an entry in either connections.json may carry:
+
+  env_file   path to a .env file supplying ${VAR} values for the url
+  mode       "ro" to connect read-only, "rw" (or absent) to connect writable
+  color      accent colour for this connection: a palette name
+             (green, orange, red, blue, violet, yellow) or "#rrggbb"
+
+All three are optional. An entry without them behaves exactly as before.
+
+                                                          *grip-secrets*
+Secrets: ${VAR} in a connection URL ~
+
+Any `${NAME}` in a url is resolved when you connect, so the password never
+has to be stored in connections.json: >
+
+  {
+    "name": "dev",
+    "url": "postgresql://api:${DEV_DB_PASSWORD}@dev.internal:5432/app",
+    "env_file": "~/work/api/.env"
+  }
+<
+Values come from `env_file` first and fall back to the process environment,
+so `${PGPASSWORD}` works with no env_file at all. An unresolved placeholder
+is always an error, never an empty substitution -- a url quietly missing its
+password either connects somewhere unintended or hangs on a prompt. Such an
+entry shows `?` in the picker and names the missing variable when you try to
+connect.
+
+The .env file is parsed for `KEY=value` and `export KEY=value` lines; one
+pair of surrounding quotes is stripped; `#` comments and blank lines are
+ignored. It is read at connect time and memoized on the file's mtime, so a
+rotated password is picked up on the next query. A git-crypt-locked file is
+reported as such by name rather than as a parse error, and because failed
+reads are never cached, `git-crypt unlock` takes effect on the very next
+connect with no restart.
+
+Grip stores and exposes the *template*: `vim.g.db` holds the url with the
+placeholder still in it, and expansion happens at a single point on the way
+to the database client. No code path that writes to disk ever sees the
+expanded url. Passwords also reach the client process through its
+environment rather than its argv, so they are not visible in `ps`.
+
+Limit: a templated url is grip-only. vim-dadbod's `:DB` and any statusline
+reading `g:db` see the literal `${NAME}`. Keep such connections un-templated
+if you depend on either.
+
+                                                          *grip-readonly*
+Read-only mode ~
+
+With `"mode": "ro"` grip connects using the client's own read-only switch:
+
+  postgresql   PGOPTIONS=-c default_transaction_read_only=on
+  mysql        SET SESSION TRANSACTION READ ONLY, merged into --init-command
+  sqlite       sqlite3 -readonly
+  duckdb       duckdb -readonly
+  sqlserver    already read-only; `mode` does not apply
+
+Grid editing is disabled, and the DDL entry points (|:GripCreate|,
+|:GripDrop|, |:GripRename|, |:GripFill|, the sidebar's create/drop, and the
+column operations) decline up front instead of prompting and then failing at
+the server. The winbar shows `RO` while connected read-only.
+
+Press `r` in the connection picker to connect in the opposite mode for this
+session only. The connections file is not modified.
+
+This is a guard against accidents, NOT a security boundary. Each mechanism
+above is reversible from the query pad -- on postgres, `begin; set
+transaction read write; ...` is enough. If a connection must not be able to
+write, give it a database role that cannot. That is the boundary; `mode` is
+the seatbelt.
+
+Two further limits:
+
+- An `options=` already present in a postgres url wins over PGOPTIONS, so
+  such a connection reports `RO` while its session is not read-only.
+- `-readonly` is applied only to a database file that already exists.
+  `duckdb::memory:` and a not-yet-created sqlite file connect normally: the
+  flag aborts the former outright and turns "create it" into an error for
+  the latter.
+
+                                                          *grip-accent*
+Connection colour ~
+
+`"color"` takes a palette name -- green, orange, red, blue, violet,
+yellow -- or a `#rrggbb` value, and tints the window borders, the grid
+rules and the schema sidebar title, so a red production connection does not
+look like a green local one. An unknown value is ignored, not raised.
+
+The palette reuses colours already in grip's theme, and every accent also
+carries a `ctermfg` (a `#rrggbb` value is approximated onto the nearest
+xterm palette entry), so none of this needs a truecolor terminal.
+
+Three highlight groups carry it:
+
+  GripConnAccent       the connection's colour
+  GripConnAccentBold   the same, bold; used for the sidebar title
+  GripBorder           window borders and grid rules; DERIVED from the
+                       accent, which is what makes an entry without a
+                       `color` restore the default #cba6f7 / ctermfg=147
+                       instead of leaving the last connection's tint behind
+
+All three are redefined on every connection switch and re-applied whenever
+highlights are rebuilt, so they survive a `:colorscheme` change. Because
+they are redefined rather than merged, defining any of them yourself in your
+config will not stick -- this is unchanged from how grip's other groups have
+always behaved.
 
 ==============================================================================
 14. EXPORT                                                   *grip-export*

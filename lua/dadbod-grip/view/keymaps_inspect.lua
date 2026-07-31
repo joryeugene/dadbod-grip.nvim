@@ -141,6 +141,9 @@ function M.setup(bufnr, ctx)
   -- gN: rename column under cursor
   kmap("grid_rename_col", function()
     local session = ctx.session()
+    if session and require("dadbod-grip.connections").deny_if_readonly("Rename column", session.url) then
+      return
+    end
     if not session or not session.state.table_name then
       vim.notify("Rename requires a table name", vim.log.levels.INFO)
       return

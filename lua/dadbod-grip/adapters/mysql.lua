@@ -32,8 +32,18 @@ end
 --- execute() asks for ROW_COUNT() explicitly.
 --- Split out from mysql_query() so the blocking and non-blocking spawns run
 --- byte-identical command lines.
-local function mysql_args(parsed, sql_str)
-  local args = { "mysql", "--batch", "--init-command=SET sql_mode='ANSI_QUOTES,NO_BACKSLASH_ESCAPES'" }
+---
+--- opts.readonly is merged *into* the existing --init-command rather than
+--- added as a second one: the mysql CLI keeps only the last --init-command it
+--- is given, so a second flag would silently drop the sql_mode the whole
+--- adapter depends on (ANSI_QUOTES) instead of adding to it.
+--- @param opts table|nil  { readonly = boolean }
+local function mysql_args(parsed, sql_str, opts)
+  local init = { "SET sql_mode='ANSI_QUOTES,NO_BACKSLASH_ESCAPES'" }
+  if opts and opts.readonly then
+    init[#init + 1] = "SET SESSION TRANSACTION READ ONLY"
+  end
+  local args = { "mysql", "--batch", "--init-command=" .. table.concat(init, "; ") }
   if parsed.host then
     args[#args + 1] = "-h"
     args[#args + 1] = parsed.host
@@ -68,14 +78,14 @@ end
 
 --- Run a statement, blocking.
 local function mysql_query(parsed, sql_str, timeout_ms)
-  return adapters.run_cmd(mysql_args(parsed, sql_str), timeout_ms or DEFAULT_TIMEOUT,
-    { env = mysql_env(parsed) })
+  return adapters.run_cmd(mysql_args(parsed, sql_str, adapters.session_opts()),
+    timeout_ms or DEFAULT_TIMEOUT, { env = mysql_env(parsed) })
 end
 
 --- Run a statement without blocking; same argv and same env as mysql_query.
 local function mysql_query_async(parsed, sql_str, timeout_ms, callback)
-  adapters.run_cmd_async(mysql_args(parsed, sql_str), timeout_ms or DEFAULT_TIMEOUT, callback,
-    { env = mysql_env(parsed) })
+  adapters.run_cmd_async(mysql_args(parsed, sql_str, adapters.session_opts()),
+    timeout_ms or DEFAULT_TIMEOUT, callback, { env = mysql_env(parsed) })
 end
 
 function M.query(sql_str, url)

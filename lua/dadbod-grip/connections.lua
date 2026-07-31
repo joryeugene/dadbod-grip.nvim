@@ -16,6 +16,18 @@ local M = {}
 -- a meaningless report.
 local _health = {}
 
+-- Session-scoped read/write mode overrides, keyed by connection URL as stored
+-- (the template -- the same key entries live under on disk). Set only by
+-- M.switch(url, ..., { mode = ... }), which the picker's r:ro/rw action uses
+-- to connect once in the mode opposite to the entry's default.
+--
+-- Deliberately never written to connections.json: the entry's own `mode` is
+-- the user's standing decision about that database, and a keypress in a
+-- picker is not a request to rewrite their file. Every ordinary switch of a
+-- connection clears its override again, so the override lasts exactly from
+-- one connect to the next.
+local _mode_override = {}
+
 local function health_char(url)
   local s = _health[url] or "unknown"
   if s == "ok"         then return "*" end
@@ -239,6 +251,63 @@ function M.entry_for(url)
     if c.url == url then return c end
   end
   return nil
+end
+
+--- The read/write mode of a connection: "ro" or "rw", never nil.
+---
+--- "ro" only when the saved entry explicitly says `"mode": "ro"`. No entry
+--- (an ad-hoc URL, a g:dbs entry), no `mode` field, or any other value all
+--- mean "rw", so every connections.json written before this option existed
+--- keeps behaving exactly as it did.
+---
+--- Called with no argument -- the adapters and the mode badge do -- it asks
+--- about the connection currently in vim.b.db / vim.g.db, via the same
+--- precedence db.get_url() uses. That is deliberately the *template* URL:
+--- entries are keyed by the template on disk, so looking up an expanded
+--- "${VAR}" URL would find nothing and silently downgrade a ro connection to
+--- rw. Callers that already hold a stored URL (db.is_readonly) pass it in.
+--- A session override set by the picker's r:ro/rw action wins over the stored
+--- field, for that connection only and only until it is switched to again.
+--- @param url string|nil  a stored (templated) URL; defaults to the current connection
+--- @return string  "ro" or "rw"
+function M.current_mode(url)
+  -- Lazy require: db.lua reaches back into this module for expand_url.
+  local conn = require("dadbod-grip.db").get_url(url)
+  local override = conn and _mode_override[conn]
+  if override then return override end
+  local entry = M.entry_for(conn)
+  return (entry and entry.mode == "ro") and "ro" or "rw"
+end
+
+--- Refuse a schema-modifying action on a connection saved with "mode": "ro".
+--- Returns true when the caller must stop.
+---
+--- This is the layer that refuses *before* the prompt: every DDL path in the
+--- plugin opens an interactive form or a typed confirmation first, and walking
+--- a user through one only to have it fail at the end is a worse answer than
+--- declining up front.
+---
+--- It is a guard, not a boundary, and the difference matters. The adapters do
+--- put the CLI session itself in read-only mode, which usually means the
+--- server would refuse the statement even if this returned false -- but not
+--- always: a postgres URL that already carries its own `options=` overrides
+--- PGOPTIONS (see psql_env), and sqlite/duckdb pointed at a not-yet-existing
+--- file get no `-readonly` at all, by design. Treat this as the thing that
+--- keeps a read-only connection honest in ordinary use, not as something a
+--- caller may rely on to make a write impossible.
+---
+--- Lives here rather than in init.lua because the DDL entry points are spread
+--- across the command layer, the schema sidebar, the properties float and the
+--- grid's inspect keymaps; one wording for all of them is the point.
+---
+--- The message names the mode and never the URL -- it can carry a password.
+--- @param label string  the command or action name to prefix the message with
+--- @param url string|nil  defaults to the current connection
+--- @return boolean
+function M.deny_if_readonly(label, url)
+  if M.current_mode(url) ~= "ro" then return false end
+  vim.notify(label .. ": Connection is read-only (mode = ro)", vim.log.levels.WARN)
+  return true
 end
 
 --- Resolve the ${VAR} placeholders in a connection URL against the env_file
@@ -569,7 +638,9 @@ end
 --- Switch active connection. Routes file connections through grip.open(),
 --- DB connections through vim.g.db + workspace open.
 --- Auto-saves to .grip/connections.json if not already persisted.
---- opts: { write = bool, watch_ms = number }: session-only, never persisted.
+--- opts: { write = bool, watch_ms = number, mode = "ro"|"rw" }: session-only,
+--- never persisted.
+--- @return boolean committed  false when the switch aborted and nothing changed
 function M.switch(url, name, conn_type, opts)
   -- Strip session-only flags: they must never reach the connection registry
   url = strip_flags(url)
@@ -584,7 +655,7 @@ function M.switch(url, name, conn_type, opts)
   if not conn_url then
     vim.notify("Grip: " .. (secret_err or "could not resolve connection secrets"),
       vim.log.levels.ERROR)
-    return
+    return false
   end
 
   -- Single read of the local file; everything below (type resolution,
@@ -633,6 +704,34 @@ function M.switch(url, name, conn_type, opts)
     write_file_connections(local_conns)
   end
 
+  -- The one place a mode override is set or cleared. Connecting the ordinary
+  -- way always returns a connection to the mode its entry asks for, so an
+  -- override taken by mistake is undone by reconnecting rather than by
+  -- editing connections.json.
+  --
+  -- Below the expansion check above, deliberately: a switch that aborted did
+  -- not happen, and must leave the mode of that URL exactly as it found it.
+  -- Set any earlier and an `r` on an entry whose ${VAR} does not resolve
+  -- would flip a read-only connection the user is still on to writable, with
+  -- only a "could not resolve secrets" message to go on.
+  _mode_override[url] = nil
+  if opts and (opts.mode == "ro" or opts.mode == "rw") then
+    _mode_override[url] = opts.mode
+  end
+
+  -- Re-tint the accent groups for the connection being switched to. Read
+  -- after the write above so a just-added entry is found, and passed
+  -- unconditionally: an entry with no `color` (or no entry at all) has to
+  -- restore the default look, not inherit the previous connection's.
+  local view = require("dadbod-grip.view")
+  local switched_entry = M.entry_for(url)
+  view.set_connection_accent(switched_entry and switched_entry.color)
+  -- A switch changes what current_mode() answers, so every grid still open
+  -- has to ask again. Their badges are cached per session precisely because
+  -- the winbar is rebuilt on every cursor move; a switch is the one other
+  -- moment the cached answer can be wrong.
+  view.invalidate_mode_cache()
+
   if resolved_type == "file" then
     vim.notify("Grip: opening " .. (name or url), vim.log.levels.INFO)
     M.set_health(url, "ok")
@@ -662,7 +761,7 @@ function M.switch(url, name, conn_type, opts)
         require("dadbod-grip.query_pad").open(db_url)
       end)
     end)
-    return
+    return true
   end
 
   -- Regular DB connection: set vim.g.db and open full workspace
@@ -741,6 +840,7 @@ function M.switch(url, name, conn_type, opts)
     end)
 
   end)
+  return true
 end
 
 --- Get current connection info.
@@ -793,6 +893,26 @@ function M.save_attachments(url, attachments)
 end
 
 --- Prompt user to enter a new connection URL + name, then switch to it.
+--- True when the picker's `r` (ro/rw) action applies to this row.
+---
+--- Shared by the action's `when` and its `fn`: grip_picker fires `fn`
+--- regardless of `when`, so both need the same answer, and a second
+--- hand-written copy of these conditions is how the two drift apart.
+--- @param c table picker item
+--- @return boolean
+local function ro_toggle_applies(c)
+  if c._new or c._temp or c._section_header or c._local_file then return false end
+  -- A file connection has no server session to put in read-only mode;
+  -- !:write is the flag that matters there.
+  if c.type == "file" or (not c.type and is_file_url(c.url)) then return false end
+  -- SQL Server is read-only at the adapter (adapters/sqlserver.lua:9), so
+  -- offering to toggle its mode would promise a write path that does not
+  -- exist. Resolved first: a whole-URL template hides the scheme, and an
+  -- unresolvable one falls back to the template, which simply does not match.
+  local target = M.expand_url(c.url) or c.url
+  return not target:find("^sqlserver:")
+end
+
 local function prompt_new_connection()
   local url = ui.input({ prompt = "Connection URL, file path, or s3://: " })
   if not url then
@@ -859,6 +979,11 @@ function M.pick(opts)
   local new_sentinel  = { name = "+ New connection...",          url = "", _new  = true }
   local temp_sentinel = { name = "~ Connect once (no save)...", url = "", _temp = true }
 
+  -- Does any listed entry default to read-only? Set by build_picker_items and
+  -- read by display: the RO column only exists when something is in it, so a
+  -- picker with no ro entry renders byte-identically to how it always has.
+  local any_ro = false
+
   -- Build the full item list with scope sections.
   -- When at least one global connection exists and connections_path is not set,
   -- connections are grouped under "global" and "project" section headers so the
@@ -913,6 +1038,10 @@ function M.pick(opts)
     end
     table.insert(out, new_sentinel)
     table.insert(out, temp_sentinel)
+    any_ro = false
+    for _, c in ipairs(out) do
+      if c.mode == "ro" then any_ro = true; break end
+    end
     return out
   end
 
@@ -939,7 +1068,17 @@ function M.pick(opts)
       local dot = health_char(c.url)
       local pad = string.rep(" ", max_name - vim.fn.strdisplaywidth(c.name))
       local url_display = show_pass[c.url] and c.url or short_url(c.url)
-      return dot .. " " .. c.name .. pad .. "  " .. url_display
+      -- The entry's stored default, not what r:ro/rw may have overridden for
+      -- this session: this row answers "how does this connection open", and
+      -- the winbar answers "how is it open right now".
+      --
+      -- Its own column, ahead of the URL, because it is a property of the
+      -- entry like the health dot -- and because grip_picker truncates a row
+      -- that overruns the float, which ate the marker outright when it
+      -- trailed the URL: long production names and long hosts are exactly the
+      -- rows most likely to be read-only, and M:mask lengthens them further.
+      local ro = any_ro and (c.mode == "ro" and "RO " or "   ") or ""
+      return dot .. " " .. c.name .. pad .. "  " .. ro .. url_display
     end,
     on_select = function(c)
       if c._section_header then return end
@@ -1161,6 +1300,34 @@ function M.pick(opts)
           end
           vim.fn.writefile({ vim.fn.json_encode(gdata) }, global_path)
           vim.notify("'" .. c.name .. "' saved to ~/.grip/connections.json", vim.log.levels.INFO)
+        end,
+      },
+      {
+        -- r: connect in the mode opposite to the entry's default -- a ro entry
+        -- opened writable for one fix, a rw entry opened read-only before
+        -- poking at production. Session-only: nothing is written to
+        -- connections.json, and selecting the connection normally afterwards
+        -- puts it back on its own mode (see _mode_override).
+        key            = "r",
+        label          = "r:ro/rw",
+        close_on_select = true,
+        when           = function(c)
+          return ro_toggle_applies(c)
+        end,
+        fn             = function(c)
+          -- grip_picker fires fn regardless of the `when` predicate (see the
+          -- same guard on a:attach), so this is the check that actually
+          -- prevents an override being set on an entry the action was hidden
+          -- for -- not a restatement of the line above.
+          if not ro_toggle_applies(c) then return end
+          local mode = c.mode == "ro" and "rw" or "ro"
+          -- Only claim the override on a switch that committed: one that
+          -- aborted (unresolvable ${VAR}) leaves the connection exactly as it
+          -- was, and has already said why.
+          if M.switch(c.url, c.name, c.type, { mode = mode }) then
+            vim.notify("Grip: connected " .. (mode == "ro" and "read-only" or "writable")
+              .. " for this session (mode = " .. mode .. ")", vim.log.levels.INFO)
+          end
         end,
       },
       {

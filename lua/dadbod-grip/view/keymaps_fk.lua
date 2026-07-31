@@ -96,6 +96,9 @@ function M.setup(bufnr, ctx)
     -- Fetch PKs for referenced table
     local pks = db.get_primary_keys(fk_info.ref_table, session_fk.state.url) or {}
     result.primary_keys = pks
+    -- Same connection as the grid we jumped from: a read-only one stays
+    -- read-only on the referenced table too.
+    result.readonly = db.is_readonly(session_fk.state.url)
     result.table_name = fk_info.ref_table
     result.url = session_fk.state.url
     result.sql = ref_sql

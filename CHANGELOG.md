@@ -51,6 +51,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A connection can reference its password instead of storing it.** Any `${VAR}` in a connection
+  URL is resolved when you connect, from the `.env` file the new `env_file` entry field points at,
+  falling back to the process environment. The secret stays where it already lives and never
+  reaches `~/.grip/connections.json`. This is arranged so that no write path *can* leak it rather
+  than by scrubbing the ones that exist today: `vim.g.db` holds the template, and expansion happens
+  at the single dispatch point `db.resolve()`, so nothing that persists, logs, or displays a URL
+  ever holds the expanded one. An unresolved placeholder is always an error, never an empty
+  substitution — a URL quietly missing its password either connects somewhere unintended or hangs
+  on a prompt; such an entry shows `?` in the picker and names the variable it wanted. `.env`
+  contents are memoized on the file's mtime, so a rotated password is picked up on the next query,
+  and failed reads are deliberately never cached, so `git-crypt unlock` takes effect on the very
+  next connect with no restart — a still-locked file is reported as locked rather than as a parse
+  error. The one cost: a templated URL is grip-only, because vim-dadbod's `:DB` and any statusline
+  reading `g:db` see the literal `${VAR}`. New module `dadbod-grip.secrets`.
+
+- **Read-only connections.** An entry with `"mode": "ro"` connects through the client's own
+  read-only switch — `PGOPTIONS=-c default_transaction_read_only=on`, `SET SESSION TRANSACTION READ
+  ONLY` merged into mysql's existing `--init-command` (a second `--init-command` flag would silently
+  discard the first, taking `sql_mode` with it), and `-readonly` for sqlite and duckdb, applied only
+  to a file that already exists: the flag aborts `duckdb::memory:` outright and turns "create it"
+  into an error for a new sqlite file. Grid editing is off and the DDL entry points — `:GripCreate`,
+  `:GripDrop`, `:GripRename`, `:GripFill`, the sidebar's create/drop, and the four column operations
+  — decline locally instead of prompting you and then failing at the server. Press `r` in the
+  connection picker to connect in the opposite mode for one session; the file is not touched.
+  **This is a guard against accidents, not a security boundary** — every mechanism above is
+  reversible from the query pad, and the actual boundary is a database role that cannot write. Two
+  limits worth knowing: an `options=` already in a postgres URL beats `PGOPTIONS`, so such a
+  connection reports `RO` while its session is not read-only; and sqlserver is unaffected because it
+  was already read-only. New: `connections.current_mode()`, `connections.deny_if_readonly()`.
+
+- **A per-connection accent colour.** `"color"` on an entry takes a palette name (`green`,
+  `orange`, `red`, `blue`, `violet`, `yellow`) or `#rrggbb`, and tints the window borders, the grid
+  rules and the sidebar title, so a red prod connection does not look like a green local one. The
+  palette reuses hexes already in the theme rather than introducing a second one, every accent
+  carries a `ctermfg` (a user hex is approximated onto the xterm cube and grey ramp) so nothing
+  requires truecolor, and an unknown value is ignored rather than raised. `GripBorder` is now
+  *derived* from the accent, which is what makes leaving a coloured connection restore the default
+  instead of stranding the border red. The groups `GripConnAccent` and `GripConnAccentBold` are
+  redefined on every switch and re-applied from `ensure_highlights`, so they survive `:colorscheme`.
+  New: `view.set_connection_accent()`.
+
 - **ASCII distribution in the `gS` column-statistics popup.** Numeric columns get the eight
   `build_histogram_sql` buckets with their bounds labelled and their counts drawn as horizontal
   bars; every other type gets its top values the same way. Bars resolve to an eighth of a cell,
@@ -105,6 +146,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The two legitimate stubs of read-only fields (`os.exit` in the runner, `os.time` in
   `connections_spec`) carry inline luacheck directives at their site. No production behaviour
   changes.
+
+### Security
+
+- **Database passwords no longer travel in the CLI's argv, and no longer appear in error
+  messages.** `psql -P`-style argv is readable by any user on the machine via `ps -eo args`, so the
+  password now reaches the client through its environment instead: `PGPASSWORD` (percent-decoded,
+  as libpq expects), `MYSQL_PWD` and `SQLCMDPASSWORD` (both verbatim — `parse_dadbod_url`
+  deliberately does not decode, and decoding those would break existing passwords containing `%`).
+  To be plain about the limit: this protects against *other users*, not against a process running
+  as you, which can read your environment just as easily as your argv. Separately, URLs in error
+  text are now redacted through the shared `sql.redact_url`, including the case where the password
+  itself contains an `@` — the authority is split on the last `@`, not the first, which previously
+  left `p@ssw0rd` masked as `***@ssw0rd`. DuckDB's federation path got the same treatment the hard
+  way: it rewrites the DSN you hand it before echoing it back in an error, so masking the DSN
+  *string* could not work and the password *value* is masked wherever it appears, across all four
+  places grip spawns the duckdb CLI.
 
 ## [3.9.0] - 2026-07-28
 

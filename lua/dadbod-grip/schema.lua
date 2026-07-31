@@ -418,7 +418,10 @@ local function render(state)
     title = current and current.name or state.url:match("^%w+://[^/]*/?([^?]*)") or state.url
   end
   table.insert(lines, " " .. title)
-  table.insert(highlights, { line = 0, col = 0, end_col = #lines[1], hl = "GripBorder" })
+  -- The connection accent, so a connection saved with "color" is identifiable
+  -- from the sidebar title alone. Unaccented it is GripBorder's violet, which
+  -- is what this line has always been.
+  table.insert(highlights, { line = 0, col = 0, end_col = #lines[1], hl = "GripConnAccentBold" })
 
   table.insert(lines, "")
 
@@ -916,6 +919,7 @@ local function setup_keymaps(url)
       vim.notify("Move cursor to a table", vim.log.levels.INFO)
       return
     end
+    if require("dadbod-grip.connections").deny_if_readonly("Drop table", url) then return end
     local ddl = require("dadbod-grip.ddl")
     ddl.drop_table(node.name, url, function()
       state.items = nil
@@ -929,6 +933,7 @@ local function setup_keymaps(url)
 
   -- sidebar_create: create table
   kmap("sidebar_create", function()
+    if require("dadbod-grip.connections").deny_if_readonly("Create table", url) then return end
     local ddl = require("dadbod-grip.ddl")
     ddl.create_table(url, function()
       state.items = nil

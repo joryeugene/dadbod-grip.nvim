@@ -62,20 +62,36 @@ local function psql_args(url, sql_str)
   return { "psql", stripped_url, "-X", "--no-password", "--csv", "-c", sql_str }
 end
 
---- opts.env for one psql invocation: PGPASSWORD carrying whatever
---- strip_password pulled out of the URL, decoded exactly once (see
---- percent_decode above). Returns an empty table -- not a PGPASSWORD key --
---- when the URL has no password, so --no-password falls through to
---- ~/.pgpass instead of authenticating with an empty password.
-local function psql_env(url)
+--- opts.env for one psql invocation.
+---
+--- PGPASSWORD carries whatever strip_password pulled out of the URL, decoded
+--- exactly once (see percent_decode above). It is omitted -- an empty table,
+--- not an empty PGPASSWORD key -- when the URL has no password, so
+--- --no-password falls through to ~/.pgpass instead of authenticating with an
+--- empty password.
+---
+--- PGOPTIONS puts the session in read-only mode when opts.readonly is set.
+--- Not spliced into the URL as "?options=...": psql rejects that outright
+--- ('extra key/value separator "=" in URI query parameter'), and the
+--- percent-encoded form would mean decode-append-re-encode whenever a URL
+--- already carries its own options=. Caveat of using the env var instead: an
+--- options= already in the URL wins over PGOPTIONS, so such a connection is
+--- not put into read-only mode by this.
+--- @param url string
+--- @param opts table|nil  { readonly = boolean }
+local function psql_env(url, opts)
+  local env = {}
   local _, pass = strip_password(url)
-  if not pass then return {} end
-  return { PGPASSWORD = percent_decode(pass) }
+  if pass then env.PGPASSWORD = percent_decode(pass) end
+  if opts and opts.readonly then
+    env.PGOPTIONS = "-c default_transaction_read_only=on"
+  end
+  return env
 end
 
 local function psql(url, sql_str, timeout_ms)
   return adapters.run_cmd(psql_args(url, sql_str), timeout_ms or DEFAULT_TIMEOUT,
-    { env = psql_env(url) })
+    { env = psql_env(url, adapters.session_opts()) })
 end
 
 local function split_routine_name(routine_name)
@@ -331,7 +347,7 @@ function M.get_schema_batch_async(url, callback)
   adapters.run_cmd_async(psql_args(url, SCHEMA_BATCH_SQL), DEFAULT_TIMEOUT, function(stdout, _, code)
     if code ~= 0 then callback(nil); return end
     callback(parse_schema_batch(stdout))
-  end, { env = psql_env(url) })
+  end, { env = psql_env(url, adapters.session_opts()) })
 end
 
 function M.explain(sql_str, url)
@@ -607,7 +623,8 @@ end
 --- Ping the server by running SELECT 1. Returns true on success, false on any error.
 function M.ping(url)
   if vim.fn.executable("psql") == 0 then return false end
-  local _, _, code = adapters.run_cmd(psql_args(url, "SELECT 1"), 5000, { env = psql_env(url) })
+  local _, _, code = adapters.run_cmd(psql_args(url, "SELECT 1"), 5000,
+    { env = psql_env(url, adapters.session_opts()) })
   return code == 0
 end
 

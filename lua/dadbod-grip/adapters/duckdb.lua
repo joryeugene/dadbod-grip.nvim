@@ -267,6 +267,40 @@ local function split_catalog_schema_table(url, table_name)
   return nil, prefix, tbl
 end
 
+--- argv prefix for one duckdb invocation: the executable, the caller's output
+--- flags, an optional -readonly, and the database path. Callers append their
+--- own "-c <sql>".
+---
+--- `db` may be a duckdb: URL or an already-extracted path, so the three spawn
+--- sites (which hold a path) and the tests (which hold a URL) share one
+--- builder. A path never starts with "duckdb:".
+---
+--- -readonly is applied only to a file-backed database that already exists,
+--- and both halves of that condition are load-bearing rather than defensive:
+---   * "duckdb -readonly" on :memory: aborts with "Cannot launch in-memory
+---     database in read-only mode!", and :memory: is both the default starter
+---     connection and the engine behind file-as-table;
+---   * on a not-yet-existing file it aborts with "Cannot open database ... in
+---     read-only mode: database does not exist" rather than creating it.
+--- @param db string  a duckdb: URL or a database path
+--- @param opts table|nil  { readonly = boolean }
+--- @param flags string[]|nil  output flags for this call site
+local function duckdb_args(db, opts, flags)
+  local db_path = (type(db) == "string" and db:match("^duckdb:")) and extract_path(db) or db
+  local args = { "duckdb" }
+  for _, f in ipairs(flags or {}) do
+    args[#args + 1] = f
+  end
+  local file_backed = db_path and db_path ~= ":memory:"
+  if opts and opts.readonly and file_backed and vim.fn.filereadable(db_path) == 1 then
+    args[#args + 1] = "-readonly"
+  end
+  if file_backed then
+    args[#args + 1] = db_path
+  end
+  return args
+end
+
 local function duckdb(db_path, sql_str, timeout_ms, url)
   local effective_sql = sql_str
   local effective_timeout = timeout_ms or DEFAULT_TIMEOUT
@@ -288,10 +322,7 @@ local function duckdb(db_path, sql_str, timeout_ms, url)
     effective_timeout = math.max(effective_timeout, HTTP_TIMEOUT)
   end
 
-  local args = { "duckdb", "-csv", "-header" }
-  if db_path ~= ":memory:" then
-    args[#args + 1] = db_path
-  end
+  local args = duckdb_args(db_path, adapters.session_opts(), { "-csv", "-header" })
   args[#args + 1] = "-c"
   args[#args + 1] = effective_sql
 
@@ -333,10 +364,7 @@ end
 --- from the main Neovim loop via vim.schedule. Used for schema pre-warming.
 local function duckdb_async(db_path, sql_str, timeout_ms, url, callback)
   local effective_sql = url and (build_attach_prefix(url) .. sql_str) or sql_str
-  local args = { "duckdb", "-csv", "-header" }
-  if db_path ~= ":memory:" then
-    args[#args + 1] = db_path
-  end
+  local args = duckdb_args(db_path, adapters.session_opts(), { "-csv", "-header" })
   args[#args + 1] = "-c"
   args[#args + 1] = effective_sql
   vim.system(args, { text = true, timeout = timeout_ms or 8000 }, function(out)
@@ -354,10 +382,7 @@ local function duckdb_exec(db_path, sql_str, timeout_ms, url)
     effective_sql = build_attach_prefix(url) .. effective_sql
   end
 
-  local args = { "duckdb" }
-  if db_path ~= ":memory:" then
-    args[#args + 1] = db_path
-  end
+  local args = duckdb_args(db_path, adapters.session_opts())
   args[#args + 1] = "-c"
   args[#args + 1] = effective_sql
 
@@ -1281,6 +1306,7 @@ function M.ping(url)
 end
 
 M._extract_path = extract_path
+M._args = duckdb_args
 M._build_attach_prefix = build_attach_prefix
 M._detect_extension = detect_extension
 M._attach_unchecked = store_attachment

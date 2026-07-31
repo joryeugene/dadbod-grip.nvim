@@ -119,6 +119,68 @@ https://host/data.parquet  ← remote file via httpfs
 duckdb::memory:            ← single-query scratch (tables don't persist between queries)
 ```
 
+### Keeping the password out of the connection file
+
+A connection entry can reference its password instead of storing it. Any `${NAME}` in the URL is
+resolved when you connect, from the `.env` file the entry points at:
+
+```json
+{
+  "name": "dev",
+  "url": "postgresql://api@dev.internal:5432/app?sslmode=require",
+  "env_file": "~/work/api/.env"
+}
+```
+
+with `url` written as `postgresql://api:${DEV_DB_PASSWORD}@dev.internal:5432/app?sslmode=require`.
+
+Values come from `env_file` first and fall back to the process environment, so `${PGPASSWORD}`
+alone works with no `env_file` at all. An unresolved placeholder is an error, never an empty
+substitution — a URL quietly missing its password either connects somewhere unintended or hangs
+on a prompt. Such an entry shows as `?` in the picker and reports the missing variable when you
+try to connect.
+
+The `.env` file is parsed for `KEY=value` and `export KEY=value` lines, one pair of surrounding
+quotes is stripped, `#` comments and blank lines are ignored. It is read at connect time and
+memoized on the file's mtime, so a password a teammate rotates mid-session is picked up on the
+next query. If the file is still git-crypt-locked, grip says so by name instead of failing with a
+parse error, and — because failed reads are never cached — `git-crypt unlock` takes effect on the
+very next connect, with no restart.
+
+What this buys you: the secret lives in exactly one place you already control, and
+`~/.grip/connections.json` never receives it. `vim.g.db` holds the *template*, and expansion
+happens at a single point on the way to the database client, so no code path that writes to disk
+ever sees the expanded URL. Passwords also travel to the client process in its environment rather
+than in `argv`, so they do not show up in another user's `ps`.
+
+**One limit, stated plainly:** a templated URL in `vim.g.db` is grip-only. vim-dadbod's `:DB`
+command and any statusline that reads that variable will see the literal `${NAME}`. If you rely on
+either, keep those connections un-templated.
+
+### Read-only connections
+
+An entry can carry `"mode": "ro"`, and grip then connects with the client's own read-only switch:
+`PGOPTIONS=-c default_transaction_read_only=on` for postgres, a `SET SESSION TRANSACTION READ ONLY`
+merged into mysql's init command, `-readonly` for sqlite and duckdb. Grid editing is off, and the
+DDL commands (`:GripCreate`, `:GripDrop`, `:GripRename`, `:GripFill`, the sidebar's create/drop and
+the column operations) decline up front instead of prompting and failing at the server.
+
+Press `r` in the connection picker to connect in the opposite mode for this session only — the
+file is not modified.
+
+**This is a guard against accidents, not a security boundary.** Every one of those mechanisms is
+reversible from the query pad: `begin; set transaction read write; …` on postgres, and its
+equivalents elsewhere. If a connection must not be able to write, give it a database role that
+cannot — that is the boundary; `mode` is the seatbelt.
+
+Two more limits worth knowing:
+
+- If the postgres URL already carries its own `options=` parameter, that wins over `PGOPTIONS`, so
+  the session is not actually read-only even though grip shows it as `RO`.
+- `-readonly` is applied only to a database file that already exists. `duckdb::memory:` and a
+  not-yet-created sqlite file connect normally — the flag would abort the former outright and turn
+  "create it" into an error for the latter.
+
 ### Cross-database federation (DuckDB as hub)
 
 ```vim
