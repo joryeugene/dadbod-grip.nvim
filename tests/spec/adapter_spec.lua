@@ -685,6 +685,95 @@ test("duckdb query: http URL also triggers httpfs", function()
   end)
 end)
 
+-- ── DuckDB scanner extension install timeout ────────────────────────────────
+-- The ATTACH prefix carries "INSTALL <scanner>" into every query on an attached
+-- connection, and the first one has to fetch that extension from
+-- extensions.duckdb.org -- the same cost the httpfs block above already buys
+-- headroom for. Without it the fetch has to fit inside the 10s query timeout,
+-- which is what took CI's test (stable) down on the run for 010d91d: duckdb
+-- killed at 124, and 13 assertions failing about catalogs that were never
+-- attached. The headroom is deliberately not unconditional -- a warm INSTALL is
+-- a local no-op, and an unreachable database should still fail in 10s, not 60.
+
+test("duckdb query: a cold scanner INSTALL gets the network timeout", function()
+  duckdb._forget_installed_extensions()
+  local url = "duckdb:cold_scanner.db"
+  duckdb._attach_unchecked(url, "sqlite:legacy.db", "legacy")
+  with_executable(function()
+    local _, opts = capture_system_call("col\nval\n", function()
+      duckdb.query("SELECT * FROM legacy.orders", url)
+    end)
+    assert(opts.timeout >= 60000,
+      "a cold scanner fetch needs >= 60000, got " .. tostring(opts.timeout))
+  end)
+  duckdb.detach(url, "legacy")
+end)
+
+test("duckdb query: a scanner installed earlier this session keeps the default timeout", function()
+  duckdb._forget_installed_extensions()
+  local url = "duckdb:warm_scanner.db"
+  duckdb._attach_unchecked(url, "sqlite:legacy.db", "legacy")
+  with_executable(function()
+    -- Arrange: one clean exit, which is what marks the scanner installed.
+    capture_system_call("col\nval\n", function() duckdb.query("SELECT 1", url) end)
+    local _, opts = capture_system_call("col\nval\n", function()
+      duckdb.query("SELECT 1", url)
+    end)
+    eq(opts.timeout, 10000, "a warm scanner must not buy network headroom")
+  end)
+  duckdb.detach(url, "legacy")
+end)
+
+test("duckdb query: a query with no attachments keeps the default timeout", function()
+  duckdb._forget_installed_extensions()
+  with_executable(function()
+    local _, opts = capture_system_call("col\nval\n", function()
+      duckdb.query("SELECT 1", "duckdb::memory:")
+    end)
+    eq(opts.timeout, 10000, "an unattached query has no INSTALL to wait for")
+  end)
+end)
+
+test("duckdb query: a scanner whose query failed keeps the network timeout next time", function()
+  duckdb._forget_installed_extensions()
+  local url = "duckdb:failed_scanner.db"
+  duckdb._attach_unchecked(url, "postgres:dbname=sales", "pg")
+  with_executable(function()
+    -- A non-zero exit says nothing about whether the fetch got through, so it
+    -- must not be remembered as an install that succeeded.
+    with_system_mock("", 'Extension "postgres_scanner" not found', 1, function()
+      duckdb.query("SELECT 1", url)
+    end)
+    local _, opts = capture_system_call("col\nval\n", function()
+      duckdb.query("SELECT 1", url)
+    end)
+    assert(opts.timeout >= 60000,
+      "a failed install must not count as installed, got " .. tostring(opts.timeout))
+  end)
+  duckdb.detach(url, "pg")
+end)
+
+test("duckdb attach: validating a scanner-backed DSN gets the network timeout", function()
+  duckdb._forget_installed_extensions()
+  local url = "duckdb:attach_scanner.db"
+  local _, opts = capture_system_call("42\n", function()
+    duckdb.attach(url, "md:cloud_db", "cloud")
+  end)
+  assert(opts.timeout >= 60000,
+    "attach validation runs the very first INSTALL, got " .. tostring(opts.timeout))
+  duckdb.detach(url, "cloud")
+end)
+
+test("duckdb attach: a DSN with no scanner keeps the default validation timeout", function()
+  duckdb._forget_installed_extensions()
+  local url = "duckdb:attach_plain.db"
+  local _, opts = capture_system_call("42\n", function()
+    duckdb.attach(url, "/tmp/plain.duckdb", "plain")
+  end)
+  eq(opts.timeout, 10000, "no scanner means no fetch to wait for")
+  duckdb.detach(url, "plain")
+end)
+
 -- ── SQLite get_constraints ───────────────────────────────────────────────────
 
 test("sqlite get_constraints: queries sqlite_master with table name", function()
@@ -1140,6 +1229,23 @@ for _, case in ipairs(BATCH_ARGV_CASES) do
     eq_argv(async_argv, sync_argv, case.name .. " async argv must match sync argv")
   end)
 end
+
+-- Lives here rather than beside the other scanner-timeout tests because it needs
+-- await_batch. The pre-warm path prepends the same ATTACH prefix, so it pays the
+-- same one-off extension fetch -- and it starts from a *shorter* budget than a
+-- foreground query, so without the headroom it is the first thing to time out on
+-- a cold connection.
+test("duckdb get_schema_batch_async: a cold scanner INSTALL gets the network timeout", function()
+  duckdb._forget_installed_extensions()
+  local url = "duckdb:async_scanner.db"
+  duckdb._attach_unchecked(url, "sqlite:legacy.db", "legacy")
+  local _, opts = capture_system_call("", function()
+    await_batch(function(cb) duckdb.get_schema_batch_async(url, cb) end)
+  end)
+  assert(opts.timeout >= 60000,
+    "the pre-warm path pays the same fetch, got " .. tostring(opts.timeout))
+  duckdb.detach(url, "legacy")
+end)
 
 -- Adapters must not silently lose the async variant: warm_schema is a no-op
 -- without it, which is exactly the regression this section exists to prevent.

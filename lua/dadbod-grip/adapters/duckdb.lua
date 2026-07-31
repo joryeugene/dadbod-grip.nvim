@@ -10,12 +10,21 @@ local esc      = sql_util.escape_literal
 local M = {}
 
 local DEFAULT_TIMEOUT = 10000
-local HTTP_TIMEOUT    = 60000
+--- Budget for a CLI call that may have to reach the network before it can answer:
+--- an httpfs query fetching the remote file, or a first-use INSTALL fetching a
+--- scanner extension from extensions.duckdb.org. Both are the same shape of cost,
+--- and neither fits in DEFAULT_TIMEOUT on a cold cache.
+local NETWORK_TIMEOUT = 60000
 
 --- Track whether httpfs has been loaded in this Neovim session.
 --- INSTALL is only needed once; after that LOAD suffices.
 --- Reset to nil if an httpfs error occurs so the next query retries INSTALL.
 local _httpfs_state = nil  -- nil = unknown, "installed" = ready, "failed" = unavailable
+
+--- Scanner extensions whose INSTALL has already come back clean this session:
+--- extension name -> true. Only read to decide a timeout, never to change the
+--- SQL -- see attach_install_pending().
+local _installed_ext = {}
 
 --- Attachment registry: url -> { {dsn, alias, extension}, ... }
 --- Populated by M.attach(), persisted via connections.lua.
@@ -201,6 +210,29 @@ local function build_attach_prefix(url)
   return table.concat(parts, "\n") .. "\n"
 end
 
+--- True when the INSTALL statements build_attach_prefix() just emitted may still
+--- have to fetch something. The prefix always carries them -- a warm INSTALL is a
+--- local no-op, so there is no reason to vary the SQL -- but the first one per
+--- extension is a download, and that is the only case worth widening the timeout
+--- for. Keeping it conditional is what stops an unreachable attached database
+--- from taking NETWORK_TIMEOUT to report itself on every single query.
+local function attach_install_pending(url)
+  for _, a in ipairs(_attachments[url] or {}) do
+    if a.extension and not _installed_ext[a.extension] then return true end
+  end
+  return false
+end
+
+--- Record the extensions a finished call had in its prefix as installed.
+--- Only a clean exit counts: a non-zero code can mean the fetch itself failed,
+--- and remembering that as installed would cost the retry its headroom.
+local function note_ext_installed(url, code)
+  if code ~= 0 then return end
+  for _, a in ipairs(_attachments[url] or {}) do
+    if a.extension then _installed_ext[a.extension] = true end
+  end
+end
+
 --- Extract file path from dadbod's duckdb: URL format.
 --- "duckdb:path/to/db.duckdb"    -> "path/to/db.duckdb"
 --- "duckdb:/absolute/path.db"    -> "/absolute/path.db"
@@ -308,6 +340,9 @@ local function duckdb(db_path, sql_str, timeout_ms, url)
   -- Prepend ATTACH statements for cross-database federation
   if url then
     effective_sql = build_attach_prefix(url) .. effective_sql
+    if attach_install_pending(url) then
+      effective_timeout = math.max(effective_timeout, NETWORK_TIMEOUT)
+    end
   end
 
   if sql_str:find("https?://") then
@@ -319,7 +354,7 @@ local function duckdb(db_path, sql_str, timeout_ms, url)
       prefix = "INSTALL httpfs; LOAD httpfs;\n"
     end
     effective_sql = prefix .. effective_sql
-    effective_timeout = math.max(effective_timeout, HTTP_TIMEOUT)
+    effective_timeout = math.max(effective_timeout, NETWORK_TIMEOUT)
   end
 
   local args = duckdb_args(db_path, adapters.session_opts(), { "-csv", "-header" })
@@ -336,6 +371,8 @@ local function duckdb(db_path, sql_str, timeout_ms, url)
       _httpfs_state = "installed"
     end
   end
+
+  if url then note_ext_installed(url, code) end
 
   -- The ATTACH prefix carried the attachment DSNs into this process; a failing
   -- attachment gets them quoted back. Masked here rather than at each of the
@@ -364,11 +401,17 @@ end
 --- from the main Neovim loop via vim.schedule. Used for schema pre-warming.
 local function duckdb_async(db_path, sql_str, timeout_ms, url, callback)
   local effective_sql = url and (build_attach_prefix(url) .. sql_str) or sql_str
+  local effective_timeout = timeout_ms or 8000
+  -- Same one-off extension fetch as in duckdb(), from a shorter starting budget.
+  if url and attach_install_pending(url) then
+    effective_timeout = math.max(effective_timeout, NETWORK_TIMEOUT)
+  end
   local args = duckdb_args(db_path, adapters.session_opts(), { "-csv", "-header" })
   args[#args + 1] = "-c"
   args[#args + 1] = effective_sql
-  vim.system(args, { text = true, timeout = timeout_ms or 8000 }, function(out)
+  vim.system(args, { text = true, timeout = effective_timeout }, function(out)
     vim.schedule(function()
+      if url then note_ext_installed(url, out.code) end
       -- Same reason as in duckdb(): the ATTACH prefix is in this SQL.
       callback(out.stdout or "", redact_query_error(out.stderr or "", url), out.code)
     end)
@@ -378,8 +421,14 @@ end
 --- Run DML without CSV mode (to get change count output).
 local function duckdb_exec(db_path, sql_str, timeout_ms, url)
   local effective_sql = sql_str
+  local effective_timeout = timeout_ms or DEFAULT_TIMEOUT
   if url then
     effective_sql = build_attach_prefix(url) .. effective_sql
+    -- Same one-off extension fetch as in duckdb(): a DML statement against an
+    -- attached table is as likely to be the first call of the session as a SELECT.
+    if attach_install_pending(url) then
+      effective_timeout = math.max(effective_timeout, NETWORK_TIMEOUT)
+    end
   end
 
   local args = duckdb_args(db_path, adapters.session_opts())
@@ -387,7 +436,8 @@ local function duckdb_exec(db_path, sql_str, timeout_ms, url)
   args[#args + 1] = effective_sql
 
   -- Same reason as in duckdb(): the ATTACH prefix is in this SQL.
-  local stdout, stderr, code = adapters.run_cmd(args, timeout_ms or DEFAULT_TIMEOUT)
+  local stdout, stderr, code = adapters.run_cmd(args, effective_timeout)
+  if url then note_ext_installed(url, code) end
   return stdout, redact_query_error(stderr, url), code
 end
 
@@ -1113,8 +1163,14 @@ function M.attach(url, dsn, alias, template)
   -- Validate: try the ATTACH before storing (a broken attachment kills all queries)
   local ext = detect_extension(dsn)
   local test_sql = ""
+  local timeout = DEFAULT_TIMEOUT
   if ext then
     test_sql = string.format("INSTALL %s; LOAD %s;\n", ext, ext)
+    -- This is the first INSTALL of the scanner in most sessions -- the attachment
+    -- has to exist before any query can carry the prefix -- so this is the call
+    -- most likely to be paying for the download. Validation that times out at 10s
+    -- rejects a perfectly good DSN with "Failed to attach database".
+    if not _installed_ext[ext] then timeout = NETWORK_TIMEOUT end
   end
   test_sql = test_sql .. string.format("ATTACH IF NOT EXISTS '%s' AS %s;\n", esc(dsn), alias)
   test_sql = test_sql .. "SELECT 42;"
@@ -1124,13 +1180,17 @@ function M.attach(url, dsn, alias, template)
   -- (both also open the same file), causing "Failed to lock file" on connection switch.
   local args = { "duckdb", "-c", test_sql }
 
-  local _, stderr_attach, code_attach = adapters.run_cmd(args, 10000)
+  local _, stderr_attach, code_attach = adapters.run_cmd(args, timeout)
   if code_attach ~= 0 then
     -- The DSN is in the SQL the CLI just rejected, so its stderr can quote
     -- the credentials straight back at us. Never return it raw.
     local msg = redact_attach_error(stderr_attach:gsub("%s+$", ""), dsn)
     return msg ~= "" and msg or "Failed to attach database"
   end
+
+  -- The validation call above ran the INSTALL and came back clean, so the queries
+  -- that follow do not have to budget for the fetch a second time.
+  if ext then _installed_ext[ext] = true end
 
   store_attachment(url, dsn, alias, template)
   -- warm_schema is NOT scheduled here: the caller (connections.switch or GripAttach)
@@ -1317,5 +1377,9 @@ M._unsupported_attach_scheme = unsupported_attach_scheme
 M._make_schema_batch_sql = _make_schema_batch_sql
 M._main_catalog_name = main_catalog_name
 M._nested_json_sql = nested_json_sql
+--- Drop the record of which scanners are installed. Test-only: the timeout a
+--- query gets depends on that state, so a spec asserting on either branch has to
+--- be able to start from a cold session.
+M._forget_installed_extensions = function() _installed_ext = {} end
 
 return M
