@@ -119,6 +119,24 @@ https://host/data.parquet  ← remote file via httpfs
 duckdb::memory:            ← single-query scratch (tables don't persist between queries)
 ```
 
+Beyond `name` and `url`, what an entry can carry depends on where it lives:
+
+| field | `connections.json` | `g:dbs` |
+|-------|--------------------|---------|
+| `name`, `url` | yes | yes |
+| `type` | yes | no |
+| `env_file` | yes | no |
+| `mode` | yes | no |
+| `color` | yes | no |
+| `attachments` | yes | no |
+
+`g:dbs` is read as the vim-dadbod-ui format, so a `color` or `mode` written there is discarded on
+read — those belong in `.grip/connections.json` or `~/.grip/connections.json`.
+
+Sources are deduplicated by URL in this order: discovered Docker containers, project file, global
+file, `g:dbs`, `$DATABASE_URL`, `g:db`. The first hit wins and later duplicates are dropped whole,
+so an entry can keep its URL in `g:dbs` while its `color` and `mode` live in the JSON file.
+
 ### Keeping the password out of the connection file
 
 A connection entry can reference its password instead of storing it. Any `${NAME}` in the URL is
@@ -185,7 +203,7 @@ reversible from the query pad: `begin; set transaction read write; …` on postg
 equivalents elsewhere. If a connection must not be able to write, give it a database role that
 cannot — that is the boundary; `mode` is the seatbelt.
 
-Two more limits worth knowing:
+Three more limits worth knowing:
 
 - If the postgres URL already carries its own `options=` parameter, that wins over `PGOPTIONS`, so
   the session is not actually read-only even though grip shows it as `RO`. Connecting such an entry
@@ -194,6 +212,32 @@ Two more limits worth knowing:
 - `-readonly` is applied only to a database file that already exists. `duckdb::memory:` and a
   not-yet-created sqlite file connect normally — the flag would abort the former outright and turn
   "create it" into an error for the latter.
+- A connection pooler refuses the option outright. Pgbouncer-compatible poolers (DigitalOcean's
+  pooler port, for instance) reject unknown startup parameters, so `PGOPTIONS` does not degrade the
+  session — it fails the connection with `FATAL: unsupported startup parameter in options:
+  default_transaction_read_only`. Unlike the two limits above, this is not an overstated `RO`
+  badge; there is no session at all. Point a `mode: "ro"` entry at the direct port rather than the
+  pooled one.
+
+### Colour-coding a connection
+
+An entry can carry `"color"`, and grip tints that connection's window borders, grid rules and
+schema sidebar title, so a red production connection does not look like a green local one:
+
+```json
+{ "name": "prod", "url": "postgresql://…", "mode": "ro", "color": "red" }
+```
+
+The value is one of `green`, `orange`, `red`, `blue`, `violet`, `yellow`, or a `#rrggbb` string.
+Every accent also carries a `ctermfg` — a hex value is approximated onto the nearest xterm palette
+entry — so none of this needs a truecolor terminal. An unknown value is ignored rather than raised.
+
+Three highlight groups carry it: `GripConnAccent`, `GripConnAccentBold` (the sidebar title), and
+`GripBorder`, which is *derived* from the accent. That derivation is what makes an entry without a
+`color` restore the default border instead of leaving the previous connection's tint behind. All
+three are redefined on every connection switch and re-applied whenever highlights are rebuilt, so
+they survive a `:colorscheme` change — and because they are redefined rather than merged, defining
+them yourself will not stick.
 
 ### Cross-database federation (DuckDB as hub)
 
