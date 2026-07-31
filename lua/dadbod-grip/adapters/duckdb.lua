@@ -29,6 +29,148 @@ local _catalog_cache = {}
 --- Forward declaration: body assigned after duckdb() is defined (Lua scoping).
 local get_catalog_set
 
+-- ── credential masking ────────────────────────────────────────────────────
+-- Defined up here, above everything that spawns the CLI, because every one of
+-- those paths carries an attachment DSN into DuckDB and can get it echoed
+-- back in stderr. See redact_query_error at the end of this block.
+
+--- Keys whose value is a credential in a "key=value ..." DSN.
+---
+--- Audited against the DSN dialects DuckDB's scanners actually accept rather
+--- than grown one entry at a time:
+---   * libpq (postgres_scanner) -- `password` and `sslpassword`, the client
+---     key passphrase. Deliberately NOT `passfile` or `sslkey`: those are
+---     paths, and masking a path only makes the error unactionable without
+---     protecting anything.
+---   * mysql_scanner and the other key=value dialects -- `passwd`, `pwd`.
+---   * token-bearing DSNs (MotherDuck, DuckDB secrets, object stores).
+local DSN_SECRET_KEYS = {
+  password = true, sslpassword = true, passwd = true, pwd = true,
+  token = true, motherduck_token = true, access_token = true,
+  auth_token = true, session_token = true,
+  api_key = true, apikey = true,
+  secret = true, secret_access_key = true,
+}
+
+--- Walk the `key=value` pairs of a libpq/DuckDB-style DSN, calling
+--- fn(key, raw_value) for each. `raw_value` is the span exactly as it appears
+--- in the DSN, backslash escapes included, because that is the form the CLI
+--- echoes back and therefore the form that has to be masked.
+---
+--- Not a gmatch("([%w_]+)=(%S+)"): libpq conninfo lets a value be quoted and
+--- contain spaces, and lets a quote inside a quoted value be backslash
+--- escaped. :GripAttach hands the DSN through verbatim (init.lua rejoins its
+--- argv with spaces), so both forms are two keystrokes away. A
+--- whitespace-terminated scan truncates `password='hun ter2'` to `'hun`, and
+--- a scan that stops at the first quote truncates `password='hun\'ter2'` to
+--- `hun\` -- both verified against DuckDB v1.5.5, which echoes the whole
+--- quoted value back.
+--- @param dsn string
+--- @param fn fun(key: string, raw_value: string)
+local function each_dsn_pair(dsn, fn)
+  local pos = 1
+  while pos <= #dsn do
+    local s, e, key = dsn:find("([%w_]+)=", pos)
+    if not s then return end
+    local quote = dsn:sub(e + 1, e + 1)
+    local value
+    if quote == "'" or quote == '"' then
+      -- Scan to the real closing quote, stepping over "\<any>" escapes.
+      local i = e + 2
+      while i <= #dsn do
+        local ch = dsn:sub(i, i)
+        if ch == "\\" then
+          i = i + 2
+        elseif ch == quote then
+          break
+        else
+          i = i + 1
+        end
+      end
+      -- Unterminated quote: the rest of the DSN is the value. Erring long is
+      -- the safe direction -- it can only mask more, never less.
+      value = dsn:sub(e + 2, math.min(i, #dsn + 1) - 1)
+      pos = i + 1
+    else
+      value = dsn:match("^%S*", e + 1) or ""
+      pos = e + 1 + #value
+    end
+    fn(key, value)
+    pos = math.max(pos, e + 1)
+  end
+end
+
+--- Strip the credentials of `dsn` out of a DuckDB error message.
+---
+--- The CLI echoes the DSN back in its own stderr, so a credentialed
+--- postgres/mysql/MotherDuck DSN reappears in the error text we hand to
+--- vim.notify(). What it echoes is NOT the string we passed, though: DuckDB
+--- v1.5.5 rewrites it first. "postgresql://u:pw@h/db" comes back as
+---
+---   IO Error: Cannot open file "<cwd>/postgresql:/u:pw@h/db": ...
+---
+--- -- one slash gone, the process cwd prepended -- and a "postgres:k=v ..."
+--- DSN comes back with the "postgres:" prefix stripped. So masking by
+--- whole-DSN substitution does not fire on the messages that actually occur.
+---
+--- This masks the credential *values* instead, wherever they appear and
+--- whatever surrounds them, which survives that rewriting as well as
+--- re-quoting, line-splitting and truncation:
+---   1. the password out of a URL-shaped DSN's authority (sql_util shares the
+---      last-"@" authority rule with redact_url and url_to_dsn);
+---   2. every `password=` / `token=`-style value of a key=value DSN --
+---      redact_url cannot see those at all, since a DuckDB DSN has no
+---      "user:pass@" run for it to match. Both the raw span and its
+---      backslash-unescaped form are masked, since which one the CLI echoes
+---      depends on how far into libpq the DSN got before it failed.
+---
+--- The message as a whole is deliberately NOT run through redact_url(): its
+--- doc comment warns that a free-form message can over-mask on an incidental
+--- "word:word@word". Working from the known secret material instead means a
+--- genuine diagnostic ("Extension not found") survives untouched.
+--- @param msg string
+--- @param dsn string|nil
+--- @return string
+local function redact_attach_error(msg, dsn)
+  if not dsn or dsn == "" then return msg end
+  local function mask(value)
+    if value and value ~= "" then
+      -- Function replacement, so a "%1" in a password is not expanded.
+      msg = msg:gsub(vim.pesc(value), function() return "***" end)
+    end
+  end
+  mask(sql_util.url_password(dsn))
+  each_dsn_pair(dsn, function(key, value)
+    if DSN_SECRET_KEYS[key:lower()] then
+      mask(value)
+      local unescaped = value:gsub("\\(.)", "%1")
+      if unescaped ~= value then mask(unescaped) end
+    end
+  end)
+  return msg
+end
+
+--- Strip the credentials of every DSN attached to `url` out of a DuckDB
+--- error message.
+---
+--- redact_attach_error only guards M.attach(). But build_attach_prefix() puts
+--- those same DSNs at the head of *every* query, so the moment an attached
+--- server becomes unreachable -- a restart, a dropped VPN -- the password
+--- comes back in the stderr of an ordinary SELECT and goes to vim.notify via
+--- view.lua. Applied inside the three functions that spawn the CLI with a
+--- prefix (duckdb, duckdb_async, duckdb_exec), so no individual error-return
+--- site has to remember.
+--- @param msg string|nil
+--- @param url string|nil
+--- @return string
+local function redact_query_error(msg, url)
+  if not msg or msg == "" or not url then return msg or "" end
+  for _, a in ipairs(_attachments[url] or {}) do
+    msg = redact_attach_error(msg, a.dsn)
+  end
+  return msg
+end
+
 --- Map DSN scheme prefix to the DuckDB extension that handles it.
 local function detect_extension(dsn)
   if dsn:find("^postgres:") or dsn:find("^postgresql:") then return "postgres_scanner" end
@@ -164,7 +306,10 @@ local function duckdb(db_path, sql_str, timeout_ms, url)
     end
   end
 
-  return stdout, stderr, code
+  -- The ATTACH prefix carried the attachment DSNs into this process; a failing
+  -- attachment gets them quoted back. Masked here rather than at each of the
+  -- ~15 places that return this stderr onwards.
+  return stdout, redact_query_error(stderr, url), code
 end
 
 --- Assigned here (after duckdb() is in scope) so the upvalue resolves correctly.
@@ -196,7 +341,8 @@ local function duckdb_async(db_path, sql_str, timeout_ms, url, callback)
   args[#args + 1] = effective_sql
   vim.system(args, { text = true, timeout = timeout_ms or 8000 }, function(out)
     vim.schedule(function()
-      callback(out.stdout or "", out.stderr or "", out.code)
+      -- Same reason as in duckdb(): the ATTACH prefix is in this SQL.
+      callback(out.stdout or "", redact_query_error(out.stderr or "", url), out.code)
     end)
   end)
 end
@@ -215,7 +361,9 @@ local function duckdb_exec(db_path, sql_str, timeout_ms, url)
   args[#args + 1] = "-c"
   args[#args + 1] = effective_sql
 
-  return adapters.run_cmd(args, timeout_ms or DEFAULT_TIMEOUT)
+  -- Same reason as in duckdb(): the ATTACH prefix is in this SQL.
+  local stdout, stderr, code = adapters.run_cmd(args, timeout_ms or DEFAULT_TIMEOUT)
+  return stdout, redact_query_error(stderr, url), code
 end
 
 --- Statement kinds a subquery can hold. Everything else -- DESCRIBE (db.describe_file
@@ -800,6 +948,30 @@ local function resolve_dsn_path(dsn)
   return prefix .. path
 end
 
+--- Split "user:pass@host:port/dbname" into its pieces, using the shared
+--- last-"@" authority rule from sql_util.
+---
+--- Emphatically NOT a `([^:@]+):?([^@]*)@([^:/]+)` pattern, which is what this
+--- used to be: that splits on the FIRST "@", so a perfectly legal password
+--- containing "@" ("P@ssw0rd") came out as password=P with the rest of the
+--- password stuffed into host=. Besides producing a DSN that cannot connect,
+--- it defeated redact_attach_error downstream -- the mask dutifully masked
+--- "P" and DuckDB echoed the remaining seven characters to the screen.
+--- @param rest string  everything after "scheme://"
+--- @return string|nil user
+--- @return string password  "" when absent
+--- @return string host
+--- @return string port  "" when absent
+--- @return string dbname  "" when absent
+local function split_url_rest(rest)
+  local authority = rest:match("^([^/]*)") or ""
+  local dbname = rest:match("^[^/]*/(.*)") or ""
+  local user, password, hostport = sql_util.split_authority(authority)
+  local host, port = hostport:match("^([^:]*):?(%d*)$")
+  if not host or host == "" then return nil end
+  return user, password or "", host, port or "", dbname
+end
+
 --- Convert a dadbod URL to a DuckDB ATTACH-compatible DSN.
 --- "postgresql://user:pass@host:port/dbname" -> "postgres:dbname=dbname user=user password=pass host=host port=port"
 --- "sqlite:path/to/db" -> "sqlite:path/to/db" (unchanged)
@@ -812,38 +984,37 @@ function M.url_to_dsn(url)
   -- so we match both schemes explicitly
   local pg_rest = url:match("^postgresql://(.+)") or url:match("^postgres://(.+)")
   if pg_rest then
-    -- With credentials: user:pass@host:port/db
-    local pg_user, pg_pass, pg_host, pg_port, pg_db =
-      pg_rest:match("^([^:@]+):?([^@]*)@([^:/]+):?(%d*)/?(.*)")
-    if pg_user then
-      local parts = { "postgres:dbname=" .. (pg_db ~= "" and pg_db or pg_user) }
-      table.insert(parts, "user=" .. pg_user)
-      if pg_pass ~= "" then table.insert(parts, "password=" .. pg_pass) end
+    local pg_user, pg_pass, pg_host, pg_port, pg_db = split_url_rest(pg_rest)
+    if pg_host then
+      -- With credentials: user[:pass]@host[:port]/db
+      if pg_user then
+        local parts = { "postgres:dbname=" .. (pg_db ~= "" and pg_db or pg_user) }
+        table.insert(parts, "user=" .. pg_user)
+        if pg_pass ~= "" then table.insert(parts, "password=" .. pg_pass) end
+        table.insert(parts, "host=" .. pg_host)
+        if pg_port ~= "" then table.insert(parts, "port=" .. pg_port) end
+        return table.concat(parts, " ")
+      end
+      -- Without credentials: host:port/db
+      local parts = { "postgres:dbname=" .. (pg_db ~= "" and pg_db or "postgres") }
       table.insert(parts, "host=" .. pg_host)
       if pg_port ~= "" then table.insert(parts, "port=" .. pg_port) end
-      return table.concat(parts, " ")
-    end
-    -- Without credentials: host:port/db
-    local pg_host_only, pg_port_only, pg_db_only =
-      pg_rest:match("^([^:/]+):?(%d*)/?(.*)")
-    if pg_host_only then
-      local parts = { "postgres:dbname=" .. (pg_db_only ~= "" and pg_db_only or "postgres") }
-      table.insert(parts, "host=" .. pg_host_only)
-      if pg_port_only ~= "" then table.insert(parts, "port=" .. pg_port_only) end
       return table.concat(parts, " ")
     end
   end
 
   -- MySQL URL -> mysql_scanner DSN
-  local my_user, my_pass, my_host, my_port, my_db =
-    url:match("^mysql://([^:@]+):?([^@]*)@([^:/]+):?(%d*)/?(.*)")
-  if my_user then
-    local parts = { "mysql:host=" .. my_host }
-    table.insert(parts, "user=" .. my_user)
-    if my_pass ~= "" then table.insert(parts, "password=" .. my_pass) end
-    if my_db ~= "" then table.insert(parts, "database=" .. my_db) end
-    if my_port ~= "" then table.insert(parts, "port=" .. my_port) end
-    return table.concat(parts, " ")
+  local my_rest = url:match("^mysql://(.+)")
+  if my_rest then
+    local my_user, my_pass, my_host, my_port, my_db = split_url_rest(my_rest)
+    if my_user then
+      local parts = { "mysql:host=" .. my_host }
+      table.insert(parts, "user=" .. my_user)
+      if my_pass ~= "" then table.insert(parts, "password=" .. my_pass) end
+      if my_db ~= "" then table.insert(parts, "database=" .. my_db) end
+      if my_port ~= "" then table.insert(parts, "port=" .. my_port) end
+      return table.concat(parts, " ")
+    end
   end
 
   -- Fallback: return as-is
@@ -851,7 +1022,11 @@ function M.url_to_dsn(url)
 end
 
 --- Store an attachment without validation (used by tests and load_attachments).
-local function store_attachment(url, dsn, alias)
+--- `template` is the still-templated form of the DSN, when the caller
+--- resolved a "${VAR}" placeholder to build `dsn`. It is carried purely so
+--- connections.save_attachments() can write the placeholder back to disk
+--- instead of the expanded, password-bearing DSN; nothing here reads it.
+local function store_attachment(url, dsn, alias, template)
   dsn = resolve_dsn_path(dsn)
   local ext = detect_extension(dsn)
   _attachments[url] = _attachments[url] or {}
@@ -859,21 +1034,56 @@ local function store_attachment(url, dsn, alias)
     if a.alias == alias then
       a.dsn = dsn
       a.extension = ext
+      a.template = template
       _catalog_cache[url] = nil  -- attachment list changed; re-query on next use
       return
     end
   end
-  table.insert(_attachments[url], { dsn = dsn, alias = alias, extension = ext })
+  table.insert(_attachments[url], { dsn = dsn, alias = alias, extension = ext, template = template })
   _catalog_cache[url] = nil  -- attachment list changed; re-query on next use
+end
+
+
+--- URL schemes a DuckDB scanner can be pointed at. url_to_dsn() rewrites the
+--- postgres/mysql URL forms into scanner DSNs; sqlite/duckdb/motherduck URLs
+--- it hands through because ATTACH takes those as-is.
+local ATTACHABLE_SCHEMES = {
+  postgres = true, postgresql = true, mysql = true,
+  sqlite = true, duckdb = true, md = true, motherduck = true,
+}
+
+--- Reject a DSN whose scheme has no DuckDB scanner behind it, before it ever
+--- reaches the CLI. Returns an error string, or nil when the DSN is fine.
+---
+--- DuckDB does not fail such an ATTACH with "unknown scheme": it falls
+--- through to its file reader and reports `Cannot open file
+--- "<cwd>/sqlserver:/sa:hunter2@host/db"` -- an error that says nothing
+--- useful and quotes the credentials back. The picker offers `a:attach` on
+--- every non-DuckDB connection (SQL Server included) and :GripAttach takes
+--- whatever is typed, so this is two keystrokes away; catching it here keeps
+--- both paths honest. The message names only the scheme -- never the DSN.
+--- @param dsn string
+--- @return string|nil err
+local function unsupported_attach_scheme(dsn)
+  local scheme = dsn:match("^(%a[%w%+%.%-]*)://")
+  if not scheme or ATTACHABLE_SCHEMES[scheme:lower()] then return nil end
+  return string.format(
+    "DuckDB has no scanner for %s:// -- it cannot ATTACH that database. "
+    .. "Attachable: postgres, mysql, sqlite, motherduck.", scheme)
 end
 
 --- Attach an external database to a DuckDB session.
 --- Validates the connection before storing. Returns nil on success, error string on failure.
 --- The attachment is prepended to every query via build_attach_prefix().
-function M.attach(url, dsn, alias)
+--- `url` and `dsn` must both already be expanded (callers of this function
+--- bypass db.resolve()); `template` is the pre-expansion DSN, kept only so
+--- the placeholder is what gets persisted. See store_attachment().
+function M.attach(url, dsn, alias, template)
   dsn = resolve_dsn_path(dsn)
   local db_path = extract_path(url)
   if not db_path then return "Invalid DuckDB URL" end
+  local scheme_err = unsupported_attach_scheme(dsn)
+  if scheme_err then return scheme_err end
 
   -- Validate: try the ATTACH before storing (a broken attachment kills all queries)
   local ext = detect_extension(dsn)
@@ -891,11 +1101,13 @@ function M.attach(url, dsn, alias)
 
   local _, stderr_attach, code_attach = adapters.run_cmd(args, 10000)
   if code_attach ~= 0 then
-    local msg = stderr_attach:gsub("%s+$", "")
+    -- The DSN is in the SQL the CLI just rejected, so its stderr can quote
+    -- the credentials straight back at us. Never return it raw.
+    local msg = redact_attach_error(stderr_attach:gsub("%s+$", ""), dsn)
     return msg ~= "" and msg or "Failed to attach database"
   end
 
-  store_attachment(url, dsn, alias)
+  store_attachment(url, dsn, alias, template)
   -- warm_schema is NOT scheduled here: the caller (connections.switch or GripAttach)
   -- is responsible, so only one async duckdb process opens the file after connect.
   return nil
@@ -922,6 +1134,8 @@ end
 --- Bulk-load attachments (called on connection switch from persisted data).
 --- Runs DSNs through url_to_dsn and validates each via M.attach().
 --- Skips attachments that fail validation (stale/unreachable).
+--- Each entry is { dsn, alias, template? }; connections.switch() has already
+--- resolved any "${VAR}" in dsn and put the original in template.
 function M.load_attachments(url, attachments)
   if not attachments or #attachments == 0 then
     _attachments[url] = nil
@@ -932,7 +1146,7 @@ function M.load_attachments(url, attachments)
   _catalog_cache[url] = nil
   for _, a in ipairs(attachments) do
     local dsn = M.url_to_dsn(a.dsn)
-    local err = M.attach(url, dsn, a.alias)
+    local err = M.attach(url, dsn, a.alias, a.template)
     if err then
       vim.notify(string.format("Skipped attachment '%s': %s", a.alias, err), vim.log.levels.WARN)
     end
@@ -1070,6 +1284,10 @@ M._extract_path = extract_path
 M._build_attach_prefix = build_attach_prefix
 M._detect_extension = detect_extension
 M._attach_unchecked = store_attachment
+M._redact_attach_error = redact_attach_error
+M._redact_query_error = redact_query_error
+M._dsn_secret_keys = DSN_SECRET_KEYS
+M._unsupported_attach_scheme = unsupported_attach_scheme
 M._make_schema_batch_sql = _make_schema_batch_sql
 M._main_catalog_name = main_catalog_name
 M._nested_json_sql = nested_json_sql

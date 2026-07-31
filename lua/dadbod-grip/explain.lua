@@ -7,8 +7,12 @@
 local M = {}
 
 --- Detect adapter type from connection URL.
+--- Resolves a "${VAR}" template first: parse_nodes gates every extraction on
+--- this value, so an unresolved template would silently return a plan with no
+--- cost, rows or time.
 function M.detect_adapter(url)
-  return require("dadbod-grip.adapters").kind(url) or "unknown"
+  local resolved = require("dadbod-grip.db").resolved_url(url)
+  return require("dadbod-grip.adapters").kind(resolved) or "unknown"
 end
 
 --- Parse EXPLAIN output into structured nodes.

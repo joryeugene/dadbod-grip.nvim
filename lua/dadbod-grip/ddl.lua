@@ -322,7 +322,12 @@ local function build_drop_sql(table_name, kind, has_referencing)
 end
 
 function M.drop_table(table_name, url, on_done)
-  local kind = adapters.kind(url)
+  -- Dialect decisions need the real scheme, so a "${DATABASE_URL}" template
+  -- has to be resolved first: a nil kind would silently drop CASCADE from the
+  -- generated SQL, discard every schema-qualified FK dependent below, and
+  -- print "This adapter doesn't support CASCADE" about PostgreSQL.
+  local dialect_url = db.resolved_url(url)
+  local kind = adapters.kind(dialect_url)
 
   -- Check for FK dependents: one query instead of a get_foreign_keys() spawn
   -- per other table in the schema (see filter_referencing above for the two
@@ -337,7 +342,7 @@ function M.drop_table(table_name, url, on_done)
   -- server error (or, on MySQL, a silently ignored keyword) after the fact.
   local note
   if has_referencing and not CASCADE_KINDS[kind] then
-    local name = adapters.display_name(url) or "This adapter"
+    local name = adapters.display_name(dialect_url) or "This adapter"
     note = name .. " doesn't support CASCADE: dependent foreign keys won't be"
       .. " dropped, so this may fail or leave dangling references."
   end

@@ -4,17 +4,23 @@
 
 local paths = require("dadbod-grip.paths")
 local ui = require("dadbod-grip.ui")
+local secrets = require("dadbod-grip.secrets")
 
 local M = {}
 
 -- Session-scoped connection health state (never persisted).
--- Values: "ok" | "fail" | "unknown" (default when absent)
+-- Values: "ok" | "fail" | "unresolved" | "unknown" (default when absent).
+-- "unresolved" is distinct from "fail": the connection was never attempted --
+-- its ${VAR} placeholder(s) couldn't be expanded (missing .env, still
+-- git-crypt-locked, renamed variable), so a scheme/network failure would be
+-- a meaningless report.
 local _health = {}
 
 local function health_char(url)
   local s = _health[url] or "unknown"
-  if s == "ok"   then return "*" end
-  if s == "fail" then return "x" end
+  if s == "ok"         then return "*" end
+  if s == "fail"       then return "x" end
+  if s == "unresolved" then return "?" end
   return " "
 end
 
@@ -182,6 +188,9 @@ local function read_json_connections(path, source)
                   type = entry.type, source = source or "file" }
       if entry.attachments then c.attachments = entry.attachments end
       if entry.last_used then c.last_used = entry.last_used end
+      if entry.env_file then c.env_file = entry.env_file end
+      if entry.mode then c.mode = entry.mode end
+      if entry.color then c.color = entry.color end
       table.insert(result, c)
     end
   end
@@ -213,6 +222,64 @@ local function read_file_connections()
   return result
 end
 
+-- ── secret expansion ──────────────────────────────────────────────────────
+
+--- Find the saved entry for a connection URL, or nil when the URL is not a
+--- saved connection (an ad-hoc :GripConnect URL, a g:dbs entry, ...).
+---
+--- Exists so db.lua can reach an entry's env_file without knowing where
+--- connections are stored. Deliberately reads the JSON files directly rather
+--- than going through M.list(): list() also runs Docker discovery, and this
+--- sits on the query path -- db.resolve() calls it for every templated URL.
+--- @param url string|nil
+--- @return table|nil entry
+function M.entry_for(url)
+  if type(url) ~= "string" or url == "" then return nil end
+  for _, c in ipairs(read_file_connections()) do
+    if c.url == url then return c end
+  end
+  return nil
+end
+
+--- Resolve the ${VAR} placeholders in a connection URL against the env_file
+--- of its saved entry (falling back to the process environment).
+---
+--- The expanded URL carries the live password, so it exists in exactly two
+--- kinds of place: the argv/env of the database CLI, and the local variable
+--- that got it there. vim.g.db, vim.b.db, connections.json and the query
+--- history all keep the *template* -- db.resolve() calls this at the single
+--- point where a URL is handed to an adapter, which is why no write path in
+--- the plugin can spill a secret. Do not push the expansion outward.
+---
+--- A URL with no placeholder is returned unchanged without touching the
+--- filesystem, so ordinary literal connections cost exactly what they did
+--- before.
+--- @param url string|nil
+--- @return string|nil expanded  nil only when expansion failed
+--- @return string|nil err
+function M.expand_url(url)
+  if type(url) ~= "string" or not secrets.has_template(url) then return url end
+  return secrets.expand(url, M.entry_for(url))
+end
+
+--- Resolve the ${VAR} placeholders in a persisted DuckDB attachment DSN.
+---
+--- Attachment DSNs are stored templated (see M.save_attachments), so the
+--- password of an attached postgres/mysql database never lands in
+--- connections.json either. Variables resolve against the attached
+--- connection's own entry when the stored string is itself a saved
+--- connection URL -- how the `a:attach` picker action stores it -- and
+--- otherwise against the entry of the DuckDB connection the attachment hangs
+--- off, which is what a DSN typed straight into :GripAttach gets.
+--- @param dsn string|nil
+--- @param host_url string|nil the DuckDB connection URL, as stored (templated)
+--- @return string|nil expanded
+--- @return string|nil err
+function M.expand_dsn(dsn, host_url)
+  if type(dsn) ~= "string" or not secrets.has_template(dsn) then return dsn end
+  return secrets.expand(dsn, M.entry_for(dsn) or M.entry_for(host_url))
+end
+
 --- Write connections to .grip/connections.json.
 --- Deduplicates by URL before writing, keeping the entry with the highest
 --- last_used timestamp. This self-heals files bloated by historical bugs.
@@ -236,6 +303,9 @@ local function write_file_connections(conns)
     if c.type then entry.type = c.type end
     if c.attachments and #c.attachments > 0 then entry.attachments = c.attachments end
     if c.last_used then entry.last_used = c.last_used end
+    if c.env_file then entry.env_file = c.env_file end
+    if c.mode then entry.mode = c.mode end
+    if c.color then entry.color = c.color end
     table.insert(data, entry)
   end
   local json = vim.fn.json_encode(data)
@@ -328,6 +398,9 @@ function M.list()
     for _, gc in ipairs(global_existing) do
       local gentry = { name = gc.name, url = gc.url }
       if gc.type then gentry.type = gc.type end
+      if gc.env_file then gentry.env_file = gc.env_file end
+      if gc.mode then gentry.mode = gc.mode end
+      if gc.color then gentry.color = gc.color end
       table.insert(gdata, gentry)
     end
     vim.fn.writefile({ vim.fn.json_encode(gdata) }, global_connections_path())
@@ -419,7 +492,7 @@ function M.set_health(url, status)
   _health[url] = status
 end
 
---- Return the current session health for a URL: "ok" | "fail" | "unknown".
+--- Return the current session health for a URL: "ok" | "fail" | "unresolved" | "unknown".
 function M.get_health(url)
   return _health[url] or "unknown"
 end
@@ -501,6 +574,19 @@ function M.switch(url, name, conn_type, opts)
   -- Strip session-only flags: they must never reach the connection registry
   url = strip_flags(url)
 
+  -- Resolve ${VAR} placeholders up front, before anything is mutated or
+  -- written: a connection whose .env is missing or still git-crypt-locked
+  -- must fail cleanly instead of leaving a half-switched session behind.
+  -- `url` itself stays the template -- that is what gets persisted, what
+  -- vim.g.db holds, and what every later lookup keys on. conn_url is only
+  -- needed by the DuckDB attachment paths below, which bypass db.resolve().
+  local conn_url, secret_err = M.expand_url(url)
+  if not conn_url then
+    vim.notify("Grip: " .. (secret_err or "could not resolve connection secrets"),
+      vim.log.levels.ERROR)
+    return
+  end
+
   -- Single read of the local file; everything below (type resolution,
   -- rename/insert, MRU touch) mutates this same in-memory list, and it is
   -- written back at most once at the end instead of once per mutation.
@@ -552,8 +638,12 @@ function M.switch(url, name, conn_type, opts)
     M.set_health(url, "ok")
     -- Compute the DuckDB connection that will actually run queries against this file.
     -- Mirrors the logic in init.lua so the query pad is wired to the same connection.
+    -- The scheme test needs the resolved URL (a whole-URL template hides it);
+    -- the pad is still bound to the template, which db.resolve() expands.
     local active = vim.g.db
-    local db_url = (active and active:match("^duckdb:")) and active or "duckdb::memory:"
+    local active_resolved = active and (M.expand_url(active) or active)
+    local db_url = (active_resolved and active_resolved:match("^duckdb:")) and active
+      or "duckdb::memory:"
     vim.schedule(function()
       -- No reuse_win: let find_content_win() place the grid correctly.
       -- Passing cur_win risks putting the grid in the sidebar if that window was focused.
@@ -580,7 +670,12 @@ function M.switch(url, name, conn_type, opts)
 
   -- Restore persisted attachments for DuckDB connections (local file only;
   -- attachments are always saved to local by M.save_attachments).
-  if url:find("^duckdb:") then
+  --
+  -- One of the four paths that bypass db.resolve(), so it expands by hand:
+  -- the adapter's attachment registry is keyed by the URL the adapter is
+  -- called with, which is the *expanded* one on every query, and the stored
+  -- DSNs are templates that only become connectable here.
+  if conn_url:find("^duckdb:") then
     local stored_atts
     for _, c in ipairs(local_conns) do
       if c.url == url and c.attachments then
@@ -589,7 +684,28 @@ function M.switch(url, name, conn_type, opts)
       end
     end
     if stored_atts then
-      require("dadbod-grip.adapters.duckdb").load_attachments(url, stored_atts)
+      local live_atts = {}
+      for _, a in ipairs(stored_atts) do
+        local stored_dsn = type(a) == "table" and a.dsn or nil
+        if type(stored_dsn) ~= "string" then
+          -- Nothing to expand: hand the record on exactly as it was read and
+          -- let load_attachments deal with whatever shape it is, as before.
+          table.insert(live_atts, a)
+        else
+          local dsn, dsn_err = M.expand_dsn(stored_dsn, url)
+          if dsn then
+            -- template is carried through so the next save_attachments()
+            -- writes the placeholder back, not what it resolved to.
+            table.insert(live_atts, {
+              dsn = dsn, alias = a.alias, template = dsn ~= stored_dsn and stored_dsn or nil,
+            })
+          else
+            vim.notify(string.format("Skipped attachment '%s': %s", a.alias, dsn_err),
+              vim.log.levels.WARN)
+          end
+        end
+      end
+      require("dadbod-grip.adapters.duckdb").load_attachments(conn_url, live_atts)
     end
   end
 
@@ -646,6 +762,16 @@ end
 
 --- Persist attachments for a DuckDB connection URL.
 --- Called after attach/detach to update .grip/connections.json.
+---
+--- `url` is the connection URL as stored (templated), since that is the key
+--- the entry lives under on disk; the live adapter registry is keyed by the
+--- expanded URL, so callers pass the two separately.
+---
+--- Each record is persisted as `a.template or a.dsn`: a live attachment
+--- record carries the expanded, password-bearing DSN, and writing that here
+--- would put the password on disk through a field nothing else covers. The
+--- template is resolved again on replay by M.switch/expand_dsn. Records with
+--- no template (a literal DSN) round-trip byte-identically, as before.
 function M.save_attachments(url, attachments)
   local file_conns = read_local_connections()
   local found = false
@@ -654,7 +780,7 @@ function M.save_attachments(url, attachments)
       c.attachments = attachments and #attachments > 0 and {} or nil
       if attachments then
         for _, a in ipairs(attachments) do
-          table.insert(c.attachments, { dsn = a.dsn, alias = a.alias })
+          table.insert(c.attachments, { dsn = a.template or a.dsn, alias = a.alias })
         end
       end
       found = true
@@ -912,18 +1038,39 @@ function M.pick(opts)
         close_on_select = true,
         when           = function(c)
           if c._new or c._temp or c._section_header or c._local_file then return false end
-          -- Show on non-DuckDB connections when current connection is DuckDB
+          -- Show on non-DuckDB connections when current connection is DuckDB.
+          -- Both URLs are resolved first: a whole-URL template hides the
+          -- scheme, and without this the action is hidden on a templated
+          -- DuckDB connection even though its fn below handles one.
           local cur = vim.g.db
-          return cur and cur:find("^duckdb:") and not c.url:find("^duckdb:")
+          cur = cur and (M.expand_url(cur) or cur)
+          local target = M.expand_url(c.url) or c.url
+          if not (cur and cur:find("^duckdb:")) or target:find("^duckdb:") then return false end
+          -- Hide it outright for databases DuckDB has no scanner for (SQL
+          -- Server, Oracle, ...) rather than offering an action that can only
+          -- fail. M.attach refuses those too, for the :GripAttach path.
+          local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
+          return duckdb_adapter._unsupported_attach_scheme(duckdb_adapter.url_to_dsn(target)) == nil
         end,
         fn             = function(c)
           if c._new or c._temp or c._section_header or c._local_file then return end
           -- Guard: grip_picker fires fn regardless of `when` predicate label
+          -- url is the active connection as stored (templated: the key on
+          -- disk); conn_url is what the adapter registry is keyed by. One of
+          -- the four paths that bypass db.resolve(), so both the DuckDB URL
+          -- and the target's URL are expanded by hand here.
           local url = vim.g.db
-          if not url or not url:find("^duckdb:") then
+          local conn_url = M.expand_url(url)
+          if not conn_url or not conn_url:find("^duckdb:") then
             vim.notify(
               "Attach requires an active DuckDB connection. Switch to DuckDB with gc first.",
               vim.log.levels.WARN)
+            return
+          end
+          local target_url, target_err = M.expand_url(c.url)
+          if not target_url then
+            vim.notify("Attach failed: " .. (target_err or "unresolved connection secrets"),
+              vim.log.levels.ERROR)
             return
           end
           local default_alias = c.name:lower():gsub("[^%w_]", "_"):gsub("_+", "_"):gsub("^_", ""):gsub("_$", "")
@@ -931,13 +1078,17 @@ function M.pick(opts)
           if not alias then return end
           local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
           local schema_mod = require("dadbod-grip.schema")
-          local dsn = duckdb_adapter.url_to_dsn(c.url)
-          local err = duckdb_adapter.attach(url, dsn, alias)
+          local dsn = duckdb_adapter.url_to_dsn(target_url)
+          -- Persist the connection's own URL template, not the DSN derived
+          -- from it: M.expand_dsn() finds this entry's env_file by that URL,
+          -- and load_attachments() runs url_to_dsn() again on replay.
+          local template = target_url ~= c.url and c.url or nil
+          local err = duckdb_adapter.attach(conn_url, dsn, alias, template)
           if err then
             vim.notify("Attach failed: " .. err, vim.log.levels.ERROR)
             return
           end
-          M.save_attachments(url, duckdb_adapter.get_attachments(url))
+          M.save_attachments(url, duckdb_adapter.get_attachments(conn_url))
           schema_mod.refresh(url)
           vim.notify(string.format("Attached '%s' as %s", c.name, alias), vim.log.levels.INFO)
         end,
@@ -950,11 +1101,25 @@ function M.pick(opts)
         when  = function(c) return not (c._new or c._temp or c._section_header) end,
         fn    = function(c)
           if c._new or c._temp or c._section_header then return end
-          if is_testable_locally(c) then
-            local path = extract_local_path(c.url)
+          -- A templated entry must report *why* it can't be tested, not a
+          -- meaningless "Unsupported database scheme: ${VAR}" from handing
+          -- the literal placeholder to the adapter.
+          local conn_url, secret_err = M.expand_url(c.url)
+          if not conn_url then
+            M.set_health(c.url, "unresolved")
+            vim.notify("Grip: " .. (secret_err or "could not resolve connection secrets"),
+              vim.log.levels.ERROR)
+            return
+          end
+          -- Scheme detection (is_testable_locally) needs the resolved URL for
+          -- a whole-URL template, same reasoning as a:attach above.
+          local test_target = conn_url == c.url and c
+            or vim.tbl_extend("force", {}, c, { url = conn_url })
+          if is_testable_locally(test_target) then
+            local path = extract_local_path(conn_url)
             M.set_health(c.url, vim.fn.filereadable(path) == 1 and "ok" or "fail")
           else
-            local ok = require("dadbod-grip.db").ping(c.url)
+            local ok = require("dadbod-grip.db").ping(conn_url)
             M.set_health(c.url, ok and "ok" or "fail")
           end
         end,
@@ -982,11 +1147,16 @@ function M.pick(opts)
               return
             end
           end
-          table.insert(global_conns, { name = c.name, url = c.url })
+          local promoted = { name = c.name, url = c.url, type = c.type,
+                              env_file = c.env_file, mode = c.mode, color = c.color }
+          table.insert(global_conns, promoted)
           local gdata = {}
           for _, gc in ipairs(global_conns) do
             local entry = { name = gc.name, url = gc.url }
             if gc.type then entry.type = gc.type end
+            if gc.env_file then entry.env_file = gc.env_file end
+            if gc.mode then entry.mode = gc.mode end
+            if gc.color then entry.color = gc.color end
             table.insert(gdata, entry)
           end
           vim.fn.writefile({ vim.fn.json_encode(gdata) }, global_path)

@@ -242,8 +242,11 @@ function M.build_schema_context(url, question)
   local tables = db.list_tables(url)
   if not tables then return "", "unknown" end
 
-  -- Detect adapter name (generic "SQL" when no adapter claims the scheme)
-  local adapter_name = require("dadbod-grip.adapters").display_name(url) or "SQL"
+  -- Detect adapter name (generic "SQL" when no adapter claims the scheme).
+  -- A "${VAR}" template is resolved first: this name goes into the LLM prompt
+  -- as the target dialect, and the SQL that comes back is run.
+  local adapter_name = require("dadbod-grip.adapters")
+    .display_name(db.resolved_url(url)) or "SQL"
 
   -- Extract table names (adapters return different formats)
   local table_names = {}

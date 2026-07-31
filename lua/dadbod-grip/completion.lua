@@ -364,7 +364,10 @@ function M.complete(before, url, aliases)
       if not found_in_cache then
         local ok, duckdb = pcall(require, "dadbod-grip.adapters.duckdb")
         if ok then
-          local atts = duckdb.get_attachments(url)
+          -- The attachment registry is keyed by the expanded URL (that is
+          -- what db.resolve hands the adapter on every query), while `url`
+          -- here is vim.b.db/vim.g.db -- the template.
+          local atts = duckdb.get_attachments(require("dadbod-grip.db").resolved_url(url))
           for _, att in ipairs(atts) do
             if att.alias == q then
               local db = require("dadbod-grip.db")

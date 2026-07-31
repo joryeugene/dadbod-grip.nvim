@@ -72,6 +72,56 @@ function M.split_table_name(table_name, default_schema)
   return M.unquote_ident(schema), M.unquote_ident(tbl)
 end
 
+--- Split a URL authority ("user:password@host:port") into its three parts.
+--- `user` is nil when there is no "@" at all; `password` is nil when the
+--- userinfo carries no ":". `host` is always the remainder.
+---
+--- The split is on the LAST "@", mirroring parse_dadbod_url's own rule below:
+--- a password may itself contain "@", and splitting on the first one would
+--- leave the rest of the password — everything between that first "@" and the
+--- real one before the host — outside whatever the caller does with it. That
+--- is not academic: adapters/duckdb.lua's url_to_dsn used to split on the
+--- first "@" and put the tail of the password into host=, which then defeated
+--- the ATTACH-error mask downstream.
+---
+--- The single copy of that rule: redact_url, url_password and url_to_dsn all
+--- go through here.
+--- @param authority string
+--- @return string|nil user
+--- @return string|nil password
+--- @return string host
+local function split_authority(authority)
+  local at = nil
+  for i = #authority, 1, -1 do
+    if authority:sub(i, i) == "@" then at = i; break end
+  end
+  if not at then return nil, nil, authority end
+  local userinfo, host = authority:sub(1, at - 1), authority:sub(at + 1)
+  local colon = userinfo:find(":", 1, true)
+  if not colon then return userinfo, nil, host end
+  return userinfo:sub(1, colon - 1), userinfo:sub(colon + 1), host
+end
+M.split_authority = split_authority
+
+--- The password out of a URL's authority, or nil when there is none.
+---
+--- For callers that must scrub a password out of text they did not build —
+--- a CLI's own stderr, say, which may have rewritten the URL past
+--- recognition. redact_url() is the wrong tool there: it rewrites a URL it
+--- can still see, whereas masking the *value* survives re-quoting,
+--- truncation, percent-decoding and path-prefixing. See
+--- adapters/duckdb.lua's redact_attach_error for the case that forced it.
+--- @param url string|nil
+--- @return string|nil password
+function M.url_password(url)
+  if type(url) ~= "string" then return nil end
+  local authority = url:match("://([^/]*)")
+  if not authority then return nil end
+  local _, password = split_authority(authority)
+  if password == nil or password == "" then return nil end
+  return password
+end
+
 --- Mask the password in a connection URL for display in logs, errors, notifications.
 --- The authority component is captured up to the next "/" (so this never
 --- reaches into the path or query — a "/" always ends the search). Inside
@@ -99,15 +149,10 @@ function M.redact_url(url)
   if not url then return "" end
   if url:find("://", 1, true) then
     return (url:gsub("://([^/]*)", function(authority)
-      local at = nil
-      for i = #authority, 1, -1 do
-        if authority:sub(i, i) == "@" then at = i; break end
-      end
-      if not at then return "://" .. authority end
-      local userpass, host = authority:sub(1, at - 1), authority:sub(at + 1)
-      local colon = userpass:find(":", 1, true)
-      if not colon then return "://" .. authority end
-      return "://" .. userpass:sub(1, colon - 1) .. ":***@" .. host
+      local user, password, host = split_authority(authority)
+      -- No "@", or no ":" in the userinfo: nothing that is a password.
+      if not user or not password then return "://" .. authority end
+      return "://" .. user .. ":***@" .. host
     end))
   end
   return (url:gsub("([^:/@%s]+):([^@%s]*)@", "%1:***@"))

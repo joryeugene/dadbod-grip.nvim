@@ -933,8 +933,12 @@ function M.open(arg, url, opts)
   -- File-as-table: use the active DuckDB connection so ATTACHed databases
   -- remain accessible. Fall back to duckdb::memory: when no DuckDB session exists.
   if file_path then
+    -- The scheme test needs the resolved URL (a whole-URL template hides it),
+    -- but `conn` stays the template: everything downstream of here expands via
+    -- db.resolve(), and history/view must not record the expansion.
     local active = vim.g.db
-    conn = (active and active:match("^duckdb:")) and active or "duckdb::memory:"
+    local resolved = db.resolved_url(active)
+    conn = (resolved and resolved:match("^duckdb:")) and active or "duckdb::memory:"
   end
 
   if not conn or conn == "" then
@@ -2015,8 +2019,13 @@ function M.setup(opts)
     local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
     local schema_mod = require("dadbod-grip.schema")
 
+    -- url is the active connection as stored (templated: the key its entry
+    -- lives under in connections.json); conn_url is the expanded form the
+    -- adapter's attachment registry is keyed by. This command bypasses
+    -- db.resolve(), so it expands by hand.
     local url = vim.g.db
-    if not url or not url:find("^duckdb:") then
+    local conn_url = connections.expand_url(url)
+    if not conn_url or not conn_url:find("^duckdb:") then
       vim.notify("GripAttach: requires a DuckDB connection. Use :GripConnect to switch.", vim.log.levels.WARN)
       return
     end
@@ -2035,12 +2044,19 @@ function M.setup(opts)
       alias = a
     end
 
-    local err = duckdb_adapter.attach(url, dsn, alias)
+    -- A hand-typed DSN may reference ${VAR} too; resolve it against the
+    -- active connection's env_file and keep the placeholder for persistence.
+    local live_dsn, dsn_err = connections.expand_dsn(dsn, url)
+    if not live_dsn then
+      vim.notify("GripAttach: " .. (dsn_err or "unresolved secrets in DSN"), vim.log.levels.ERROR)
+      return
+    end
+    local err = duckdb_adapter.attach(conn_url, live_dsn, alias, live_dsn ~= dsn and dsn or nil)
     if err then
       vim.notify("GripAttach: " .. err, vim.log.levels.ERROR)
       return
     end
-    connections.save_attachments(url, duckdb_adapter.get_attachments(url))
+    connections.save_attachments(url, duckdb_adapter.get_attachments(conn_url))
     require("dadbod-grip.completion").invalidate(url)
     schema_mod.refresh(url)
     -- Pre-warm completion cache after manual attach (M.attach no longer does this).
@@ -2059,15 +2075,17 @@ function M.setup(opts)
     local duckdb_adapter = require("dadbod-grip.adapters.duckdb")
     local schema_mod = require("dadbod-grip.schema")
 
+    -- Same template/expanded split as :GripAttach above.
     local url = vim.g.db
-    if not url or not url:find("^duckdb:") then
+    local conn_url = connections.expand_url(url)
+    if not conn_url or not conn_url:find("^duckdb:") then
       vim.notify("GripDetach: requires a DuckDB connection.", vim.log.levels.WARN)
       return
     end
 
     local alias = vim.trim(cmd_opts.args or "")
     if alias == "" then
-      local atts = duckdb_adapter.get_attachments(url)
+      local atts = duckdb_adapter.get_attachments(conn_url)
       if #atts == 0 then
         vim.notify("GripDetach: no databases attached.", vim.log.levels.INFO)
         return
@@ -2079,8 +2097,8 @@ function M.setup(opts)
       alias = val
     end
 
-    duckdb_adapter.detach(url, alias)
-    connections.save_attachments(url, duckdb_adapter.get_attachments(url))
+    duckdb_adapter.detach(conn_url, alias)
+    connections.save_attachments(url, duckdb_adapter.get_attachments(conn_url))
     require("dadbod-grip.completion").invalidate(url)
     schema_mod.refresh(url)
     vim.notify(string.format("Detached '%s'", alias), vim.log.levels.INFO)
@@ -2285,8 +2303,10 @@ function M.do_fill_rows(n)
   local ddl     = ai_mod._format_ddl_line(tbl, cols or {}, pks or {}, fks)
 
   -- Detect adapter for value-format hints. SQLite stays the fallback for
-  -- URLs no adapter claims (its value syntax is the most permissive).
-  local adapter = require("dadbod-grip.adapters").display_name(db_url) or "SQLite"
+  -- URLs no adapter claims (its value syntax is the most permissive) -- which
+  -- is why a "${VAR}" template is resolved first: the generated rows are
+  -- executed, so falling back to the wrong dialect is not a cosmetic miss.
+  local adapter = require("dadbod-grip.adapters").display_name(db_mod.resolved_url(db_url)) or "SQLite"
 
   ui.blocking("Generating " .. n .. " row(s)...", function()
     local done = false

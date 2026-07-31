@@ -3,6 +3,7 @@
 -- All functions return (result, err). Never throw.
 
 local adapters = require("dadbod-grip.adapters")
+local secrets = require("dadbod-grip.secrets")
 local esc = require("dadbod-grip.sql").escape_literal
 
 local M = {}
@@ -17,6 +18,24 @@ function M.get_url(url)
   local global_url = vim.g.db
   if type(global_url) == "string" and global_url ~= "" then return global_url end
   return nil, "No database connection. Use :GripConnect or set vim.g.db."
+end
+
+--- The connectable form of a URL, for callers that need its *scheme* rather
+--- than a connection: adapters.kind() / display_name() dispatch on the
+--- scheme, and a whole-URL template ("${DATABASE_URL}") has none to dispatch
+--- on. Getting nil back there is not cosmetic -- it silently drops CASCADE
+--- from generated DDL, discards FK dependents, degrades Query Doctor, and
+--- feeds the wrong dialect to the LLM.
+---
+--- Best-effort by design: an unresolvable template comes back unchanged, so
+--- those callers degrade to exactly what they did before this feature instead
+--- of erroring. Anything that actually opens a connection must go through the
+--- db.* API, where resolve() surfaces the expansion error.
+--- @param url string|nil
+--- @return string|nil
+function M.resolved_url(url)
+  if type(url) ~= "string" or not secrets.has_template(url) then return url end
+  return (require("dadbod-grip.connections").expand_url(url)) or url
 end
 
 --- Group flat referencing-FK rows into one entry per constraint.
@@ -212,9 +231,32 @@ end
 
 -- ── resolve adapter from URL ──────────────────────────────────────────────
 
+--- Pick the adapter for a URL and turn that URL into a connectable one.
+---
+--- Every public db.* function funnels through here, which makes this the one
+--- and only place where a "${VAR}" template becomes a real URL carrying a
+--- real password. vim.g.db, vim.b.db, .grip/connections.json and the query
+--- history all keep the template, so no write path anywhere in the plugin is
+--- ever handed a secret it could spill -- not because each of them scrubs,
+--- but because none of them ever holds one. Keep it that way: expanding
+--- further out (in M.get_url, in connections.switch, in a caller) puts the
+--- password back into everything downstream of it.
+---
+--- The has_template() check comes first so a literal URL -- the overwhelming
+--- majority -- does not even load connections.lua, let alone read a file.
+--- @return table|nil adapter
+--- @return string|nil conn  the expanded URL to hand the adapter
+--- @return string|nil err
 local function resolve(url)
   local conn, conn_err = M.get_url(url)
   if not conn then return nil, nil, conn_err end
+  if secrets.has_template(conn) then
+    -- Lazy require: connections.lua pulls in the UI stack, and db.lua is
+    -- loaded by every adapter.
+    local expanded, exp_err = require("dadbod-grip.connections").expand_url(conn)
+    if not expanded then return nil, nil, exp_err end
+    conn = expanded
+  end
   local adapter, adapt_err = adapters.resolve(conn)
   if not adapter then return nil, nil, adapt_err end
   return adapter, conn, nil
