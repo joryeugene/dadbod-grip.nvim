@@ -1383,7 +1383,10 @@ function M.open(state, url, query_sql, opts)
   end
   pcall(vim.api.nvim_buf_set_name, bufnr, buf_name)
 
-  -- Register session before rendering
+  -- Register session before rendering. query_spec/total_rows are optional: a
+  -- caller that already has them (init.open fetches the COUNT inside its
+  -- spinner) hands them over here so the very first render can draw
+  -- "Page 1/N (M rows)" instead of rendering twice.
   M._sessions[bufnr] = {
     state = state,
     url = url,
@@ -1393,6 +1396,8 @@ function M.open(state, url, query_sql, opts)
     elapsed_ms = opts and opts.elapsed_ms or nil,
     write_mode = (opts and opts.write == true) and true or false,
     pinned = false,
+    query_spec = opts and opts.query_spec or nil,
+    total_rows = opts and opts.total_rows or nil,
   }
 
   -- Open in existing window (reuse_win) or a new horizontal split below
@@ -2179,39 +2184,49 @@ function M._fk_referencing(bufnr)
       { pinned = true })
     local ref_sql = qmod.build_sql(ref_spec)
 
-    local result, err = db.query(ref_sql, session.state.url)
-    if err then
-      table.remove(session.nav_stack) -- pop on failure
-      vim.notify("Reverse FK query failed: " .. err, vim.log.levels.WARN)
-      return
-    end
+    -- Four round-trips (rows, columns, PKs, COUNT) behind one spinner: without
+    -- it the jump is a dead editor for as long as the connection takes.
+    -- One table out, never a bare `nil, err`: ui.blocking() forwards through
+    -- table.unpack, which drops everything after a leading nil.
+    local row_count
+    local fetched = ui.blocking("  querying " .. ref.table .. "...", function()
+      local res, qerr = db.query(ref_sql, session.state.url)
+      if qerr then return { err = qerr } end
 
-    -- Empty result: fetch columns from schema (same guard as grid_fk_follow)
-    if #result.columns == 0 then
-      local col_info = db.get_column_info(ref.table, session.state.url)
-      if col_info then
-        for _, ci in ipairs(col_info) do
-          table.insert(result.columns, ci.column_name)
+      -- Empty result: fetch columns from schema (same guard as grid_fk_follow)
+      if #res.columns == 0 then
+        local col_info = db.get_column_info(ref.table, session.state.url)
+        if col_info then
+          for _, ci in ipairs(col_info) do
+            table.insert(res.columns, ci.column_name)
+          end
         end
       end
-    end
 
-    -- Fetch PKs for the referencing table
-    local pks = db.get_primary_keys(ref.table, session.state.url) or {}
-    result.primary_keys = pks
-    -- FK navigation lands on a different table but the same connection, so a
-    -- read-only one stays read-only here too.
-    result.readonly = db.is_readonly(session.state.url)
-    result.table_name = ref.table
-    result.url = session.state.url
-    result.sql = ref_sql
+      -- Fetch PKs for the referencing table
+      res.primary_keys = db.get_primary_keys(ref.table, session.state.url) or {}
+      -- FK navigation lands on a different table but the same connection, so a
+      -- read-only one stays read-only here too.
+      res.readonly = db.is_readonly(session.state.url)
+      res.table_name = ref.table
+      res.url = session.state.url
+      res.sql = ref_sql
 
-    -- Single cheap COUNT (after selection) for pagination + notify
-    local row_count = #result.rows
-    local count_result = db.query(qmod.build_count_sql(ref_spec), session.state.url)
-    if count_result and count_result.rows[1] then
-      row_count = tonumber(count_result.rows[1][1]) or row_count
+      -- Single cheap COUNT (after selection) for pagination + notify
+      row_count = #res.rows
+      local count_result = db.query(qmod.build_count_sql(ref_spec), session.state.url)
+      if count_result and count_result.rows[1] then
+        row_count = tonumber(count_result.rows[1][1]) or row_count
+      end
+      return { result = res }
+    end)
+    if not fetched or not fetched.result then
+      table.remove(session.nav_stack) -- pop on failure
+      vim.notify("Reverse FK query failed: " .. tostring((fetched and fetched.err) or "unknown error"),
+        vim.log.levels.WARN)
+      return
     end
+    local result = fetched.result
 
     local new_state = data.new(result)
     session.query_spec = ref_spec

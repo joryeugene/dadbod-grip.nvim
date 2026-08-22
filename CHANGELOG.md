@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Opening a table dropped the spinner, then froze.** `init.open()` ran three round-trips —
+  the `SELECT`, the primary-key lookup, and the pagination `COUNT` — but only the `SELECT` was
+  inside the float. On a remote connection the spinner vanished, the editor sat frozen through
+  two more adapter invocations, and only then did the grid appear. All three now run under one
+  spinner, and the `COUNT` moving ahead of `view.open()` means the grid is rendered **once**
+  instead of twice: `view.open()` takes `query_spec` and `total_rows` in its opts, so the first
+  paint already reads `Page 1/N (M rows)` and the follow-up re-render is gone.
+- **The loading spinner only covered the first query.** `init.open()` wrapped its opening
+  query in `ui.blocking`, but every later reload went straight to `db.query`: sorting (`s`, `S`),
+  filtering (`f`, `<C-f>`, `F`, `gn`, `gF`, presets), pagination (`H`/`L`, `[p`/`]p`, `[P`/`]P`),
+  reset (`X`), refresh (`R`) and FK jumps (`gf`, `gm`). On anything slower than a local SQLite file
+  those keys froze the editor with no indicator at all, so the grid looked hung. `do_refresh` is
+  now split into `fetch_refresh` (the db round-trips) and `apply_refresh` (the render), and every
+  reload path runs the fetch inside one spinner — `on_requery`'s COUNT and its page query share a
+  single float instead of flashing two, and the FK jumps put their three or four round-trips behind
+  one. Note for future callers: `ui.blocking()` forwards its `fn`'s returns through `table.unpack`,
+  which drops everything after a leading `nil`, so work run inside it returns a single table
+  (`{ result = ..., err = ... }`) rather than `nil, err` — otherwise the real db error is lost and
+  the user is told "unknown error".
 - **`F` and `X` dropped you out of an FK context without saying so.** An FK jump (`gf`, `gm`)
   scopes the grid with a WHERE clause of its own — `"categoryId" = 15` for "the CategoryVersion
   rows referencing Category 15". That clause lived in `query_spec.filters` indistinguishable from
