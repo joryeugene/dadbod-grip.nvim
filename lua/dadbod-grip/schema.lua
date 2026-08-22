@@ -1147,6 +1147,26 @@ local function sidebar_width()
   return math.max(SIDEBAR_MIN_WIDTH, math.min(SIDEBAR_MAX_WIDTH, w))
 end
 
+--- Fetch the schema for `url` into state, touching no window.
+---
+--- Split out of toggle() so a caller assembling the workspace can pay for the
+--- DB round-trip while the preloader is still up and the old screen is still
+--- whole, instead of behind a sidebar that is already visible and empty.
+--- Cached: a second call for the same URL costs nothing.
+--- @param url string
+--- @return table state
+function M.prefetch(url)
+  local state = get_state(url)
+  if not state.items then
+    if is_file_url(url) then
+      fetch_file_schema(state)
+    else
+      fetch_tables(state)
+    end
+  end
+  return state
+end
+
 --- Open or toggle the schema sidebar.
 -- From outside the sidebar: focus it (open if needed).
 -- From inside the sidebar: close it.
@@ -1171,7 +1191,13 @@ function M.toggle(url)
     end
   end
 
-  local state = get_state(url)
+  -- Fetch first, window second. list_tables()/list_routines() block on a DB
+  -- round-trip that pumps the event loop, so a sidebar opened ahead of them
+  -- sat on screen empty for the whole query -- and, next to an equally empty
+  -- content area, made the workspace look like it was assembling itself in
+  -- front of the user. Nothing between here and render() below blocks, so the
+  -- split now appears already filled.
+  local state = M.prefetch(url)
 
   -- Create buffer if needed
   if not _sidebar_bufnr or not vim.api.nvim_buf_is_valid(_sidebar_bufnr) then
@@ -1197,15 +1223,6 @@ function M.toggle(url)
   vim.wo[_sidebar_winid].cursorline = true
   vim.wo[_sidebar_winid].winfixwidth = true
   vim.wo[_sidebar_winid].wrap = false
-
-  -- Fetch schema if not cached
-  if not state.items then
-    if is_file_url(url) then
-      fetch_file_schema(state)
-    else
-      fetch_tables(state)
-    end
-  end
 
   render(state)
 end
@@ -1246,6 +1263,11 @@ end
 M.get_state = get_state
 
 --- Exposed for testing only.
+--- Test hook: forget every cached schema so a spec can watch a fresh fetch.
+function M._reset_state()
+  _states = {}
+end
+
 M._truncate_name = truncate_name
 M._build_nodes = build_nodes
 

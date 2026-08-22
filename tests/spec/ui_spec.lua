@@ -52,6 +52,59 @@ test("blocking: nil return values handled", function()
   eq(b, nil, "second nil")
 end)
 
+-- ── nested blocking() ───────────────────────────────────────────────────────
+-- A workspace is built from several steps that each want to say what they are
+-- doing. Only the outermost one owns the float: an inner call that closed it
+-- would flush the half-built layout to the terminal, which is the whole thing
+-- the preloader exists to hide.
+
+test("blocking: nested call keeps one float, not two", function()
+  local outer_wins, inner_wins
+  ui.blocking("outer", function()
+    outer_wins = win_count()
+    ui.blocking("inner", function()
+      inner_wins = win_count()
+    end)
+  end)
+  eq(inner_wins, outer_wins, "nested call adds no second float")
+end)
+
+test("blocking: float survives the nested call", function()
+  local after_nested
+  ui.blocking("outer", function()
+    ui.blocking("inner", function() end)
+    after_nested = win_count()
+  end)
+  assert(after_nested, "outer body ran")
+  eq(after_nested, win_count() + 1, "outer float still up after the nested call")
+end)
+
+test("blocking: nested call forwards return values", function()
+  local a, b = ui.blocking("outer", function()
+    return ui.blocking("inner", function() return 7, 8 end)
+  end)
+  eq(a, 7, "first"); eq(b, 8, "second")
+end)
+
+test("blocking: nested error propagates and still cleans up", function()
+  local before = win_count()
+  local ok, err = pcall(ui.blocking, "outer", function()
+    ui.blocking("inner", function() error("nested boom") end)
+  end)
+  eq(ok, false, "should error")
+  assert(tostring(err):find("nested boom"), "error msg should contain 'nested boom'")
+  eq(win_count(), before, "no float left behind")
+end)
+
+test("blocking: a later top-level call still opens its own float", function()
+  ui.blocking("outer", function()
+    ui.blocking("inner", function() end)
+  end)
+  local during
+  ui.blocking("after", function() during = win_count() end)
+  eq(during, win_count() + 1, "spinner state was released")
+end)
+
 -- ── input / confirm ─────────────────────────────────────────────────────────
 
 --- Answer the next prompt with `keys`, then run fn().

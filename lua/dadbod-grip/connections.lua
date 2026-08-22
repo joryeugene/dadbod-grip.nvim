@@ -781,7 +781,6 @@ function M.switch(url, name, conn_type, opts)
   view.invalidate_mode_cache()
 
   if resolved_type == "file" then
-    vim.notify("Grip: opening " .. (name or url), vim.log.levels.INFO)
     M.set_health(url, "ok")
     -- Compute the DuckDB connection that will actually run queries against this file.
     -- Mirrors the logic in init.lua so the query pad is wired to the same connection.
@@ -791,22 +790,33 @@ function M.switch(url, name, conn_type, opts)
     local active_resolved = active and (M.expand_url(active) or active)
     local db_url = (active_resolved and active_resolved:match("^duckdb:")) and active
       or "duckdb::memory:"
+    local label = name or url
     vim.schedule(function()
       -- No reuse_win: let find_content_win() place the grid correctly.
       -- Passing cur_win risks putting the grid in the sidebar if that window was focused.
       local open_opts = {}
       if opts and opts.write    then open_opts.write    = true       end
       if opts and opts.watch_ms then open_opts.watch_ms = opts.watch_ms end
-      require("dadbod-grip").open(url, nil, open_opts)
-      -- Open sidebar and query pad after the grid is placed
+      local schema = require("dadbod-grip.schema")
+      -- Both round-trips under one preloader. open() runs a blocking() of its
+      -- own for the grid query; nested, that relabels this float instead of
+      -- closing it, so the screen stays covered until there is a grid to show.
+      -- prefetch() goes first so the sidebar opened in the next tick is
+      -- already populated rather than empty for a second beside a live grid.
+      ui.blocking("opening " .. label .. "...", function()
+        schema.prefetch(url)
+        require("dadbod-grip").open(url, nil, open_opts)
+      end)
+      -- Open sidebar and query pad after the grid is placed. Nothing here
+      -- blocks any more, so both land in a single repaint.
       vim.schedule(function()
-        local schema = require("dadbod-grip.schema")
         if not schema.is_open() then
           schema.toggle(url)
         else
           schema.refresh(url)
         end
         require("dadbod-grip.query_pad").open(db_url)
+        vim.notify("Grip: opening " .. label, vim.log.levels.INFO)
       end)
     end)
     return true
@@ -856,29 +866,44 @@ function M.switch(url, name, conn_type, opts)
     end
   end
 
-  vim.notify("Grip: connected to " .. (name or url), vim.log.levels.INFO)
   M.set_health(url, "ok")
   -- Invalidate completion cache so the new connection's schema is fetched fresh.
   require("dadbod-grip.completion").invalidate(url)
 
+  local label = name or url
+
   vim.schedule(function()
     local schema = require("dadbod-grip.schema")
-    if not schema.is_open() then
-      schema.toggle(url)
-    else
-      schema.refresh(url)
-    end
 
-    -- Show welcome screen in the main content area
-    require("dadbod-grip").open_welcome()
+    -- One preloader over the whole workspace. The table list is fetched here,
+    -- before any of these windows exist, and the three panes are then built
+    -- with nothing blocking between them -- so the float lifts on a finished
+    -- layout. Built the other way round, each pane appeared empty and filled
+    -- in a second later, which read as the plugin assembling itself on screen.
+    ui.blocking("connecting to " .. label .. "...", function()
+      schema.prefetch(url)
 
-    local query_pad = require("dadbod-grip.query_pad")
-    query_pad.open(url)
+      if not schema.is_open() then
+        schema.toggle(url)
+      else
+        schema.refresh(url)
+      end
 
-    -- Focus sidebar so user can immediately browse tables
-    if schema.is_open() and schema.get_winid() then
-      vim.api.nvim_set_current_win(schema.get_winid())
-    end
+      -- Show welcome screen in the main content area
+      require("dadbod-grip").open_welcome()
+
+      local query_pad = require("dadbod-grip.query_pad")
+      query_pad.open(url)
+
+      -- Focus sidebar so user can immediately browse tables
+      if schema.is_open() and schema.get_winid() then
+        vim.api.nvim_set_current_win(schema.get_winid())
+      end
+    end)
+
+    -- After the layout, not before it: fired first, this toast hung alone over
+    -- an empty screen for however long the schema took to arrive.
+    vim.notify("Grip: connected to " .. label, vim.log.levels.INFO)
 
     -- Pre-warm completion schema cache in background (avoids freeze on first keypress)
     vim.schedule(function()
