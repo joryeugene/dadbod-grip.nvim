@@ -1552,15 +1552,11 @@ function M.open_welcome()
     end
     vim.api.nvim_buf_set_lines(sbuf, 0, -1, false, lines)
     local sh   = #lines
-    local swin = vim.api.nvim_open_win(sbuf, true, {
-      relative = "editor",
-      width    = sw,
-      height   = sh,
-      row      = math.floor((vim.o.lines   - sh - 4) / 2),
-      col      = math.floor((vim.o.columns - sw - 2) / 2),
-      style    = "minimal",
-      border   = ui.border(),
-      zindex   = 60,
+    local swin = ui.info_float({
+      buf    = sbuf,
+      width  = sw,
+      height = sh,
+      zindex = 60,
     })
     vim.bo[sbuf].modifiable = false
     vim.bo[sbuf].buftype    = "nofile"

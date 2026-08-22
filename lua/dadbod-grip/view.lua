@@ -2750,14 +2750,10 @@ function M.show_help(opts)
         if key_end then hadd(ln, "Identifier", 2, key_end - 1) end
       end
     end
-    local win = vim.api.nvim_open_win(popup_buf, true, {
-      relative = "editor",
-      row = math.floor((vim.o.lines - #help) / 2),
-      col = math.floor((vim.o.columns - max_w) / 2),
+    local win = ui.info_float({
+      buf = popup_buf,
       width = max_w,
       height = #help,
-      style = "minimal",
-      border = ui.border(),
       title = " Help ",
       title_pos = "center",
       zindex = 50,
