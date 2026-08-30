@@ -172,8 +172,17 @@ test("TODO contains only active or unshipped work", function()
   assert(not todo:find("SECURITY.md", 1, true), "completed security policy retained")
   assert(not todo:find("CONTRIBUTING.md", 1, true), "completed contributor guide retained")
   assert(not todo:find("TOP N pagination", 1, true), "stale SQL Server pagination claim retained")
-  assert(todo:find("`##temp`", 1, true), "unresolved SQL Server temp-table limitation missing")
+  assert(not todo:find("`##temp`", 1, true), "stateless SQL Server temp-table scope retained as product work")
   assert(not todo:find("GripFill", 1, true), "shipped GripFill work retained")
+end)
+
+test("query-pad and SQL Server temp-table scope stay accurate", function()
+  assert(help:find("blank-line-delimited SQL block under the cursor", 1, true),
+    "query-pad block behavior missing")
+  assert(help:find("Create and use #temp\nor ##temp tables in the same submitted block or visual selection", 1, true),
+    "SQL Server temp-table session boundary missing")
+  assert(help:find("GO-separated\nbatches in one submission share that session", 1, true),
+    "SQL Server same-invocation GO behavior missing")
 end)
 
 test("contributor and vulnerability paths remain actionable", function()
