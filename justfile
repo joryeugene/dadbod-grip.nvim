@@ -15,7 +15,18 @@ spec name: seed-sqlite
 # Lint with luacheck. Settings live in .luacheckrc; same args as CI.
 # Install: luarocks --lua-version=5.1 --local install luacheck
 lint:
-    luacheck lua/ plugin/ lazy.lua tests/
+    #!/usr/bin/env bash
+    set -euo pipefail
+    luacheck_bin="$(command -v luacheck || true)"
+    if [[ -z "$luacheck_bin" ]] && command -v luarocks >/dev/null 2>&1; then
+        export PATH="$(luarocks path --lr-bin):$PATH"
+        luacheck_bin="$(command -v luacheck || true)"
+    fi
+    if [[ -z "$luacheck_bin" ]]; then
+        echo "LuaCheck not found. Install it with: luarocks --lua-version=5.1 --local install luacheck" >&2
+        exit 1
+    fi
+    "$luacheck_bin" lua/ plugin/ lazy.lua tests/
 
 # Seed PostgreSQL test database
 seed-pg:
