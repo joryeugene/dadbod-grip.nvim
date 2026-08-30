@@ -11,7 +11,7 @@ o  ╚██████╔╝██║  ██║██║██║
 d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
 </pre>
 <p>
-<a href="https://joryeugene.github.io/dadbod-grip-web/"><img src="https://img.shields.io/badge/docs-website-4ade80.svg" alt="Docs"></a>&nbsp;
+<a href="https://jorypestorious.com/dadbod-grip-web/"><img src="https://img.shields.io/badge/docs-website-4ade80.svg" alt="Docs"></a>&nbsp;
 <a href="https://github.com/joryeugene/dadbod-grip.nvim/blob/main/LICENSE"><img src="https://img.shields.io/github/license/joryeugene/dadbod-grip.nvim.svg" alt="MIT License"></a>&nbsp;
 <img src="https://img.shields.io/badge/Neovim-0.10%2B-green.svg" alt="Neovim 0.10+">&nbsp;
 <a href="https://github.com/joryeugene/dadbod-grip.nvim/actions/workflows/test.yml"><img src="https://github.com/joryeugene/dadbod-grip.nvim/actions/workflows/test.yml/badge.svg" alt="Tests"></a>&nbsp;
@@ -28,7 +28,7 @@ Connect to PostgreSQL, MySQL, SQLite, DuckDB, or MotherDuck and edit tables like
 
 **Connect to PostgreSQL, MySQL, SQLite, or DuckDB and edit tables like Vim buffers.** Rows stage with color coding, preview as SQL, and commit in a single transaction. Undo committed changes. Follow foreign keys through a breadcrumb trail. Open any Markdown file as a runnable SQL notebook and execute individual blocks with `<C-CR>`. Generate SQL from natural language.
 
-A command palette (`<C-p>`) surfaces every action without memorizing keymaps. The query pad has SQL syntax highlighting, a formatter, and built-in completion. Every Vim motion works. Nothing installs outside Neovim.
+A command palette (`<C-p>`) surfaces every action without memorizing keymaps. The query pad has SQL syntax highlighting, a formatter, and built-in completion. Every Vim motion works. There are no required Lua or Neovim-plugin dependencies; install only the database CLI for the adapters you use.
 
 | **Editing** | **Analysis** | **Schema & AI** |
 |---|---|---|
@@ -47,7 +47,7 @@ A command palette (`<C-p>`) surfaces every action without memorizing keymaps. Th
 <img src="https://jorypestorious.com/dadbod-grip-web/live.png" alt="dadbod-grip: schema sidebar, query pad, and editable grid with color-coded mutations" width="900">
 </p>
 
-An example database is included. `:GripStart` opens it with seventeen tables and something in the consumer incidents that does not add up. See the [walkthrough](demo/softrear-internal.md) for the full investigation.
+An example database is included. `:GripStart` recreates it from the bundled seed on every run, then opens seventeen tables and something in the consumer incidents that does not add up. See the [walkthrough](demo/softrear-internal.md) for the full investigation.
 
 ## Contents
 
@@ -66,8 +66,8 @@ An example database is included. `:GripStart` opens it with seventeen tables and
 ## Quickstart
 
 ```lua
--- lazy.nvim (always latest stable release)
-{ "joryeugene/dadbod-grip.nvim", version = "*" }
+-- lazy.nvim
+{ "joryeugene/dadbod-grip.nvim" }
 ```
 
 Then `:checkhealth dadbod-grip` to verify your setup, `:GripStart` to explore the demo database, or `:GripConnect` to pick your own. Schema sidebar + query pad open automatically.
@@ -76,7 +76,7 @@ Then `:checkhealth dadbod-grip` to verify your setup, `:GripStart` to explore th
 
 The picker discovers running postgres containers on every open by reading
 Docker labels (the same convention DataGrip and Beekeeper Studio use).
-Add this to any `docker-compose.yml` and the stack appears in `:GripPick`
+Add this to any `docker-compose.yml` and the stack appears in `:GripConnect`
 the moment it starts, disappears when it stops, no editing of
 `~/.grip/connections.json` required:
 
@@ -108,6 +108,7 @@ require("dadbod-grip").setup({ discovery = false })
 ```
 postgresql://user:pass@host:5432/dbname
 mysql://user:pass@host:3306/dbname
+mariadb://user:pass@host:3306/dbname
 sqlserver://user:pass@host:1433/dbname
 mssql://user:pass@host:1433/dbname
 sqlite:path/to/file.db
@@ -119,11 +120,16 @@ https://host/data.parquet  ← remote file via httpfs
 duckdb::memory:            ← single-query scratch (tables don't persist between queries)
 ```
 
+SQL Server validates the server certificate by default. URL query options are
+`encrypt=optional|mandatory|strict`, `trust_server_certificate=true`, and
+`server_certificate=<url-encoded-path>`; the last two cannot be combined.
+
 Beyond `name` and `url`, what an entry can carry depends on where it lives:
 
 | field | `connections.json` | `g:dbs` |
 |-------|--------------------|---------|
 | `name`, `url` | yes | yes |
+| `id` (opaque saved-query binding) | yes | no |
 | `type` | yes | no |
 | `env_file` | yes | no |
 | `mode` | yes | no |
@@ -180,11 +186,16 @@ happens at a single point on the way to the database client, so no code path tha
 ever sees the expanded URL. Passwords also travel to `psql`, `mysql` and `sqlcmd` in the process
 environment rather than in `argv`, so they do not show up in another user's `ps`.
 
-**The exception is DuckDB federation.** `ATTACH` inlines the attached database's DSN into the SQL
-string, and grip passes that string to `duckdb -c`, so an attachment's password *is* visible in
-`ps` for the lifetime of every query against that connection — including one that came from
-`${VAR}`. If that matters to you, do not attach a credentialed database into DuckDB until this is
-moved onto DuckDB's secrets manager.
+DuckDB queries and attachment declarations are sent through stdin, never `duckdb -c`, so SQL and
+DSNs do not appear in process arguments. Credentialed PostgreSQL/MySQL attachments use a temporary,
+invocation-scoped DuckDB secret and attach by secret name. Grip never creates persistent DuckDB
+secrets (DuckDB stores those unencrypted on disk).
+
+Saved queries bind to an opaque connection ID, not to a URL. Persisted connections receive an
+`"id"` lazily, and new query files carry `-- grip:connection=<id>`. Renaming, promoting, or editing
+a connection preserves that ID. An unsaved connection produces an unbound query and a prompt to
+save the connection first. Legacy `-- grip:url=` files remain readable when the URL is templated or
+credential-free; a credential-bearing legacy URL is removed from the editor and never auto-connected.
 
 **One limit, stated plainly:** a templated URL in `vim.g.db` is grip-only. vim-dadbod's `:DB`
 command and any statusline that reads that variable will see the literal `${NAME}`. If you rely on
@@ -336,7 +347,7 @@ work without credentials.
 - **SQL query pad** via `:GripQuery` or `q`. A persistent scratch buffer that pipes results into editable grids. Clicking a table in the sidebar or picker never replaces pad content: new queries append below existing SQL with a blank separator so all your work stays intact. `<C-CR>` runs the visual selection or the full buffer; when cursor is inside a `` ```sql ``` `` fence, only that block runs. `gn` opens the notebook picker to load any `.md` or `.sql` file. `gA` reads existing pad content and modifies it rather than generating from scratch. Pressing `q` or `2` focuses the pad without overwriting anything.
 - **Built-in SQL completion** with table names, column names, SQL keywords, and alias tracking. No extra plugins required. In DuckDB federated sessions, columns from all attached databases appear with schema-qualified names (e.g. `pg.users.email`). Works with nvim-cmp (source `dadbod_grip`), blink.cmp, or standalone via `<C-Space>` and auto-trigger.
 - **Saved queries** via `:GripSave` and `:GripLoad` persisting to project-local `.grip/queries/` files.
-- **Connection profiles** via `:GripConnect` or `gC` storing connections in `.grip/connections.json` with `g:dbs` backward compatibility. Connections auto-persist globally (`~/.grip/connections.json`) so they're available from any project. Connecting opens the full workspace (schema sidebar + query pad) automatically. The picker shows a **Local Files (cwd)** section listing `.csv`, `.parquet`, `.json`, `.xlsx`, and other supported files in your working directory so you can open them without typing a path. Press `s` to save a local file as a named connection. Each connection displays a session-scoped health indicator (`*` ok, `o` unknown, `x` failed); press `T` on any file-based connection to retest it instantly.
+- **Connection profiles** via `:GripConnect` or `gC` storing connections in `.grip/connections.json` with `g:dbs` backward compatibility. Connections auto-persist globally (`~/.grip/connections.json`) so they're available from any project. Connecting opens the full workspace (schema sidebar + query pad) by default; set `open_sidebar = false` to start in the main workspace without the sidebar. The picker shows a **Local Files (cwd)** section with every supported data file in your working directory. Press `s` to save a local file as a named connection. Each connection displays a session-scoped health indicator (`*` ok, `o` unknown, `x` failed); press `T` on any file-based connection to retest it instantly.
 - **Data diff** via `:GripDiff` or `gD` comparing two tables by primary key with color-coded change highlighting. Auto-switches to compact layout on narrow terminals (<120 cols), toggle with `gv`.
 
 ### Schema Operations (DDL)
@@ -350,14 +361,16 @@ work without credentials.
 - **Conditional formatting** that colors negatives red, booleans green/red, past dates dim, and URLs underlined.
 - **Column hide/show** using `-` to hide, `g-` to restore all, and `gH` for a visibility picker.
 - **Smart column auto-fit** that distributes extra terminal width to truncated columns.
-- **Export to clipboard** in 6 formats via `gE`: CSV, TSV, JSON, SQL INSERT, Markdown, and Grip Table (box-drawing).
-- **Export to file** via `gX` or `:GripExport`: saves the current result set as CSV, JSON, or SQL INSERT statements.
+- **Scoped export to clipboard** via `gE`: choose current page or all filtered/sorted rows, then CSV, TSV, JSON, SQL INSERT, Markdown, or Grip Table (100,000-row clipboard cap).
+- **Atomic export to file** via `gX` or `:GripExport`: choose current page or all filtered/sorted rows, confirm above 10,000, then stream CSV, JSON, or SQL through a temporary file and rename.
 
 ### Multi-Database
 - **PostgreSQL, SQLite, MySQL/MariaDB, and DuckDB** adapters with adapter-specific metadata queries.
 - **Multi-schema PostgreSQL**: all schemas visible in sidebar (not just `public`). Tables from other schemas appear as `schema.table`.
-- **File-as-table** support where `:Grip /path/to/data.parquet` opens Parquet/CSV/JSON/XLSX files via DuckDB.
+- **File-as-table** support where `:Grip /path/to/data.parquet` opens supported data files via DuckDB.
 - **Remote file querying** where `:Grip https://example.com/data.csv` opens remote files via DuckDB httpfs.
+
+Supported extensions: `.parquet` `.csv` `.tsv` `.json` `.ndjson` `.jsonl` `.xlsx` `.orc` `.arrow` `.ipc`
 - **MySQL backslash safety**: MySQL sessions use `NO_BACKSLASH_ESCAPES` so backslashes in cell values are treated as literals, not escape characters. Values like `C:\path\to\file` round-trip correctly.
 
 ### File Modes: Watch and Write
@@ -628,17 +641,25 @@ Note: explain query plan is at `gQ` (Query Doctor).
 | `:GripCreate` | Create a new table interactively |
 | `:GripDiff {table1} {table2}` | Compare two tables by PK (compact/wide, toggle `gv`) |
 | `:GripDrop [table]` | Drop a table with typed confirmation |
+| `:GripExport` | Export the current page or all filtered/sorted rows to a file |
+| `:GripAttach [dsn] [alias]` | Attach PostgreSQL, MySQL, SQLite, or MotherDuck to DuckDB |
+| `:GripDetach [alias]` | Detach a DuckDB attachment |
+| `:GripOpen [path]` | Open a local, HTTPS, or S3 data file without saving a connection |
+| `:GripFill [N]` | Stage AI-generated rows in the current editable table |
+| `:GripStart` | Recreate and open the built-in demo database |
+| `:GripHome` | Return to the welcome screen |
 | `:GripToggle` | Close all grip windows, or reopen if closed |
 
 ## Requirements
 
 - **Neovim 0.10+**
-- One or more database CLI tools in PATH:
+- One or more database CLI tools in PATH (only the adapters you use):
   - **PostgreSQL**: `psql`
   - **SQLite**: `sqlite3`
-  - **MySQL/MariaDB**: `mysql` (auto-detects MariaDB and uses `--batch` output)
+  - **MySQL/MariaDB**: `mysql` (both servers use compatible `--batch` output; `mariadb://` is accepted)
   - **DuckDB**: `duckdb`
   - **SQL Server**: `sqlcmd` (read-only grid support in v1)
+- No required Neovim plugins. vim-dadbod, blink.cmp/nvim-cmp, external SQL formatters, and Ollama are optional integrations.
 
 ## Install
 
@@ -648,12 +669,9 @@ The plugin ships a `lazy.lua` spec so all commands work as lazy-load triggers au
 You do not need to copy a `cmd = { ... }` list into your config; leaving it out
 prevents stale command lists when new `:Grip*` commands are added.
 
-`version = "*"` tracks the latest stable release tag. Omit it to track HEAD (rolling).
-
 ```lua
 {
   "joryeugene/dadbod-grip.nvim",
-  version = "*",   -- always latest stable; remove to track HEAD
 }
 ```
 
@@ -674,7 +692,6 @@ identity while loading files from your local checkout.
 ```lua
 {
   "joryeugene/dadbod-grip.nvim",
-  version = "*",
   keys = {
     { "<leader>db", "<cmd>GripConnect<cr>",  desc = "DB connect" },
     { "<leader>dg", "<cmd>Grip<cr>",         desc = "DB grid" },
@@ -750,15 +767,19 @@ Plug 'joryeugene/dadbod-grip.nvim', { 'tag': 'v*' }
 require("dadbod-grip").setup({
   limit            = 100,      -- default row limit for SELECT queries
   max_col_width    = 40,       -- max display width per column
-  timeout          = 30000,    -- query timeout in ms (default: 10000; raise for slow tunnels)
+  timeout          = 10000,    -- database CLI timeout in ms; raise for slow tunnels
   completion       = true,     -- set false to use blink.cmp/nvim-cmp instead
   connections_path = nil,      -- absolute path to a shared connections.json file
   border           = "rounded",
   picker           = "builtin",-- "builtin", "telescope", or "snacks"
   cell_split       = "horizontal", -- gB cell buffer: "horizontal" or "vertical" split
   sticky_header    = true,     -- keep the column names visible while scrolling (set false to reclaim the line)
+  open_sidebar     = true,     -- set false to connect directly into the main workspace
 })
 ```
+
+`timeout` applies to adapter CLI calls. DuckDB operations that may download an extension or read
+a remote URL get a 60-second minimum for that network step. Connection health pings use 5 seconds.
 
 With `sticky_header` on (the default), the grid's column-name row is mirrored into the window's
 `winbar`, so it stays in place once a long table scrolls past it — and the column the cursor is
@@ -901,7 +922,7 @@ grip.open_smart()
 ## Architecture
 
 ```
-  :Grip  :GripNew  :GripQuery  :GripAttach  :GripStart  ...
+  :Grip  :GripCreate  :GripQuery  :GripAttach  :GripStart  ...
                               │
   ╔═══════════════════════════▼══════════════════════════╗
   ║  INIT.LUA                                            ║
@@ -952,6 +973,17 @@ Design principles:
 
 ## Testing
 
+The reproducible unit entry point recreates `tests/seed_sqlite.db` from SQL before every run:
+
+```bash
+just test
+just lint
+```
+
+The generated SQLite database is ignored, not committed. Live adapter jobs seed their assigned
+database from the same files and set `GRIP_REQUIRE_*` flags so a missing server cannot pass as a
+skip.
+
 ### PostgreSQL
 
 ```bash
@@ -965,7 +997,7 @@ psql grip_test < tests/seed_pg.sql
 sqlite3 tests/seed_sqlite.db < tests/seed_sqlite.sql
 ```
 
-### MySQL
+### MySQL or MariaDB
 
 ```bash
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS grip_test"
@@ -978,7 +1010,7 @@ mysql -u root grip_test < tests/seed_mysql.sql
 duckdb tests/seed_duckdb.duckdb < tests/seed_duckdb.sql
 ```
 
-The SQLite DB (`tests/seed_sqlite.db`) is committed to the repo for zero-setup testing. Seed files share the same 13 tables + 1 view but each has adapter-specific types in `type_zoo` (e.g. PostgreSQL TSVECTOR/RANGE/MACADDR, MySQL SET/YEAR/GEOMETRY, DuckDB HUGEINT/STRUCT/MAP/UNION, SQLite type affinity coercion).
+Seed files share the same 13 tables + 1 view but each has adapter-specific types in `type_zoo` (e.g. PostgreSQL TSVECTOR/RANGE/MACADDR, MySQL SET/YEAR/GEOMETRY, DuckDB HUGEINT/STRUCT/MAP/UNION, SQLite type affinity coercion).
 
 Open each table with `:Grip <table_name>` and verify rendering, editing, sort/filter/pagination, and FK navigation.
 
@@ -990,11 +1022,9 @@ Open each table with `:Grip <table_name>` and verify rendering, editing, sort/fi
 
 ## Credits
 
-Created by **[@joryeugene](https://github.com/joryeugene)**, who designed and wrote the plugin.
+Created and maintained by **[@joryeugene](https://github.com/joryeugene)**.
 
-Maintained by **[@GlebYavorski](https://github.com/GlebYavorski)**.
-
-Thanks to **[@Kimilhee](https://github.com/Kimilhee)** for multibyte/CJK cell alignment and **[@mireq](https://github.com/mireq)** for earlier contributions, and to everyone who filed the issues that shaped the 3.9.0 release.
+Thanks to **[@GlebYavorski](https://github.com/GlebYavorski)**, **[@Kimilhee](https://github.com/Kimilhee)** for multibyte/CJK cell alignment, **[@mireq](https://github.com/mireq)** for earlier contributions, and everyone who filed the issues that shaped the project.
 
 ---
 
