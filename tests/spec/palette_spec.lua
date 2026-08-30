@@ -173,6 +173,22 @@ test("grid-only actions do not appear in query context", function()
   end
 end)
 
+test("grid AI action is not offered in the sidebar", function()
+  captured = nil
+  palette.open("grid")
+  local grid_has_ai = false
+  for _, action in ipairs(captured.items) do
+    if action.key == "A" then grid_has_ai = true end
+  end
+  assert(grid_has_ai, "grid AI action is missing")
+
+  captured = nil
+  palette.open("sidebar")
+  for _, action in ipairs(captured.items) do
+    assert(action.key ~= "A", "grid-only AI action appeared in the sidebar")
+  end
+end)
+
 test("M.register: custom action appears in correct context", function()
   palette.register({
     label    = "[test]    Registered test action",

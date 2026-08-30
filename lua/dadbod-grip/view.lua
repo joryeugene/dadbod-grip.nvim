@@ -2619,20 +2619,11 @@ local function make_keymap_ctx(bufnr)
   ctx.NULL_DISPLAY    = NULL_DISPLAY
   ctx.VIEW_LABELS     = VIEW_LABELS
 
-  function ctx.map(key, fn, desc)
-    vim.keymap.set("n", key, fn, { buffer = bufnr, desc = desc, silent = true })
-  end
-  -- kmap: lookup action key via keymaps.lua, skip if false (user disabled)
   function ctx.kmap(action, fn, desc)
-    local key = km.get(action)
-    if key then ctx.map(key, fn, desc) end
-  end
-  function ctx.vmap(key, fn, desc)
-    vim.keymap.set("x", key, fn, { buffer = bufnr, desc = desc, silent = true })
+    km.bind("grid", bufnr, action, "n", fn, { desc = desc })
   end
   function ctx.kvmap(action, fn, desc)
-    local key = km.get(action)
-    if key then ctx.vmap(key, fn, desc) end
+    km.bind("grid", bufnr, action, "x", fn, { desc = desc })
   end
 
   -- Helper: collect row indices from visual selection
@@ -2716,6 +2707,7 @@ function M.show_help(opts)
       "  {/}       Prev / next modified row",
       "  <CR> / i  Edit cell under cursor (JSON cells: pretty-printed in editor)",
       "  gB        Open cell value in split buffer (JSON: ft=json; :w stages)",
+      "  gU        Set current column across all visible rows",
       "  K         Row view (vertical transpose; JSON cells auto-expanded)",
       "  gK        JSON tree drilldown (expand/collapse keys, yank value or JSONPath)",
       "  y         Yank cell value to clipboard",
@@ -2744,6 +2736,7 @@ function M.show_help(opts)
       "",
       "  FK Navigation",
       "  gf        Follow foreign key under cursor",
+      "  gm        Open rows that reference the current row",
       "  <C-o>     Go back in FK navigation stack",
       "",
       "  Analysis & Export",
@@ -2754,7 +2747,7 @@ function M.show_help(opts)
       "  gQ        Explain current query plan",
       "  gx        Open URL in current cell (http/https/ftp)",
       "  gD        Diff against another table",
-      "  gE        Export to clipboard (CSV, TSV, JSON, SQL, Markdown)",
+      "  gE        Export to clipboard (CSV, TSV, JSON, SQL, Markdown, Grip Table)",
       "  gX        Export to file (csv/json/sql)  :GripExport",
       "",
       "  Tab Views (1-9)",
@@ -2792,7 +2785,6 @@ function M.show_help(opts)
       "            ↳ context: schema DDL for <=30 tables (cols, types, PKs, FKs)",
       "            ↳ provider: ANTHROPIC_API_KEY -> OPENAI -> GEMINI -> Ollama",
       "            ↳ disable: setup({ ai = false }) skips schema pre-warm",
-      "  gF        Format SQL (external tool cascade: sql-formatter, pg_format, sqlfluff)",
       "  :GripAttach  Attach external DB to DuckDB session",
       "  :GripDetach  Detach attached database",
       "  :GripOpen    Open file/HTTPS/s3:// without saving to connections",

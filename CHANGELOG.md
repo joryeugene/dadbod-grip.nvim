@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   activates the same task runner and plain `just test` works without a global mise default.
 - `just lint` now finds a LuaCheck installed in LuaRocks' user bin directory when that directory is
   not already in `PATH`, and reports the exact installation command when LuaCheck is unavailable.
+- Primary Grid, Query Pad, Sidebar, and Cell Editor mappings now come from one validated catalog.
+  The deterministic `keymaps.json` export publishes each action's default, description, category,
+  surfaces, modes, and optional requirement for documentation consumers.
+
+### Fixed
+
+- Sidebar `<Esc>` now closes the sidebar, and configured `h`, `l`, `go`, completion, and Cell Editor
+  overrides now replace their defaults instead of being ignored. Grid `h` and `l` preserve native
+  counts and line boundaries, and `false` continues to disable any catalog action.
+- The command palette and manuals now match the actual mapping surfaces. AI is offered only in the
+  Grid palette, notebook and grid-jump actions are limited to their registered surfaces, and Grid
+  help includes `gU`, `gm`, and Grip Table export.
 
 ## [3.10.1] - 2026-08-30
 

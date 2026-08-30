@@ -1,0 +1,1235 @@
+{
+  "version": 1,
+  "keymaps": [
+    {
+      "action": "palette",
+      "default": "<C-p>",
+      "description": "Opens the searchable command palette.",
+      "category": "navigation",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "help",
+      "default": "?",
+      "description": "Opens the keymap help.",
+      "category": "navigation",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "er_diagram",
+      "default": "gG",
+      "description": "Opens the entity-relationship diagram.",
+      "category": "navigation",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "connections",
+      "default": "gC",
+      "description": "Opens the connection picker.",
+      "category": "navigation",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "connections_alt",
+      "default": "<C-g>",
+      "description": "Opens the connection picker with its alternate key.",
+      "category": "navigation",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "table_picker",
+      "default": "gT",
+      "description": "Opens the table picker.",
+      "category": "navigation",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "table_picker_alt",
+      "default": "gt",
+      "description": "Opens the table picker with its alternate key.",
+      "category": "navigation",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "query_history",
+      "default": "gh",
+      "description": "Opens the query history.",
+      "category": "navigation",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "load_saved",
+      "default": "gq",
+      "description": "Loads a saved query.",
+      "category": "navigation",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "welcome",
+      "default": "Q",
+      "description": "Returns to the welcome screen.",
+      "category": "navigation",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "query_pad",
+      "default": "q",
+      "description": "Opens or focuses the query pad.",
+      "category": "navigation",
+      "surfaces": ["grid", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "ai",
+      "default": "A",
+      "description": "Generates SQL from the grid with the configured AI provider.",
+      "category": "ai",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "schema_browser",
+      "default": "gb",
+      "description": "Opens, focuses, or closes the schema browser.",
+      "category": "navigation",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "goto_grid",
+      "default": "gw",
+      "description": "Focuses the grid window.",
+      "category": "navigation",
+      "surfaces": ["query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "open_notebook",
+      "default": "gn",
+      "description": "Opens a SQL or Markdown notebook in the query pad.",
+      "category": "navigation",
+      "surfaces": ["query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "table_picker_go",
+      "default": "go",
+      "description": "Opens the table picker with the short key.",
+      "category": "navigation",
+      "surfaces": ["grid", "query_pad"],
+      "modes": ["n"]
+    },
+    {
+      "action": "tab_1",
+      "default": "1",
+      "description": "Opens the first surface-specific view.",
+      "category": "views",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "tab_2",
+      "default": "2",
+      "description": "Opens the second surface-specific view.",
+      "category": "views",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "tab_3",
+      "default": "3",
+      "description": "Opens the third surface-specific view.",
+      "category": "views",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "tab_4",
+      "default": "4",
+      "description": "Opens the entity-relationship view.",
+      "category": "views",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "tab_5",
+      "default": "5",
+      "description": "Opens the column statistics view.",
+      "category": "views",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "tab_6",
+      "default": "6",
+      "description": "Opens the columns view.",
+      "category": "views",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "tab_7",
+      "default": "7",
+      "description": "Opens the foreign-keys view.",
+      "category": "views",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "tab_8",
+      "default": "8",
+      "description": "Opens the indexes view.",
+      "category": "views",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "tab_9",
+      "default": "9",
+      "description": "Opens the constraints view.",
+      "category": "views",
+      "surfaces": ["grid", "query_pad", "sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_row_down",
+      "default": "j",
+      "description": "Moves down within the data rows.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n", "x"]
+    },
+    {
+      "action": "grid_row_up",
+      "default": "k",
+      "description": "Moves up within the data rows.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n", "x"]
+    },
+    {
+      "action": "grid_row_first",
+      "default": "gg",
+      "description": "Moves to the first data row.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n", "x"]
+    },
+    {
+      "action": "grid_row_last",
+      "default": "G",
+      "description": "Moves to the last data row.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n", "x"]
+    },
+    {
+      "action": "grid_col_left",
+      "default": "h",
+      "description": "Moves left with native Vim count and boundary behavior.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_col_right",
+      "default": "l",
+      "description": "Moves right with native Vim count and boundary behavior.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_col_next",
+      "default": "w",
+      "description": "Moves to the next column.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_col_prev",
+      "default": "b",
+      "description": "Moves to the previous column.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_col_tab",
+      "default": "<Tab>",
+      "description": "Moves to the next column with Tab.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_col_tab_back",
+      "default": "<S-Tab>",
+      "description": "Moves to the previous column with Shift-Tab.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_col_end",
+      "default": "e",
+      "description": "Moves to the end of the cell and then advances.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_col_first",
+      "default": "0",
+      "description": "Moves to the first column.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_col_first2",
+      "default": "^",
+      "description": "Moves to the first column with the alternate key.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_col_last",
+      "default": "$",
+      "description": "Moves to the last column.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_prev_mod",
+      "default": "{",
+      "description": "Moves to the previous modified row.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_next_mod",
+      "default": "}",
+      "description": "Moves to the next modified row.",
+      "category": "grid navigation",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_edit",
+      "default": "i",
+      "description": "Opens the current cell for editing.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_edit_enter",
+      "default": "<CR>",
+      "description": "Opens the current cell for editing with Enter.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_cell_buffer",
+      "default": "gB",
+      "description": "Opens the current cell in a split buffer.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_null",
+      "default": "x",
+      "description": "Stages NULL for the current cell.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_column_set",
+      "default": "gU",
+      "description": "Stages one value across the visible column.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_paste",
+      "default": "p",
+      "description": "Pastes the clipboard into the current cell.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_paste_rows",
+      "default": "P",
+      "description": "Pastes lines into consecutive rows.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_insert",
+      "default": "o",
+      "description": "Stages a new blank row.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_clone",
+      "default": "c",
+      "description": "Clones the current row with primary keys cleared.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_delete",
+      "default": "d",
+      "description": "Toggles staged deletion for the current row.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_apply",
+      "default": "a",
+      "description": "Applies all staged database changes.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_undo",
+      "default": "u",
+      "description": "Undoes the latest staged change.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_redo",
+      "default": "<C-r>",
+      "description": "Redoes the latest undone change.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_undo_all",
+      "default": "U",
+      "description": "Clears all staged changes.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_v_edit",
+      "default": "e",
+      "description": "Stages one value across the selected cells.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["x"]
+    },
+    {
+      "action": "grid_v_delete",
+      "default": "d",
+      "description": "Toggles staged deletion for the selected rows.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["x"]
+    },
+    {
+      "action": "grid_v_null",
+      "default": "x",
+      "description": "Stages NULL across the selected cells.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["x"]
+    },
+    {
+      "action": "grid_v_yank",
+      "default": "y",
+      "description": "Yanks the selected cells.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["x"]
+    },
+    {
+      "action": "grid_v_compare",
+      "default": "gd",
+      "description": "Compares exactly two selected rows.",
+      "category": "grid editing",
+      "surfaces": ["grid"],
+      "modes": ["x"]
+    },
+    {
+      "action": "grid_hide_col",
+      "default": "-",
+      "description": "Hides the current column.",
+      "category": "grid display",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_restore_cols",
+      "default": "g-",
+      "description": "Restores all hidden columns.",
+      "category": "grid display",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_col_vis",
+      "default": "gH",
+      "description": "Opens the column visibility picker.",
+      "category": "grid display",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_col_width",
+      "default": "=",
+      "description": "Cycles the current column width.",
+      "category": "grid display",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_type_row",
+      "default": "T",
+      "description": "Toggles the column type row.",
+      "category": "grid display",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_live_sql",
+      "default": "gl",
+      "description": "Toggles the live SQL preview.",
+      "category": "grid display",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_row_view",
+      "default": "K",
+      "description": "Opens the current row or selection as key-value pairs.",
+      "category": "grid display",
+      "surfaces": ["grid"],
+      "modes": ["n", "x"]
+    },
+    {
+      "action": "grid_sort",
+      "default": "s",
+      "description": "Cycles sorting for the current column.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_sort_stack",
+      "default": "S",
+      "description": "Adds or cycles a stacked sort.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_filter_cell",
+      "default": "f",
+      "description": "Filters by the current cell value.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_filter_null",
+      "default": "gn",
+      "description": "Filters the current column for NULL values.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_filter_build",
+      "default": "gF",
+      "description": "Opens the structured filter builder.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_filter_where",
+      "default": "<C-f>",
+      "description": "Prompts for a free-form WHERE expression.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_filter_clear",
+      "default": "F",
+      "description": "Clears user filters while preserving pinned context.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_preset_load",
+      "default": "gp",
+      "description": "Loads a saved filter preset.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_preset_save",
+      "default": "gP",
+      "description": "Saves the current filters as a preset.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_reset_view",
+      "default": "X",
+      "description": "Clears sorting and user filters and returns to page one.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_next_page",
+      "default": "L",
+      "description": "Loads the next page.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_prev_page",
+      "default": "H",
+      "description": "Loads the previous page.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_next_page2",
+      "default": "]p",
+      "description": "Loads the next page with the bracket alias.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_prev_page2",
+      "default": "[p",
+      "description": "Loads the previous page with the bracket alias.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_last_page",
+      "default": "]P",
+      "description": "Loads the last page.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_first_page",
+      "default": "[P",
+      "description": "Loads the first page.",
+      "category": "grid filtering",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_explain_cell",
+      "default": "ge",
+      "description": "Explains the current cell.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_json_tree",
+      "default": "gK",
+      "description": "Opens the current JSON value as a tree.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_preview_sql",
+      "default": "gs",
+      "description": "Previews the staged SQL.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_copy_sql",
+      "default": "gc",
+      "description": "Copies the staged SQL.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_table_info",
+      "default": "gi",
+      "description": "Opens compact table information.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_table_props",
+      "default": "gI",
+      "description": "Opens detailed table properties.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_rename_col",
+      "default": "gN",
+      "description": "Renames the displayed column header.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_col_stats",
+      "default": "gS",
+      "description": "Opens statistics for the current column.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_profile",
+      "default": "gR",
+      "description": "Profiles every column in the current table.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_show_ddl",
+      "default": "gV",
+      "description": "Shows the CREATE TABLE statement.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_explain",
+      "default": "gQ",
+      "description": "Shows the query plan.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_url_open",
+      "default": "gx",
+      "description": "Opens the URL in the current cell.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_diff",
+      "default": "gD",
+      "description": "Compares the current table with another table.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_aggregate",
+      "default": "ga",
+      "description": "Aggregates the current column or selection.",
+      "category": "grid inspection",
+      "surfaces": ["grid"],
+      "modes": ["n", "x"]
+    },
+    {
+      "action": "grid_export_clip",
+      "default": "gE",
+      "description": "Exports the chosen result scope to the clipboard.",
+      "category": "grid export",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_export_file",
+      "default": "gX",
+      "description": "Exports the chosen result scope to a file.",
+      "category": "grid export",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_yank_cell",
+      "default": "y",
+      "description": "Yanks the current cell.",
+      "category": "grid export",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_yank_row",
+      "default": "Y",
+      "description": "Yanks the current row as CSV.",
+      "category": "grid export",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_yank_table",
+      "default": "gY",
+      "description": "Yanks the complete result as CSV.",
+      "category": "grid export",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_yank_md",
+      "default": "gy",
+      "description": "Yanks the result as a Markdown table.",
+      "category": "grid export",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_fk_follow",
+      "default": "gf",
+      "description": "Follows the foreign key in the current cell.",
+      "category": "grid relationships",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_fk_referencing",
+      "default": "gm",
+      "description": "Opens rows that reference the current row.",
+      "category": "grid relationships",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_fk_back",
+      "default": "<C-o>",
+      "description": "Returns to the previous relationship result.",
+      "category": "grid relationships",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_refresh",
+      "default": "r",
+      "description": "Refreshes the current result.",
+      "category": "grid workflow",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_watch",
+      "default": "gW",
+      "description": "Toggles automatic result refresh.",
+      "category": "grid workflow",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_write_mode",
+      "default": "g!",
+      "description": "Toggles write-back for supported local files.",
+      "category": "grid workflow",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_open_edit",
+      "default": "gO",
+      "description": "Reopens a read-only result as an editable table.",
+      "category": "grid workflow",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_fill",
+      "default": "gA",
+      "description": "Stages rows generated by the configured AI provider.",
+      "category": "grid workflow",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_pin",
+      "default": "gL",
+      "description": "Pins or unpins the current result.",
+      "category": "grid workflow",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "grid_results",
+      "default": "gJ",
+      "description": "Opens the result switcher.",
+      "category": "grid workflow",
+      "surfaces": ["grid"],
+      "modes": ["n"]
+    },
+    {
+      "action": "qpad_execute",
+      "default": "<C-CR>",
+      "description": "Executes the current SQL block or selection.",
+      "category": "query pad",
+      "surfaces": ["query_pad"],
+      "modes": ["n", "i", "x"]
+    },
+    {
+      "action": "qpad_execute_new",
+      "default": "<S-CR>",
+      "description": "Executes SQL in a new result split.",
+      "category": "query pad",
+      "surfaces": ["query_pad"],
+      "modes": ["n", "x"]
+    },
+    {
+      "action": "qpad_save",
+      "default": "<C-s>",
+      "description": "Saves the query.",
+      "category": "query pad",
+      "surfaces": ["query_pad"],
+      "modes": ["n"]
+    },
+    {
+      "action": "qpad_ai",
+      "default": "gA",
+      "description": "Generates SQL in the query pad with the configured AI provider.",
+      "category": "query pad",
+      "surfaces": ["query_pad"],
+      "modes": ["n"]
+    },
+    {
+      "action": "qpad_format",
+      "default": "gF",
+      "description": "Formats the query pad SQL.",
+      "category": "query pad",
+      "surfaces": ["query_pad"],
+      "modes": ["n"]
+    },
+    {
+      "action": "qpad_close",
+      "default": "q",
+      "description": "Closes the query pad and returns to the welcome screen.",
+      "category": "query pad",
+      "surfaces": ["query_pad"],
+      "modes": ["n"]
+    },
+    {
+      "action": "qpad_complete",
+      "default": "<C-Space>",
+      "description": "Triggers SQL completion.",
+      "category": "query completion",
+      "surfaces": ["query_pad"],
+      "modes": ["i"],
+      "requires": "completion"
+    },
+    {
+      "action": "qpad_complete_next",
+      "default": "<Tab>",
+      "description": "Triggers completion or selects the next item.",
+      "category": "query completion",
+      "surfaces": ["query_pad"],
+      "modes": ["i"],
+      "requires": "completion"
+    },
+    {
+      "action": "qpad_complete_prev",
+      "default": "<S-Tab>",
+      "description": "Selects the previous completion item or inserts Shift-Tab.",
+      "category": "query completion",
+      "surfaces": ["query_pad"],
+      "modes": ["i"],
+      "requires": "completion"
+    },
+    {
+      "action": "qpad_complete_down",
+      "default": "<Down>",
+      "description": "Selects the next completion item or moves down.",
+      "category": "query completion",
+      "surfaces": ["query_pad"],
+      "modes": ["i"],
+      "requires": "completion"
+    },
+    {
+      "action": "qpad_complete_up",
+      "default": "<Up>",
+      "description": "Selects the previous completion item or moves up.",
+      "category": "query completion",
+      "surfaces": ["query_pad"],
+      "modes": ["i"],
+      "requires": "completion"
+    },
+    {
+      "action": "qpad_complete_accept",
+      "default": "<CR>",
+      "description": "Accepts the selected completion item or inserts a newline.",
+      "category": "query completion",
+      "surfaces": ["query_pad"],
+      "modes": ["i"],
+      "requires": "completion"
+    },
+    {
+      "action": "sidebar_open",
+      "default": "<CR>",
+      "description": "Opens the table under the cursor.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_open_spl",
+      "default": "<S-CR>",
+      "description": "Opens the table under the cursor in a new split.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_expand",
+      "default": "l",
+      "description": "Expands the table under the cursor.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_collapse",
+      "default": "h",
+      "description": "Collapses the table under the cursor.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_expand_z",
+      "default": "zo",
+      "description": "Expands the table with the fold-style key.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_collap_z",
+      "default": "zc",
+      "description": "Collapses the table with the fold-style key.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_expand_all",
+      "default": "L",
+      "description": "Expands every table.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_collap_all",
+      "default": "H",
+      "description": "Collapses every table.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_filter",
+      "default": "/",
+      "description": "Filters tables by name.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_filter_c",
+      "default": "F",
+      "description": "Clears the sidebar filter.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_next",
+      "default": "n",
+      "description": "Moves to the next table.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_prev",
+      "default": "N",
+      "description": "Moves to the previous table.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_refresh",
+      "default": "r",
+      "description": "Refreshes the schema.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_refresh2",
+      "default": "R",
+      "description": "Force-refreshes the schema.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_yank",
+      "default": "y",
+      "description": "Yanks the current table or column name.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_open_s",
+      "default": "go",
+      "description": "Opens the current table with newest rows first.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_close",
+      "default": "<Esc>",
+      "description": "Closes the schema sidebar.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_drop",
+      "default": "D",
+      "description": "Drops the current table after confirmation.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_create",
+      "default": "+",
+      "description": "Creates a table.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_attach",
+      "default": "ga",
+      "description": "Attaches a database to the current DuckDB connection.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_detach",
+      "default": "gd",
+      "description": "Detaches a database from the current DuckDB connection.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "sidebar_conns",
+      "default": "gc",
+      "description": "Opens the connection picker from the sidebar.",
+      "category": "sidebar",
+      "surfaces": ["sidebar"],
+      "modes": ["n"]
+    },
+    {
+      "action": "editor_save",
+      "default": "<CR>",
+      "description": "Saves the edited cell.",
+      "category": "cell editor",
+      "surfaces": ["cell_editor"],
+      "modes": ["n", "i"]
+    },
+    {
+      "action": "editor_save_alt",
+      "default": "<C-s>",
+      "description": "Saves the edited cell with the alternate key.",
+      "category": "cell editor",
+      "surfaces": ["cell_editor"],
+      "modes": ["n", "i"]
+    },
+    {
+      "action": "editor_cancel",
+      "default": "<Esc>",
+      "description": "Cancels the cell edit.",
+      "category": "cell editor",
+      "surfaces": ["cell_editor"],
+      "modes": ["n"]
+    },
+    {
+      "action": "editor_cancel_q",
+      "default": "q",
+      "description": "Cancels the cell edit with the normal-mode key.",
+      "category": "cell editor",
+      "surfaces": ["cell_editor"],
+      "modes": ["n"]
+    },
+    {
+      "action": "editor_open_url",
+      "default": "gx",
+      "description": "Opens the edited value when it is a URL.",
+      "category": "cell editor",
+      "surfaces": ["cell_editor"],
+      "modes": ["n"]
+    },
+    {
+      "action": "editor_cancel_insert",
+      "default": "<C-c>",
+      "description": "Cancels the cell edit from insert mode.",
+      "category": "cell editor",
+      "surfaces": ["cell_editor"],
+      "modes": ["i"]
+    }
+  ]
+}

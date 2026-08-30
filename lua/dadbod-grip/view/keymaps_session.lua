@@ -14,7 +14,7 @@ function M.setup(bufnr, ctx)
   local update_winbar = ctx.update_winbar
   local start_watch = ctx.start_watch
   local stop_watch = ctx.stop_watch
-  local map, kmap = ctx.map, ctx.kmap
+  local kmap = ctx.kmap
 
   -- go / gT / gt: table picker
   local function _pick_table()
@@ -26,7 +26,7 @@ function M.setup(bufnr, ctx)
       grip.open(name, s_url)
     end)
   end
-  map("go", _pick_table, "Pick table")
+  kmap("table_picker_go", _pick_table, "Pick table")
   kmap("table_picker",     _pick_table, "Pick table")
   kmap("table_picker_alt", _pick_table, "Pick table")
 
