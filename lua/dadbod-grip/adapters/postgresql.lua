@@ -116,7 +116,8 @@ function M.readonly_caveat(url)
 end
 
 local function psql(url, sql_str, timeout_ms)
-  return adapters.run_cmd(psql_args(url, sql_str), timeout_ms or DEFAULT_TIMEOUT,
+  return adapters.run_cmd(psql_args(url, sql_str),
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
     { env = psql_env(url, adapters.session_opts()) })
 end
 
@@ -370,10 +371,11 @@ end
 --- Calls callback(tables), or callback(nil) when psql fails.
 --- Used to pre-warm the completion cache on connection switch / GripAttach.
 function M.get_schema_batch_async(url, callback)
-  adapters.run_cmd_async(psql_args(url, SCHEMA_BATCH_SQL), DEFAULT_TIMEOUT, function(stdout, _, code)
-    if code ~= 0 then callback(nil); return end
-    callback(parse_schema_batch(stdout))
-  end, { env = psql_env(url, adapters.session_opts()) })
+  adapters.run_cmd_async(psql_args(url, SCHEMA_BATCH_SQL),
+    adapters.configured_timeout(DEFAULT_TIMEOUT), function(stdout, _, code)
+      if code ~= 0 then callback(nil); return end
+      callback(parse_schema_batch(stdout))
+    end, { env = psql_env(url, adapters.session_opts()) })
 end
 
 function M.explain(sql_str, url)

@@ -21,6 +21,13 @@ local function eq(a, b, msg)
   assert(a == b, (msg or "") .. ": expected " .. tostring(b) .. ", got " .. tostring(a))
 end
 
+test("configured_timeout reads the public setup option", function()
+  local grip = require("dadbod-grip")
+  grip.setup({ timeout = 4321 })
+  eq(adapters.configured_timeout(9999), 4321, "configured timeout")
+  grip.setup({})
+end)
+
 test("run_cmd passes env to the child process", function()
   local out = adapters.run_cmd({ "sh", "-c", "printf %s \"$GRIP_TEST_VAR\"" }, 5000,
     { env = { GRIP_TEST_VAR = "sentinel-value" } })

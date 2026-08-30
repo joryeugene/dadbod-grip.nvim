@@ -10,10 +10,54 @@ local M = { readonly = true }
 
 local DEFAULT_TIMEOUT = 30000
 
---- Parse a dadbod-style SQL Server URL into connection components.
---- "sqlserver://user:pass@host:port/dbname" → {user, pass, host, port, dbname}
+local function decode_query_value(value)
+  return (value:gsub("+", " "):gsub("%%(%x%x)", function(hex)
+    return string.char(tonumber(hex, 16))
+  end))
+end
+
+--- Parse a dadbod-style SQL Server URL and its TLS query options.
+--- Both sqlserver:// and mssql:// are accepted by the shared URL parser.
+--- @return table|nil parsed
+--- @return string|nil err
 local function parse_url(url)
-  return sql_util.parse_dadbod_url(url, "1433")
+  local base, query = url:match("^(.-)%?(.*)$")
+  local parsed = sql_util.parse_dadbod_url(base or url, "1433")
+  if not parsed then return nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url) end
+
+  local params = {}
+  for part in (query or ""):gmatch("[^&]+") do
+    local key, value = part:match("^([^=]+)=?(.*)$")
+    if key then params[decode_query_value(key):lower()] = decode_query_value(value) end
+  end
+
+  local encrypt = (params.encrypt or "mandatory"):lower()
+  local encrypt_aliases = {
+    optional = "optional", o = "optional", ["false"] = "optional", no = "optional", ["0"] = "optional",
+    mandatory = "mandatory", m = "mandatory", ["true"] = "mandatory", yes = "mandatory", ["1"] = "mandatory",
+    strict = "strict", s = "strict",
+  }
+  parsed.encrypt = encrypt_aliases[encrypt]
+  if not parsed.encrypt then
+    return nil, "SQL Server encrypt must be optional, mandatory, or strict"
+  end
+
+  local trust = (params.trust_server_certificate or "false"):lower()
+  if trust == "true" or trust == "yes" or trust == "1" then
+    parsed.trust_server_certificate = true
+  elseif trust ~= "false" and trust ~= "no" and trust ~= "0" and trust ~= "" then
+    return nil, "SQL Server trust_server_certificate must be true or false"
+  end
+
+  parsed.server_certificate = params.server_certificate
+  if parsed.server_certificate == "" then parsed.server_certificate = nil end
+  if parsed.server_certificate and parsed.encrypt == "optional" then
+    return nil, "SQL Server server_certificate requires mandatory or strict encryption"
+  end
+  if parsed.server_certificate and parsed.trust_server_certificate then
+    return nil, "SQL Server server_certificate cannot be combined with trust_server_certificate=true"
+  end
+  return parsed
 end
 
 --- Split a possibly schema-qualified table name; unqualified names are "dbo".
@@ -41,6 +85,9 @@ local function sqlcmd_args(parsed, sql_str, opts)
   local args = {
     "sqlcmd",
     "-S", server,
+    -- Supplying -N makes sqlcmd validate the server certificate unless the
+    -- URL explicitly opts into -C. Mandatory is the secure default.
+    "-N" .. ({ optional = "o", mandatory = "m", strict = "s" })[parsed.encrypt or "mandatory"],
     "-W",
     "-s", "\t",
     -- Without -b sqlcmd exits 0 even when the server rejects the statement, so
@@ -49,11 +96,19 @@ local function sqlcmd_args(parsed, sql_str, opts)
     "-b",
   }
 
+  if parsed.trust_server_certificate then args[#args + 1] = "-C" end
+  if parsed.server_certificate then
+    args[#args + 1] = "-J"
+    args[#args + 1] = parsed.server_certificate
+  end
+
   -- No sql_str means the statements arrive on stdin (GO-separated batches), so
   -- there is no -Q at all.
   if sql_str then
     args[#args + 1] = "-Q"
-    args[#args + 1] = nocount and ("SET NOCOUNT ON;\n" .. sql_str) or sql_str
+    local session = "SET QUOTED_IDENTIFIER ON;\n"
+    if nocount then session = session .. "SET NOCOUNT ON;\n" end
+    args[#args + 1] = session .. sql_str
   end
 
   if parsed.dbname and parsed.dbname ~= "" then
@@ -84,7 +139,8 @@ end
 
 --- Build and run the sqlcmd command, blocking.
 local function sqlcmd(parsed, sql_str, timeout_ms, opts)
-  return adapters.run_cmd(sqlcmd_args(parsed, sql_str, opts), timeout_ms or DEFAULT_TIMEOUT,
+  return adapters.run_cmd(sqlcmd_args(parsed, sql_str, opts),
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
     { env = sqlcmd_env(parsed) })
 end
 
@@ -92,7 +148,8 @@ end
 --- carry one batch, and SET SHOWPLAN_TEXT has to be alone in its own.
 local function sqlcmd_batch(parsed, batches, timeout_ms)
   local script = table.concat(batches, "\nGO\n") .. "\nGO\n"
-  return adapters.run_cmd(sqlcmd_args(parsed, nil), timeout_ms or DEFAULT_TIMEOUT,
+  return adapters.run_cmd(sqlcmd_args(parsed, nil),
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
     { stdin = script, env = sqlcmd_env(parsed) })
 end
 
@@ -155,15 +212,38 @@ local function parse_sqlcmd_table(raw)
   return { columns = columns, rows = rows }
 end
 
+--- Translate the LIMIT/OFFSET tail emitted by the shared query builder into
+--- SQL Server's OFFSET/FETCH syntax. The adapter boundary is the only place
+--- that knows the dialect, so every initial query and requery gets the fix.
+local function normalize_query_sql(sql_str)
+  local base, limit, offset = sql_str:match(
+    "^(.-)%s+[Ll][Ii][Mm][Ii][Tt]%s+(%d+)%s+[Oo][Ff][Ff][Ss][Ee][Tt]%s+(%d+)%s*;?%s*$")
+  if not base then
+    base, limit = sql_str:match("^(.-)%s+[Ll][Ii][Mm][Ii][Tt]%s+(%d+)%s*;?%s*$")
+    offset = "0"
+  end
+  if not base then return sql_str end
+
+  -- OFFSET/FETCH requires an outer ORDER BY. Ignore any ORDER BY inside the
+  -- raw-query wrapper; it does not satisfy SQL Server's outer SELECT.
+  local lower = base:lower()
+  local raw_alias_end = lower:find("%)%s+as%s+_grip")
+  local outer = raw_alias_end and lower:sub(raw_alias_end) or lower
+  if not outer:find("%sorder%s+by%s") then
+    base = base .. " ORDER BY (SELECT NULL)"
+  end
+  return string.format("%s OFFSET %s ROWS FETCH NEXT %s ROWS ONLY", base, offset, limit)
+end
+
 local function run_query(sql_str, url, timeout_ms)
   if vim.fn.executable("sqlcmd") == 0 then
     return nil, "sqlcmd not found. Install Microsoft sqlcmd tools."
   end
 
-  local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url) end
+  local parsed, parse_err = parse_url(url)
+  if not parsed then return nil, parse_err end
 
-  local stdout, stderr, code = sqlcmd(parsed, sql_str, timeout_ms)
+  local stdout, stderr, code = sqlcmd(parsed, normalize_query_sql(sql_str), timeout_ms)
   if code ~= 0 then
     return nil, sqlcmd_error(stdout, stderr, code)
   end
@@ -184,13 +264,14 @@ local function run_query_async(sql_str, url, timeout_ms, callback)
     return
   end
 
-  local parsed = parse_url(url)
+  local parsed, parse_err = parse_url(url)
   if not parsed then
-    vim.schedule(function() callback(nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url)) end)
+    vim.schedule(function() callback(nil, parse_err) end)
     return
   end
 
-  adapters.run_cmd_async(sqlcmd_args(parsed, sql_str), timeout_ms or DEFAULT_TIMEOUT,
+  adapters.run_cmd_async(sqlcmd_args(parsed, normalize_query_sql(sql_str)),
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
     function(stdout, stderr, code)
       if code ~= 0 then
         callback(nil, sqlcmd_error(stdout, stderr, code))
@@ -214,8 +295,8 @@ function M.execute(sql_str, url)
   if vim.fn.executable("sqlcmd") == 0 then
     return nil, "sqlcmd not found. Install Microsoft sqlcmd tools."
   end
-  local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url) end
+  local parsed, parse_err = parse_url(url)
+  if not parsed then return nil, parse_err end
   local stdout, stderr, code = sqlcmd(parsed, sql_str, nil, { nocount = false })
   if code ~= 0 then
     return nil, sqlcmd_error(stdout, stderr, code)
@@ -538,10 +619,11 @@ function M.explain(sql_str, url)
   if vim.fn.executable("sqlcmd") == 0 then
     return nil, "sqlcmd not found. Install Microsoft sqlcmd tools."
   end
-  local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url) end
+  local parsed, parse_err = parse_url(url)
+  if not parsed then return nil, parse_err end
 
-  local stdout, stderr, code = sqlcmd_batch(parsed, { "SET SHOWPLAN_TEXT ON", sql_str })
+  local stdout, stderr, code = sqlcmd_batch(parsed,
+    { "SET SHOWPLAN_TEXT ON", normalize_query_sql(sql_str) })
   if code ~= 0 then
     return nil, sqlcmd_error(stdout, stderr, code)
   end
@@ -562,5 +644,6 @@ M._parse_url = parse_url
 M._parse_sqlcmd_table = parse_sqlcmd_table
 M._sqlcmd_args = sqlcmd_args
 M._sqlcmd_env = sqlcmd_env
+M._normalize_query_sql = normalize_query_sql
 
 return M

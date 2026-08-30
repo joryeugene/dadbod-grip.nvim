@@ -26,6 +26,18 @@ local function parse_output(stdout)
   return db_util.parse_batch(stdout)
 end
 
+--- MariaDB still reports deprecated integer display widths (for example
+--- bigint(20) unsigned). They are formatting hints, not type precision.
+local function normalize_column_type(column_type)
+  local name, _, rest = column_type:match("^(%a+)%((%d+)%)%s*(.*)$")
+  local integer = name and ({
+    tinyint = true, smallint = true, mediumint = true,
+    int = true, integer = true, bigint = true,
+  })[name:lower()]
+  if not integer then return column_type end
+  return name .. (rest ~= "" and (" " .. rest) or "")
+end
+
 --- Build mysql CLI args for a statement, query or DML alike.
 --- Both MySQL and MariaDB use --batch (tab-separated output; --csv is not a
 --- mysql CLI flag). --batch reports no affected-row count for DML, which is why
@@ -79,13 +91,13 @@ end
 --- Run a statement, blocking.
 local function mysql_query(parsed, sql_str, timeout_ms)
   return adapters.run_cmd(mysql_args(parsed, sql_str, adapters.session_opts()),
-    timeout_ms or DEFAULT_TIMEOUT, { env = mysql_env(parsed) })
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT), { env = mysql_env(parsed) })
 end
 
 --- Run a statement without blocking; same argv and same env as mysql_query.
 local function mysql_query_async(parsed, sql_str, timeout_ms, callback)
   adapters.run_cmd_async(mysql_args(parsed, sql_str, adapters.session_opts()),
-    timeout_ms or DEFAULT_TIMEOUT, callback, { env = mysql_env(parsed) })
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT), callback, { env = mysql_env(parsed) })
 end
 
 function M.query(sql_str, url)
@@ -186,7 +198,7 @@ function M.get_column_info(table_name, url)
     end
     table.insert(cols, {
       column_name    = row[1] or "",
-      data_type      = row[2] or "",
+      data_type      = normalize_column_type(row[2] or ""),
       is_nullable    = row[3] or "",
       column_default = row[4] or "",
       constraints    = constraint_str,
@@ -297,7 +309,7 @@ local function parse_schema_batch(stdout)
   for _, row in ipairs(result.rows) do
     local tname     = row[1] or ""
     local col_name  = row[2] or ""
-    local data_type = row[3] or ""
+    local data_type = normalize_column_type(row[3] or "")
     local nullable  = row[4] or ""
     tables[tname] = tables[tname] or {}
     table.insert(tables[tname], { column_name = col_name, data_type = data_type, is_nullable = nullable })
@@ -566,5 +578,6 @@ end
 M._parse_url = parse_url
 M._mysql_args = mysql_args
 M._mysql_env = mysql_env
+M._normalize_column_type = normalize_column_type
 
 return M

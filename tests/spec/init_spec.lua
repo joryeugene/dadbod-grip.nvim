@@ -71,6 +71,12 @@ test("is_queryable_file: .jsonl", function()
   eq(grip._is_queryable_file("/x.jsonl"), true)
 end)
 
+test("is_queryable_file: shared ORC, Arrow, and IPC extensions", function()
+  eq(grip._is_queryable_file("/x.orc"), true)
+  eq(grip._is_queryable_file("/x.arrow"), true)
+  eq(grip._is_queryable_file("/x.ipc"), true)
+end)
+
 test("is_queryable_file: .txt not supported", function()
   eq(grip._is_queryable_file("/x.txt"), false)
 end)
@@ -242,6 +248,10 @@ test("is_queryable_file: http URL with .parquet", function()
   eq(grip._is_queryable_file("http://example.com/data.parquet"), true)
 end)
 
+test("is_queryable_file: S3 URL with .parquet", function()
+  eq(grip._is_queryable_file("s3://analytics/data.parquet"), true)
+end)
+
 test("is_queryable_file: https URL with .json", function()
   eq(grip._is_queryable_file("https://example.com/data.json"), true)
 end)
@@ -281,6 +291,15 @@ test("resolve_query: https URL returns raw spec with URL as file_path", function
   assert(spec, "spec should not be nil")
   eq(tbl, nil, "table_name should be nil for URL queries")
   eq(fpath, "https://example.com/data.csv", "file_path should be the URL")
+end)
+
+test("resolve_query: S3 URL returns raw spec with URL as file_path", function()
+  local spec, tbl, fpath = grip._resolve_query("s3://analytics/data.parquet", 50)
+  assert(spec, "spec should not be nil")
+  eq(tbl, nil, "table_name should be nil for S3 queries")
+  eq(fpath, "s3://analytics/data.parquet", "file_path should be the S3 URL")
+  contains(require("dadbod-grip.query").build_sql(spec), "s3://analytics/data.parquet",
+    "SQL should contain the S3 URL")
 end)
 
 test("resolve_query: URL SQL contains the URL in FROM clause", function()

@@ -301,8 +301,9 @@ local function where_clause(filters)
   return "WHERE " .. table.concat(parts, " AND ")
 end
 
---- Build the data query SQL from a spec.
-function M.build_sql(spec)
+--- Build the data query SQL from a spec. opts.paginate=false preserves the
+--- active filters and sorts but omits LIMIT/OFFSET (used by all-row export).
+function M.build_sql(spec, opts)
   local parts = {}
 
   -- FROM clause
@@ -329,9 +330,11 @@ function M.build_sql(spec)
   end
 
   -- LIMIT / OFFSET
-  table.insert(parts, "LIMIT " .. spec.page_size)
-  if spec.page > 1 then
-    table.insert(parts, "OFFSET " .. ((spec.page - 1) * spec.page_size))
+  if not opts or opts.paginate ~= false then
+    table.insert(parts, "LIMIT " .. spec.page_size)
+    if spec.page > 1 then
+      table.insert(parts, "OFFSET " .. ((spec.page - 1) * spec.page_size))
+    end
   end
 
   return table.concat(parts, " ")

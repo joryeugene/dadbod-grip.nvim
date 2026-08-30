@@ -10,6 +10,7 @@ local esc = sql.escape_literal
 local query  = require("dadbod-grip.query")
 local ui     = require("dadbod-grip.ui")
 local explain = require("dadbod-grip.explain")
+local filetypes = require("dadbod-grip.filetypes")
 
 local M = {}
 M._version = require("dadbod-grip.version")
@@ -42,6 +43,7 @@ local OPTS = {
   -- Mirror the grid's column-name row into the window's winbar so it stays
   -- visible when a long table scrolls past it. Costs one screen line.
   sticky_header = true,
+  open_sidebar = true,
 }
 
 --- Return a copy of the current options.
@@ -61,27 +63,14 @@ function M._render_if_visible(bufnr)
   end
 end
 
--- File extensions :Grip accepts as a file-as-table argument. Deliberately
--- narrower than connections.LOCAL_FILE_EXTS, which also lists .orc/.arrow/.ipc
--- for the connection picker's cwd scan.
-local DUCKDB_EXTENSIONS = {
-  ".parquet", ".csv", ".tsv", ".json", ".ndjson", ".jsonl", ".xlsx",
-}
-
 --- Detect if arg is a queryable file path or URL for DuckDB file-as-table.
 local function is_queryable_file(arg)
   local is_path = arg:match("^/") or arg:match("^~/") or arg:match("^%./") or arg:match("^%.%./")
-  local is_url = arg:match("^https?://")
+  local is_url = arg:match("^https?://") or arg:match("^s3://")
   if not is_path and not is_url then
     return false
   end
-  local lower = arg:lower()
-  -- Strip query string and fragment for URL extension matching
-  local check = is_url and lower:gsub("[?#].*$", "") or lower
-  for _, ext in ipairs(DUCKDB_EXTENSIONS) do
-    if check:sub(-#ext) == ext then return true end
-  end
-  return false
+  return filetypes.has_supported_extension(arg)
 end
 
 --- Resolve what a table-scoped user command should act on: the explicit
@@ -132,7 +121,7 @@ local function resolve_query(arg, page_size)
 
   -- File-as-table or URL-as-table: route to DuckDB
   if is_queryable_file(arg) then
-    if arg:match("^https?://") then
+    if arg:match("^https?://") or arg:match("^s3://") then
       -- Remote URL: pass through to DuckDB httpfs
       local file_sql = string.format("SELECT * FROM '%s'", esc(arg))
       return query.new_raw(file_sql, page_size), nil, arg
@@ -220,6 +209,11 @@ end
 local function do_apply_file_writeback(bufnr, session)
   local st = session.state
   local file_path = session.file_path
+  local fmt = filetypes.write_format(file_path)
+  if not fmt then
+    vim.notify("Write mode does not support this file format", vim.log.levels.ERROR)
+    return
+  end
 
   local updates = data.get_updates(st)
   local inserts = data.get_inserts(st)
@@ -237,15 +231,6 @@ local function do_apply_file_writeback(bufnr, session)
     vim.notify("Write-back cancelled", vim.log.levels.INFO)
     return
   end
-
-  -- Detect output format from file extension
-  local ext = file_path:lower():match("%.([^.]+)$") or ""
-  local fmt_map = {
-    parquet = "PARQUET", csv = "CSV", tsv = "CSV",
-    json = "JSON", ndjson = "JSON", jsonl = "JSON",
-    arrow = "ARROW", ipc = "ARROW",
-  }
-  local fmt = fmt_map[ext] or "CSV"
 
   local safe_path = esc(file_path)
   local stmts = {}
@@ -977,6 +962,11 @@ function M.open(arg, url, opts)
     local active = vim.g.db
     local resolved = db.resolved_url(active)
     conn = (resolved and resolved:match("^duckdb:")) and active or "duckdb::memory:"
+    if opts and opts.write and not filetypes.write_format(file_path) then
+      vim.notify("Write mode does not support this file format; opened read-only",
+        vim.log.levels.WARN)
+      opts = vim.tbl_extend("force", {}, opts, { write = false })
+    end
   end
 
   if not conn or conn == "" then
@@ -1618,6 +1608,7 @@ end
 ---@field pinned_max? integer    Max number of pinned results allowed (nil = unlimited)
 ---@field border? string|table   Float window border style (default: "rounded")
 ---@field cell_split? string     Cell buffer (gB) split style: "horizontal"|"vertical"
+---@field open_sidebar? boolean  Open the schema sidebar on connection (default: true)
 
 ---Setup dadbod-grip with user options.
 ---@param opts? DadbodGripOpts
@@ -1643,6 +1634,7 @@ function M.setup(opts)
     end, '"horizontal" or "vertical"' },
     discovery     = { opts.discovery, "boolean", true },
     sticky_header = { opts.sticky_header, "boolean", true },
+    open_sidebar  = { opts.open_sidebar,  "boolean", true },
   })
   OPTS.limit        = opts.limit        or 100
   OPTS.max_col_width = opts.max_col_width or 40
@@ -1655,6 +1647,7 @@ function M.setup(opts)
   OPTS.cell_split = opts.cell_split or "horizontal"
   if opts.discovery ~= nil then OPTS.discovery = opts.discovery end
   if opts.sticky_header ~= nil then OPTS.sticky_header = opts.sticky_header end
+  OPTS.open_sidebar = opts.open_sidebar ~= false
 
   -- Keymap overrides: stored at module level for keymaps.get() to read.
   if opts.keymaps then
@@ -1826,12 +1819,12 @@ function M.setup(opts)
   vim.api.nvim_create_user_command("GripSave", function(cmd_opts)
     local saved = require("dadbod-grip.saved")
     local name = vim.trim(cmd_opts.args or "")
+    local bufnr = vim.api.nvim_get_current_buf()
     if name == "" then
-      local bufnr = vim.api.nvim_get_current_buf()
       saved.save_prompt(bufnr)
     else
-      local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-      saved.save(name, table.concat(lines, "\n"))
+      local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+      saved.save(name, table.concat(lines, "\n"), vim.b[bufnr].db or vim.g.db)
     end
   end, {
     nargs = "?",
@@ -1843,16 +1836,16 @@ function M.setup(opts)
     local saved = require("dadbod-grip.saved")
     local name = vim.trim(cmd_opts.args or "")
     if name ~= "" then
-      local content = saved.load(name)
+      local content, bound_url = saved.load(name)
       if content then
         local query_pad = require("dadbod-grip.query_pad")
-        local url = db.get_url()
+        local url = bound_url or db.get_url()
         query_pad.open(url, { initial_sql = content })
       end
     else
-      saved.pick(function(content)
+      saved.pick(function(content, _, bound_url)
         local query_pad = require("dadbod-grip.query_pad")
-        local url = db.get_url()
+        local url = bound_url or db.get_url()
         query_pad.open(url, { initial_sql = content })
       end)
     end

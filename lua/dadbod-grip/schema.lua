@@ -69,25 +69,14 @@ local function truncate_name(label, max_cols)
   return label:sub(1, math.max(1, max_cols - 1)) .. "\xe2\x80\xa6"
 end
 
--- File extensions that DuckDB can query directly (mirrors init.lua).
-local FILE_EXTENSIONS = { ".parquet", ".csv", ".tsv", ".json", ".ndjson", ".jsonl", ".xlsx", ".orc", ".arrow", ".ipc" }
+local filetypes = require("dadbod-grip.filetypes")
 
 --- Returns true when the URL is a file path or remote file (not a DB connection).
 local function is_file_url(url)
   if not url then return false end
-  if url:match("^https?://") then
-    local path = url:gsub("[?#].*$", ""):lower()
-    for _, ext in ipairs(FILE_EXTENSIONS) do
-      if path:sub(-#ext) == ext then return true end
-    end
-  end
-  if url:match("^/") or url:match("^~/") or url:match("^%.%.?/") then
-    local lower = url:lower()
-    for _, ext in ipairs(FILE_EXTENSIONS) do
-      if lower:sub(-#ext) == ext then return true end
-    end
-  end
-  return false
+  local is_remote = url:match("^https?://") or url:match("^s3://")
+  local is_path = url:match("^/") or url:match("^~/") or url:match("^%.%.?/")
+  return not not ((is_remote or is_path) and filetypes.has_supported_extension(url))
 end
 
 --- Get or create state for a URL.
@@ -880,8 +869,8 @@ local function setup_keymaps(url)
   -- load_saved: load saved query into query pad
   kmap("load_saved", function()
     local saved = require("dadbod-grip.saved")
-    saved.pick(function(sql_content)
-      require("dadbod-grip.query_pad").open(url, { initial_sql = sql_content })
+    saved.pick(function(sql_content, _, bound_url)
+      require("dadbod-grip.query_pad").open(bound_url or url, { initial_sql = sql_content })
     end)
   end)
 
@@ -1137,11 +1126,31 @@ local function setup_keymaps(url)
   end)
 end
 
---- Compute sidebar width.
-local function sidebar_width()
-  local w = math.floor(vim.o.columns * SIDEBAR_WIDTH_RATIO)
+--- Compute the automatic sidebar width for an editor width.
+local function sidebar_width_for(columns)
+  local w = math.floor(columns * SIDEBAR_WIDTH_RATIO)
   return math.max(SIDEBAR_MIN_WIDTH, math.min(SIDEBAR_MAX_WIDTH, w))
 end
+
+local function sidebar_width()
+  return sidebar_width_for(vim.o.columns)
+end
+
+--- Shrink a sidebar that no longer fits the editor, but never grow one the
+--- user deliberately made narrower than the automatic target.
+local function clamp_sidebar_width(current, columns)
+  return math.min(current, sidebar_width_for(columns))
+end
+
+vim.api.nvim_create_autocmd("VimResized", {
+  group = _ag,
+  callback = function()
+    if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
+    local current = vim.api.nvim_win_get_width(_sidebar_winid)
+    local clamped = clamp_sidebar_width(current, vim.o.columns)
+    if clamped < current then pcall(vim.api.nvim_win_set_width, _sidebar_winid, clamped) end
+  end,
+})
 
 --- Fetch the schema for `url` into state, touching no window.
 ---
@@ -1263,6 +1272,9 @@ M.get_state = get_state
 function M._reset_state()
   _states = {}
 end
+
+M._clamp_sidebar_width = clamp_sidebar_width
+M._sidebar_width_for = sidebar_width_for
 
 M._truncate_name = truncate_name
 M._build_nodes = build_nodes

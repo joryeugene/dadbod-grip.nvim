@@ -14,6 +14,7 @@
 
 local URL = vim.env.GRIP_TEST_MYSQL_URL
 local REQUIRED = vim.env.GRIP_REQUIRE_MYSQL == "1"
+local EXPECTED_FLAVOR = vim.env.GRIP_EXPECT_MYSQL_FLAVOR
 
 local function unavailable(reason)
   if REQUIRED then
@@ -60,6 +61,20 @@ local function eq(a, b, msg)
 end
 
 -- ── query ──────────────────────────────────────────────────────────────
+
+test("server flavor and version match the assigned integration job", function()
+  if not EXPECTED_FLAVOR or EXPECTED_FLAVOR == "" then return end
+  local result, err = my.query("SELECT VERSION()", URL)
+  assert(result, err)
+  local version = (result.rows[1][1] or ""):lower()
+  if EXPECTED_FLAVOR == "mariadb-11.8" then
+    assert(version:find("mariadb", 1, true) and version:match("^11%.8"), version)
+  elseif EXPECTED_FLAVOR == "mysql-8.4" then
+    assert(version:match("^8%.4") and not version:find("mariadb", 1, true), version)
+  else
+    error("unknown GRIP_EXPECT_MYSQL_FLAVOR: " .. EXPECTED_FLAVOR)
+  end
+end)
 
 test("query: basic SELECT returns rows and columns", function()
   local r, err = my.query("SELECT id, name, email, age FROM users ORDER BY id", URL)

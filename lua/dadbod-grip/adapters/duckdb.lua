@@ -59,6 +59,7 @@ local DSN_SECRET_KEYS = {
   auth_token = true, session_token = true,
   api_key = true, apikey = true,
   secret = true, secret_access_key = true,
+  oauth_client_secret = true, scram_client_key = true, scram_server_key = true,
 }
 
 --- Walk the `key=value` pairs of a libpq/DuckDB-style DSN, calling
@@ -142,6 +143,9 @@ end
 --- @return string
 local function redact_attach_error(msg, dsn)
   if not dsn or dsn == "" then return msg end
+  -- DuckDB sometimes returns the input byte-for-byte. Remove that whole copy;
+  -- the value-level masking below handles the rewritten forms it also emits.
+  msg = msg:gsub(vim.pesc(dsn), "<redacted DSN>")
   local function mask(value)
     if value and value ~= "" then
       -- Function replacement, so a "%1" in a password is not expanded.
@@ -189,6 +193,147 @@ local function detect_extension(dsn)
   return nil
 end
 
+--- Decode the key=value body of a postgres/mysql conninfo string. Both quoted
+--- values and backslash-escaped whitespace are accepted by libpq and DuckDB.
+--- @param dsn string
+--- @return table<string,string>
+local function parse_dsn_options(dsn)
+  local body = dsn:match("^postgres:(.*)")
+    or dsn:match("^postgresql:(.*)")
+    or dsn:match("^mysql:(.*)")
+  if not body then return {} end
+
+  local options = {}
+  local pos = 1
+  while pos <= #body do
+    local _, key_end, key = body:find("^%s*([%w_]+)%s*=", pos)
+    if not key then break end
+    pos = key_end + 1
+    while body:sub(pos, pos):match("%s") do pos = pos + 1 end
+
+    local quote = body:sub(pos, pos)
+    local value = {}
+    if quote == "'" or quote == '"' then
+      pos = pos + 1
+      while pos <= #body and body:sub(pos, pos) ~= quote do
+        if body:sub(pos, pos) == "\\" and pos < #body then pos = pos + 1 end
+        value[#value + 1] = body:sub(pos, pos)
+        pos = pos + 1
+      end
+      if body:sub(pos, pos) == quote then pos = pos + 1 end
+    else
+      while pos <= #body and not body:sub(pos, pos):match("%s") do
+        if body:sub(pos, pos) == "\\" and pos < #body then pos = pos + 1 end
+        value[#value + 1] = body:sub(pos, pos)
+        pos = pos + 1
+      end
+    end
+    options[key:lower()] = table.concat(value)
+  end
+  return options
+end
+
+--- DuckDB's documented connection-secret fields. Aliases are collapsed here
+--- so URL-derived `dbname`/`username` and hand-written conninfo both work.
+local PG_SECRET_OPTIONS = {
+  { "HOST", { "host", "hostname" } }, { "HOSTADDR", { "hostaddr" } },
+  { "PORT", { "port" } }, { "DATABASE", { "database", "dbname" } },
+  { "USER", { "user", "username" } },
+  { "PASSWORD", { "password", "passwd", "pwd" } },
+  { "PASSFILE", { "passfile" } }, { "REQUIRE_AUTH", { "require_auth" } },
+  { "CHANNEL_BINDING", { "channel_binding" } },
+  { "CONNECT_TIMEOUT", { "connect_timeout" } },
+  { "CLIENT_ENCODING", { "client_encoding" } }, { "OPTIONS", { "options" } },
+  { "APPLICATION_NAME", { "application_name" } },
+  { "FALLBACK_APPLICATION_NAME", { "fallback_application_name" } },
+  { "KEEPALIVES", { "keepalives" } }, { "KEEPALIVES_IDLE", { "keepalives_idle" } },
+  { "KEEPALIVES_INTERVAL", { "keepalives_interval" } },
+  { "KEEPALIVES_COUNT", { "keepalives_count" } },
+  { "TCP_USER_TIMEOUT", { "tcp_user_timeout" } },
+  { "REPLICATION", { "replication" } }, { "GSSENCMODE", { "gssencmode" } },
+  { "SSLMODE", { "sslmode" } }, { "REQUIRESSL", { "requiressl" } },
+  { "SSLNEGOTIATION", { "sslnegotiation" } },
+  { "SSLCOMPRESSION", { "sslcompression" } }, { "SSLCERT", { "sslcert" } },
+  { "SSLKEY", { "sslkey" } }, { "SSLKEYLOGFILE", { "sslkeylogfile" } },
+  { "SSLPASSWORD", { "sslpassword" } }, { "SSLCERTMODE", { "sslcertmode" } },
+  { "SSLROOTCERT", { "sslrootcert" } }, { "SSLCRL", { "sslcrl" } },
+  { "SSLCRLDIR", { "sslcrldir" } }, { "SSLSNI", { "sslsni" } },
+  { "REQUIREPEER", { "requirepeer" } },
+  { "SSL_MIN_PROTOCOL_VERSION", { "ssl_min_protocol_version" } },
+  { "SSL_MAX_PROTOCOL_VERSION", { "ssl_max_protocol_version" } },
+  { "MIN_PROTOCOL_VERSION", { "min_protocol_version" } },
+  { "MAX_PROTOCOL_VERSION", { "max_protocol_version" } },
+  { "KRBSRVNAME", { "krbsrvname" } }, { "GSSLIB", { "gsslib" } },
+  { "GSSDELEGATION", { "gssdelegation" } },
+  { "SCRAM_CLIENT_KEY", { "scram_client_key" } },
+  { "SCRAM_SERVER_KEY", { "scram_server_key" } }, { "SERVICE", { "service" } },
+  { "TARGET_SESSION_ATTRS", { "target_session_attrs" } },
+  { "LOAD_BALANCE_HOSTS", { "load_balance_hosts" } },
+  { "OAUTH_ISSUER", { "oauth_issuer" } }, { "OAUTH_CLIENT_ID", { "oauth_client_id" } },
+  { "OAUTH_CLIENT_SECRET", { "oauth_client_secret" } },
+  { "OAUTH_SCOPE", { "oauth_scope" } }, { "URI", { "uri" } },
+  { "AWS_RDS_SECRET", { "aws_rds_secret" } },
+}
+
+local MYSQL_SECRET_OPTIONS = {
+  { "HOST", { "host" } }, { "PORT", { "port" } },
+  { "DATABASE", { "database", "dbname" } }, { "USER", { "user", "username" } },
+  { "PASSWORD", { "password", "passwd", "pwd" } }, { "SOCKET", { "socket" } },
+  { "SSL_MODE", { "ssl_mode" } }, { "SSL_CA", { "ssl_ca" } },
+  { "SSL_CAPATH", { "ssl_capath" } }, { "SSL_CERT", { "ssl_cert" } },
+  { "SSL_CIPHER", { "ssl_cipher" } }, { "SSL_CRL", { "ssl_crl" } },
+  { "SSL_CRLPATH", { "ssl_crlpath" } }, { "SSL_KEY", { "ssl_key" } },
+}
+
+local function option_value(options, aliases)
+  for _, key in ipairs(aliases) do
+    if options[key] ~= nil then return options[key] end
+  end
+end
+
+local function has_credentials(options, extension)
+  if extension == "postgres_scanner" then
+    if option_value(options, {
+      "password", "passwd", "pwd", "sslpassword", "oauth_client_secret",
+      "scram_client_key", "scram_server_key",
+    }) ~= nil then return true end
+    return options.uri ~= nil and sql_util.url_password(options.uri) ~= nil
+  end
+  if extension == "mysql_scanner" then
+    return option_value(options, { "password", "passwd", "pwd" }) ~= nil
+  end
+  return false
+end
+
+local function quote_alias(alias)
+  return '"' .. alias:gsub('"', '""') .. '"'
+end
+
+--- Build one ATTACH statement. Credentialed Postgres/MySQL connections use a
+--- named invocation-scoped secret. CREATE SECRET is temporary by default in
+--- DuckDB; persistent secrets are intentionally never created.
+local function attachment_sql(a, index)
+  local alias = quote_alias(a.alias)
+  local options = parse_dsn_options(a.dsn)
+  if has_credentials(options, a.extension) then
+    local kind = a.extension == "postgres_scanner" and "postgres" or "mysql"
+    local fields = kind == "postgres" and PG_SECRET_OPTIONS or MYSQL_SECRET_OPTIONS
+    local name = "grip_attachment_" .. index
+    local secret = { string.format("CREATE SECRET %s (TYPE %s", name, kind) }
+    for _, field in ipairs(fields) do
+      local value = option_value(options, field[2])
+      if value ~= nil then
+        secret[#secret + 1] = string.format(", %s '%s'", field[1], esc(value))
+      end
+    end
+    secret[#secret + 1] = ");"
+    secret[#secret + 1] = string.format(
+      "ATTACH IF NOT EXISTS '' AS %s (TYPE %s, SECRET %s);", alias, kind, name)
+    return table.concat(secret)
+  end
+  return string.format("ATTACH IF NOT EXISTS '%s' AS %s;", esc(a.dsn), alias)
+end
+
 --- Build SQL prefix that installs extensions and attaches databases.
 --- Idempotent: safe to prepend to every query.
 local function build_attach_prefix(url)
@@ -196,18 +341,36 @@ local function build_attach_prefix(url)
   if not atts or #atts == 0 then return "" end
   local seen_ext = {}
   local parts = {}
-  for _, a in ipairs(atts) do
+  for index, a in ipairs(atts) do
     if a.extension and not seen_ext[a.extension] then
       seen_ext[a.extension] = true
       table.insert(parts, string.format("INSTALL %s; LOAD %s;", a.extension, a.extension))
     end
-    -- Escape single quotes in the DSN: it is a string literal here, and an
-    -- unescaped quote breaks every subsequent query on this connection.
-    -- Matches the validation path in M.attach().
-    local dsn_lit = (esc(a.dsn))
-    table.insert(parts, string.format("ATTACH IF NOT EXISTS '%s' AS %s;", dsn_lit, a.alias))
+    table.insert(parts, attachment_sql(a, index))
   end
   return table.concat(parts, "\n") .. "\n"
+end
+
+-- DuckDB's CSV mode prints a result set for every statement received on stdin.
+-- CREATE SECRET currently returns a `Success,true` table, so simply prepending
+-- attachment setup makes that table look like the user's query result. Put a
+-- sentinel result after setup and discard everything through it. The sentinel
+-- stays on stdin with the SQL; it never enters argv.
+local CSV_BOUNDARY = "__dadbod_grip_result_boundary__"
+
+local function with_csv_setup(setup_sql, sql_str)
+  if setup_sql == "" then return sql_str, false end
+  return setup_sql
+    .. "SELECT '" .. CSV_BOUNDARY .. "' AS _grip_boundary;\n"
+    .. sql_str, true
+end
+
+local function strip_csv_setup(stdout)
+  local _, boundary_end = (stdout or ""):find(CSV_BOUNDARY, 1, true)
+  if not boundary_end then return stdout end
+  local line_end = stdout:find("\n", boundary_end + 1, true)
+  if not line_end then return "" end
+  return stdout:sub(line_end + 1)
 end
 
 --- True when the INSTALL statements build_attach_prefix() just emitted may still
@@ -300,8 +463,8 @@ local function split_catalog_schema_table(url, table_name)
 end
 
 --- argv prefix for one duckdb invocation: the executable, the caller's output
---- flags, an optional -readonly, and the database path. Callers append their
---- own "-c <sql>".
+--- flags, an optional -readonly, and the database path. SQL is always sent on
+--- stdin by callers so process listings never expose a query or attachment.
 ---
 --- `db` may be a duckdb: URL or an already-extracted path, so the three spawn
 --- sites (which hold a path) and the tests (which hold a URL) share one
@@ -334,12 +497,12 @@ local function duckdb_args(db, opts, flags)
 end
 
 local function duckdb(db_path, sql_str, timeout_ms, url)
-  local effective_sql = sql_str
-  local effective_timeout = timeout_ms or DEFAULT_TIMEOUT
+  local setup_sql = ""
+  local effective_timeout = timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT)
 
   -- Prepend ATTACH statements for cross-database federation
   if url then
-    effective_sql = build_attach_prefix(url) .. effective_sql
+    setup_sql = build_attach_prefix(url)
     if attach_install_pending(url) then
       effective_timeout = math.max(effective_timeout, NETWORK_TIMEOUT)
     end
@@ -353,15 +516,15 @@ local function duckdb(db_path, sql_str, timeout_ms, url)
     else
       prefix = "INSTALL httpfs; LOAD httpfs;\n"
     end
-    effective_sql = prefix .. effective_sql
+    setup_sql = prefix .. setup_sql
     effective_timeout = math.max(effective_timeout, NETWORK_TIMEOUT)
   end
 
-  local args = duckdb_args(db_path, adapters.session_opts(), { "-csv", "-header" })
-  args[#args + 1] = "-c"
-  args[#args + 1] = effective_sql
+  local effective_sql, has_setup = with_csv_setup(setup_sql, sql_str)
 
-  local stdout, stderr, code = adapters.run_cmd(args, effective_timeout)
+  local args = duckdb_args(db_path, adapters.session_opts(), { "-csv", "-header" })
+  local stdout, stderr, code = adapters.run_cmd(args, effective_timeout, { stdin = effective_sql })
+  if has_setup then stdout = strip_csv_setup(stdout) end
 
   -- Track httpfs install state from stderr output
   if sql_str:find("https?://") then
@@ -400,28 +563,26 @@ end
 --- Non-blocking async variant: spawns DuckDB and calls callback(stdout, stderr, code)
 --- from the main Neovim loop via vim.schedule. Used for schema pre-warming.
 local function duckdb_async(db_path, sql_str, timeout_ms, url, callback)
-  local effective_sql = url and (build_attach_prefix(url) .. sql_str) or sql_str
-  local effective_timeout = timeout_ms or 8000
-  -- Same one-off extension fetch as in duckdb(), from a shorter starting budget.
+  local setup_sql = url and build_attach_prefix(url) or ""
+  local effective_sql, has_setup = with_csv_setup(setup_sql, sql_str)
+  local effective_timeout = timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT)
+  -- Same one-off extension fetch as in duckdb().
   if url and attach_install_pending(url) then
     effective_timeout = math.max(effective_timeout, NETWORK_TIMEOUT)
   end
   local args = duckdb_args(db_path, adapters.session_opts(), { "-csv", "-header" })
-  args[#args + 1] = "-c"
-  args[#args + 1] = effective_sql
-  vim.system(args, { text = true, timeout = effective_timeout }, function(out)
-    vim.schedule(function()
-      if url then note_ext_installed(url, out.code) end
-      -- Same reason as in duckdb(): the ATTACH prefix is in this SQL.
-      callback(out.stdout or "", redact_query_error(out.stderr or "", url), out.code)
-    end)
-  end)
+  adapters.run_cmd_async(args, effective_timeout, function(stdout, stderr, code)
+    if url then note_ext_installed(url, code) end
+    if has_setup then stdout = strip_csv_setup(stdout) end
+    -- Same reason as in duckdb(): the ATTACH prefix is in this SQL.
+    callback(stdout, redact_query_error(stderr, url), code)
+  end, { stdin = effective_sql })
 end
 
 --- Run DML without CSV mode (to get change count output).
 local function duckdb_exec(db_path, sql_str, timeout_ms, url)
   local effective_sql = sql_str
-  local effective_timeout = timeout_ms or DEFAULT_TIMEOUT
+  local effective_timeout = timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT)
   if url then
     effective_sql = build_attach_prefix(url) .. effective_sql
     -- Same one-off extension fetch as in duckdb(): a DML statement against an
@@ -432,11 +593,8 @@ local function duckdb_exec(db_path, sql_str, timeout_ms, url)
   end
 
   local args = duckdb_args(db_path, adapters.session_opts())
-  args[#args + 1] = "-c"
-  args[#args + 1] = effective_sql
-
   -- Same reason as in duckdb(): the ATTACH prefix is in this SQL.
-  local stdout, stderr, code = adapters.run_cmd(args, effective_timeout)
+  local stdout, stderr, code = adapters.run_cmd(args, effective_timeout, { stdin = effective_sql })
   if url then note_ext_installed(url, code) end
   return stdout, redact_query_error(stderr, url), code
 end
@@ -1078,8 +1236,8 @@ function M.url_to_dsn(url)
     end
   end
 
-  -- MySQL URL -> mysql_scanner DSN
-  local my_rest = url:match("^mysql://(.+)")
+  -- MySQL/MariaDB URL -> mysql_scanner DSN
+  local my_rest = url:match("^mysql://(.+)") or url:match("^mariadb://(.+)")
   if my_rest then
     local my_user, my_pass, my_host, my_port, my_db = split_url_rest(my_rest)
     if my_user then
@@ -1123,7 +1281,7 @@ end
 --- postgres/mysql URL forms into scanner DSNs; sqlite/duckdb/motherduck URLs
 --- it hands through because ATTACH takes those as-is.
 local ATTACHABLE_SCHEMES = {
-  postgres = true, postgresql = true, mysql = true,
+  postgres = true, postgresql = true, mysql = true, mariadb = true,
   sqlite = true, duckdb = true, md = true, motherduck = true,
 }
 
@@ -1144,7 +1302,7 @@ local function unsupported_attach_scheme(dsn)
   if not scheme or ATTACHABLE_SCHEMES[scheme:lower()] then return nil end
   return string.format(
     "DuckDB has no scanner for %s:// -- it cannot ATTACH that database. "
-    .. "Attachable: postgres, mysql, sqlite, motherduck.", scheme)
+    .. "Attachable: postgres, mysql/mariadb, sqlite, motherduck.", scheme)
 end
 
 --- Attach an external database to a DuckDB session.
@@ -1154,7 +1312,10 @@ end
 --- bypass db.resolve()); `template` is the pre-expansion DSN, kept only so
 --- the placeholder is what gets persisted. See store_attachment().
 function M.attach(url, dsn, alias, template)
-  dsn = resolve_dsn_path(dsn)
+  if type(alias) ~= "string" or alias == "" or alias:find("[%z\1-\31\127]") then
+    return "Attachment alias must be non-empty and contain no control characters"
+  end
+  dsn = resolve_dsn_path(M.url_to_dsn(dsn))
   local db_path = extract_path(url)
   if not db_path then return "Invalid DuckDB URL" end
   local scheme_err = unsupported_attach_scheme(dsn)
@@ -1163,24 +1324,24 @@ function M.attach(url, dsn, alias, template)
   -- Validate: try the ATTACH before storing (a broken attachment kills all queries)
   local ext = detect_extension(dsn)
   local test_sql = ""
-  local timeout = DEFAULT_TIMEOUT
+  local timeout = adapters.configured_timeout(DEFAULT_TIMEOUT)
   if ext then
     test_sql = string.format("INSTALL %s; LOAD %s;\n", ext, ext)
     -- This is the first INSTALL of the scanner in most sessions -- the attachment
     -- has to exist before any query can carry the prefix -- so this is the call
     -- most likely to be paying for the download. Validation that times out at 10s
     -- rejects a perfectly good DSN with "Failed to attach database".
-    if not _installed_ext[ext] then timeout = NETWORK_TIMEOUT end
+    if not _installed_ext[ext] then timeout = math.max(timeout, NETWORK_TIMEOUT) end
   end
-  test_sql = test_sql .. string.format("ATTACH IF NOT EXISTS '%s' AS %s;\n", esc(dsn), alias)
+  test_sql = test_sql .. attachment_sql({ dsn = dsn, alias = alias, extension = ext }, 1) .. "\n"
   test_sql = test_sql .. "SELECT 42;"
 
   -- Validate in-memory: avoids acquiring a write lock on the main db file.
   -- If we opened db_path here, we'd race with list_tables / get_schema_batch_async
   -- (both also open the same file), causing "Failed to lock file" on connection switch.
-  local args = { "duckdb", "-c", test_sql }
+  local args = { "duckdb" }
 
-  local _, stderr_attach, code_attach = adapters.run_cmd(args, timeout)
+  local _, stderr_attach, code_attach = adapters.run_cmd(args, timeout, { stdin = test_sql })
   if code_attach ~= 0 then
     -- The DSN is in the SQL the CLI just rejected, so its stderr can quote
     -- the credentials straight back at us. Never return it raw.
@@ -1349,7 +1510,7 @@ function M.get_schema_batch_async(url, callback)
   local main_catalog = main_catalog_name(db_path)
   local sql_str = _make_schema_batch_sql(has_attachments, main_catalog)
 
-  duckdb_async(db_path, sql_str, 8000, url, function(stdout, _, code)
+  duckdb_async(db_path, sql_str, nil, url, function(stdout, _, code)
     if code ~= 0 then callback(nil); return end
     callback(_parse_schema_batch_rows(db_util.parse_csv(stdout), main_catalog))
   end)
@@ -1368,6 +1529,9 @@ end
 M._extract_path = extract_path
 M._args = duckdb_args
 M._build_attach_prefix = build_attach_prefix
+M._strip_csv_setup = strip_csv_setup
+M._attachment_sql = attachment_sql
+M._parse_dsn_options = parse_dsn_options
 M._detect_extension = detect_extension
 M._attach_unchecked = store_attachment
 M._redact_attach_error = redact_attach_error

@@ -130,41 +130,7 @@ function M.setup(bufnr, ctx)
 
   -- gE: export in multiple formats
   kmap("grid_export_clip", function()
-    local session_e = ctx.session()
-    if not session_e or not session_e._render then return end
-    local st_e = session_e.state
-    local r_e = session_e._render
-
-    local formats = { "CSV", "TSV", "JSON", "SQL INSERT", "Markdown", "Grip Table" }
-    vim.ui.select(formats, { prompt = "Export format:" }, function(choice)
-      if not choice then return end
-
-      local cols = st_e.columns
-      local rows_data = {}
-      for _, row_idx in ipairs(r_e.ordered) do
-        local row = {}
-        -- Indexed assignment: effective_value returns nil for NULL, and
-        -- table.insert(row, nil) is a no-op that would shift columns left.
-        -- Holes are intentional; consumers below iterate `for ci = 1, #cols`.
-        for ci, col in ipairs(cols) do
-          row[ci] = data.effective_value(st_e, row_idx, col)
-        end
-        table.insert(rows_data, row)
-      end
-
-      local FORMAT_IDS = {
-        ["CSV"] = "csv", ["TSV"] = "tsv", ["JSON"] = "json",
-        ["SQL INSERT"] = "sql", ["Markdown"] = "markdown", ["Grip Table"] = "grip",
-      }
-      -- Empty for a zero-row SQL INSERT export; still copied, as before.
-      local output = table.concat(
-        view._format_export(rows_data, cols, FORMAT_IDS[choice], st_e.table_name or "table_name"), "\n")
-
-      if output then
-        vim.fn.setreg("+", output)
-        vim.notify("Exported " .. #rows_data .. " rows as " .. choice .. " to clipboard", vim.log.levels.INFO)
-      end
-    end)
+    view.export_to_clipboard(bufnr)
   end, "Export in multiple formats")
 
   -- gQ: explain current query (shortcut for :GripExplain)

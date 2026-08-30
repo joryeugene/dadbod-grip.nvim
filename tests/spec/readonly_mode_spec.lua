@@ -896,8 +896,8 @@ end
 
 test("the rendered row keeps RO on a production-length name and url", function()
   with_switchable(nil, function(connections)
-    local orig_columns = vim.o.columns
-    vim.o.columns = 80  -- the float caps at 70, so rows are cut at 64 bytes
+    assert(vim.o.columns == 80,
+      "this integration assertion expects Neovim's natural 80-column headless grid")
     local ok, err = pcall(function()
       local lines, buf = open_real_picker(connections)
       local row = row_with(lines, LONG_RO_NAME)
@@ -922,7 +922,6 @@ test("the rendered row keeps RO on a production-length name and url", function()
         .. "or M never landed on this row: [" .. tostring(unmasked) .. "]")
     end)
     close_floats()
-    vim.o.columns = orig_columns
     if not ok then error(err) end
   end)
 end)
@@ -980,6 +979,24 @@ test("r:ro/rw is offered on a database connection and withheld elsewhere", funct
       { name = "sales",   url = "/tmp/sales.parquet", type = "file" },
       { name = "web",     url = "https://example.com/x.csv" },
       { name = "mssql",   url = "sqlserver://u:p@h/db", type = "sqlserver" },
+    }) do
+      eq(action.when(item), false, "withheld on " .. item.name)
+    end
+  end)
+end)
+
+test("!:write is offered only for explicitly writable local file formats", function()
+  with_switchable(nil, function(connections)
+    local _, action = picker_action(connections, "!", "ro-db")
+    eq(action.when({ name = "local", url = "/tmp/data.csv", _local_file = true }), true,
+      "local CSV")
+    eq(action.when({ name = "saved", url = "/tmp/data.parquet", type = "file" }), true,
+      "saved Parquet")
+    for _, item in ipairs({
+      { name = "xlsx", url = "/tmp/data.xlsx", _local_file = true },
+      { name = "orc", url = "/tmp/data.orc", type = "file" },
+      { name = "remote", url = "https://example.com/data.csv", type = "file" },
+      { name = "db", url = "postgresql://u:p@h/db", type = "postgresql" },
     }) do
       eq(action.when(item), false, "withheld on " .. item.name)
     end

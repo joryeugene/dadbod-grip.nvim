@@ -80,5 +80,17 @@ test("wider window: no truncation on 46-char name at 50 cols", function()
   eq(result, name, "full name fits at 50 cols, no truncation")
 end)
 
+test("sidebar resize clamps at 80/100/160 columns without regrowing a narrow sidebar", function()
+  eq(schema._sidebar_width_for(80), 24, "automatic width at 80 columns")
+  eq(schema._sidebar_width_for(100), 25, "automatic width at 100 columns")
+  eq(schema._sidebar_width_for(160), 36, "automatic width at 160 columns")
+  eq(schema._clamp_sidebar_width(36, 80), 24, "80-column editor")
+  eq(schema._clamp_sidebar_width(36, 100), 25, "100-column editor")
+  eq(schema._clamp_sidebar_width(36, 160), 36, "160-column editor")
+  eq(schema._clamp_sidebar_width(20, 160), 20, "deliberately narrow sidebar stays narrow")
+  eq(schema._clamp_sidebar_width(schema._clamp_sidebar_width(36, 80), 160), 24,
+    "growing editor does not automatically regrow sidebar")
+end)
+
 print(string.format("schema_truncation_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

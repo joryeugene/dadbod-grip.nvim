@@ -67,6 +67,10 @@ function M.setup(bufnr, ctx)
       vim.notify("Remote files are read-only", vim.log.levels.INFO)
       return
     end
+    if not require("dadbod-grip.filetypes").write_format(file_path) then
+      vim.notify("Write mode does not support this file format", vim.log.levels.INFO)
+      return
+    end
 
     if session.write_mode then
       -- Turning OFF: warn if staged changes exist

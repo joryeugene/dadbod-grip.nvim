@@ -402,6 +402,55 @@ test("sqlserver parse_url: full URL parses all fields", function()
   eq(r.host, "db.host", "host")
   eq(r.port, "14330", "port")
   eq(r.dbname, "grip_test", "dbname")
+  eq(r.encrypt, "mandatory", "certificate-validating encryption is the default")
+end)
+
+test("sqlserver TLS URL options map to sqlcmd for both schemes", function()
+  for _, scheme in ipairs({ "sqlserver", "mssql" }) do
+    local parsed = assert(sqlserver._parse_url(scheme
+      .. "://sa:secret@db.host:1433/grip_test?encrypt=strict&server_certificate=%2Ftmp%2Fdb+cert.pem"))
+    eq(parsed.dbname, "grip_test", scheme .. " dbname excludes query")
+    eq(parsed.encrypt, "strict", scheme .. " strict parsed")
+    eq(parsed.server_certificate, "/tmp/db cert.pem", scheme .. " certificate decoded")
+    local args = sqlserver._sqlcmd_args(parsed, "SELECT 1")
+    has_arg(args, "-Ns", scheme .. " strict encryption")
+    has_arg(args, "-J", scheme .. " certificate pinning")
+    has_arg(args, "/tmp/db cert.pem", scheme .. " certificate path")
+  end
+end)
+
+test("sqlserver TLS defaults to validation and allows explicit local trust", function()
+  local secure = assert(sqlserver._parse_url("sqlserver://sa:pw@db/app"))
+  has_arg(sqlserver._sqlcmd_args(secure, "SELECT 1"), "-Nm", "secure default")
+
+  local local_dev = assert(sqlserver._parse_url(
+    "sqlserver://sa:pw@localhost/app?encrypt=optional&trust_server_certificate=true"))
+  local args = sqlserver._sqlcmd_args(local_dev, "SELECT 1")
+  has_arg(args, "-No", "optional encryption")
+  has_arg(args, "-C", "explicit certificate bypass")
+end)
+
+test("sqlserver rejects unsafe or contradictory TLS URL values before spawning", function()
+  local parsed, err = sqlserver._parse_url("sqlserver://sa:pw@db/app?encrypt=maybe")
+  eq(parsed, nil, "invalid encryption rejected")
+  contains(err, "optional, mandatory, or strict", "valid values named")
+
+  parsed, err = sqlserver._parse_url(
+    "mssql://sa:pw@db/app?server_certificate=%2Ftmp%2Fdb.pem&trust_server_certificate=true")
+  eq(parsed, nil, "pinning and bypass cannot be combined")
+  contains(err, "cannot be combined", "conflict explained")
+end)
+
+test("sqlserver translates shared LIMIT pagination to OFFSET/FETCH", function()
+  eq(sqlserver._normalize_query_sql('SELECT * FROM "orders" LIMIT 25'),
+    'SELECT * FROM "orders" ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT 25 ROWS ONLY',
+    "first page gets a deterministic legal ordering")
+  eq(sqlserver._normalize_query_sql(
+      'SELECT * FROM "orders" ORDER BY "total" ASC LIMIT 25 OFFSET 50'),
+    'SELECT * FROM "orders" ORDER BY "total" ASC OFFSET 50 ROWS FETCH NEXT 25 ROWS ONLY',
+    "sort and page offset preserved")
+  eq(sqlserver._normalize_query_sql("SELECT TOP 5 * FROM users"),
+    "SELECT TOP 5 * FROM users", "native SQL Server query unchanged")
 end)
 
 test("sqlserver query: parses sqlcmd tab output", function()
@@ -489,6 +538,21 @@ test("sqlserver query: still sends SET NOCOUNT ON (keeps row count out of the gr
       sqlserver.query("SELECT 1", "sqlserver://sa:pw@localhost:1433/grip_test")
     end)
     contains(last_arg(args), "SET NOCOUNT ON", "query must still set NOCOUNT")
+  end)
+end)
+
+test("sqlserver enables double-quoted identifiers for every command", function()
+  with_executable(function()
+    local query_args = capture_system_args("id\n--\n1\n", function()
+      sqlserver.query('SELECT * FROM "orders"', "sqlserver://sa:pw@localhost/grip_test")
+    end)
+    contains(last_arg(query_args), "SET QUOTED_IDENTIFIER ON", "query session")
+
+    local exec_args = capture_system_args("\n(1 rows affected)\n", function()
+      sqlserver.execute('UPDATE "orders" SET "status" = \'done\' WHERE "id" = 1',
+        "sqlserver://sa:pw@localhost/grip_test")
+    end)
+    contains(last_arg(exec_args), "SET QUOTED_IDENTIFIER ON", "execute session")
   end)
 end)
 
@@ -640,24 +704,35 @@ end)
 
 test("duckdb query: SQL with HTTP URL prepends INSTALL/LOAD httpfs", function()
   with_executable(function()
-    local args = capture_system_args("col\nval\n", function()
+    local args, opts = capture_system_call("col\nval\n", function()
       duckdb.query("SELECT * FROM 'https://example.com/data.csv'", "duckdb::memory:")
     end)
-    local sql_arg = args[#args]
-    contains(sql_arg, "INSTALL httpfs", "should prepend INSTALL httpfs")
-    contains(sql_arg, "LOAD httpfs", "should prepend LOAD httpfs")
-    contains(sql_arg, "https://example.com/data.csv", "original SQL preserved")
+    assert(not vim.tbl_contains(args, "-c"), "DuckDB SQL must not be in argv")
+    contains(opts.stdin, "INSTALL httpfs", "should prepend INSTALL httpfs")
+    contains(opts.stdin, "LOAD httpfs", "should prepend LOAD httpfs")
+    contains(opts.stdin, "https://example.com/data.csv", "original SQL preserved")
   end)
 end)
 
 test("duckdb query: SQL without HTTP URL does not prepend httpfs", function()
   with_executable(function()
-    local args = capture_system_args("col\nval\n", function()
+    local _, opts = capture_system_call("col\nval\n", function()
       duckdb.query("SELECT * FROM users", "duckdb::memory:")
     end)
-    local sql_arg = args[#args]
-    assert(not sql_arg:find("httpfs", 1, true), "should not contain httpfs: " .. sql_arg)
+    assert(not opts.stdin:find("httpfs", 1, true), "should not contain httpfs: " .. opts.stdin)
   end)
+end)
+
+test("duckdb query: attachment setup rows cannot replace query results", function()
+  local output = table.concat({
+    "Success",
+    "true",
+    "_grip_boundary",
+    "__dadbod_grip_result_boundary__",
+    "count_star()",
+    "15",
+  }, "\n") .. "\n"
+  eq(duckdb._strip_csv_setup(output), "count_star()\n15\n", "setup output stripped")
 end)
 
 test("duckdb query: httpfs timeout is at least 30 seconds", function()
@@ -677,11 +752,10 @@ end)
 
 test("duckdb query: http URL also triggers httpfs", function()
   with_executable(function()
-    local args = capture_system_args("col\nval\n", function()
+    local _, opts = capture_system_call("col\nval\n", function()
       duckdb.query("SELECT * FROM 'http://example.com/data.csv'", "duckdb::memory:")
     end)
-    local sql_arg = args[#args]
-    contains(sql_arg, "httpfs", "http should also trigger httpfs")
+    contains(opts.stdin, "httpfs", "http should also trigger httpfs")
   end)
 end)
 
@@ -774,6 +848,21 @@ test("duckdb attach: a DSN with no scanner keeps the default validation timeout"
   duckdb.detach(url, "plain")
 end)
 
+test("duckdb attach: plain validation honors the configured timeout", function()
+  local grip = require("dadbod-grip")
+  grip.setup({ timeout = 4321 })
+  local ok, err = pcall(function()
+    local url = "duckdb:attach_configured_timeout.db"
+    local _, opts = capture_system_call("42\n", function()
+      duckdb.attach(url, "/tmp/plain.duckdb", "plain")
+    end)
+    eq(opts.timeout, 4321, "configured timeout")
+    duckdb.detach(url, "plain")
+  end)
+  grip.setup({})
+  if not ok then error(err) end
+end)
+
 -- ── SQLite get_constraints ───────────────────────────────────────────────────
 
 test("sqlite get_constraints: queries sqlite_master with table name", function()
@@ -836,35 +925,33 @@ end)
 
 test("duckdb get_constraints: queries duckdb_constraints() for table", function()
   with_executable(function()
-    local captured_args
+    local captured_opts
     local orig = vim.system
-    vim.system = function(a, _o, cb)
-      captured_args = a
+    vim.system = function(_a, opts, cb)
+      captured_opts = opts
       local r = { stdout = "", stderr = "", code = 0 }
       if cb then cb(r) else return { wait = function() return r end } end
     end
     duckdb.get_constraints("users", "duckdb::memory:")
     vim.system = orig
-    local sql_arg = captured_args[#captured_args]
-    contains(sql_arg, "duckdb_constraints", "queries duckdb_constraints()")
-    contains(sql_arg, "users", "filters by table name")
+    contains(captured_opts.stdin, "duckdb_constraints", "queries duckdb_constraints()")
+    contains(captured_opts.stdin, "users", "filters by table name")
   end)
 end)
 
 test("duckdb get_constraints: filters by schema name", function()
   with_executable(function()
-    local captured_args
+    local captured_opts
     local orig = vim.system
-    vim.system = function(a, _o, cb)
-      captured_args = a
+    vim.system = function(_a, opts, cb)
+      captured_opts = opts
       local r = { stdout = "", stderr = "", code = 0 }
       if cb then cb(r) else return { wait = function() return r end } end
     end
     duckdb.get_constraints("myschema.users", "duckdb:test.db")
     vim.system = orig
-    local sql_arg = captured_args[#captured_args]
-    contains(sql_arg, "myschema", "includes schema filter")
-    contains(sql_arg, "users", "includes table filter")
+    contains(captured_opts.stdin, "myschema", "includes schema filter")
+    contains(captured_opts.stdin, "users", "includes table filter")
   end)
 end)
 
@@ -1102,11 +1189,11 @@ local function assert_uses_column_type(sql, label)
     label .. " must not rebuild the type from CHARACTER_MAXIMUM_LENGTH")
 end
 
-test("mysql get_schema_batch: type comes from COLUMN_TYPE verbatim", function()
+test("mysql get_schema_batch: type comes from COLUMN_TYPE with MariaDB widths normalized", function()
   local tsv = table.concat({
     "table_name\tcolumn_name\tdata_type\tis_nullable",
     "type_zoo\tfeeling\tenum('happy','sad','neutral')\tYES",
-    "type_zoo\tbig_unsigned\tbigint unsigned\tYES",
+    "type_zoo\tbig_unsigned\tbigint(20) unsigned\tYES",
   }, "\n") .. "\n"
 
   local args, result
@@ -1119,7 +1206,7 @@ test("mysql get_schema_batch: type comes from COLUMN_TYPE verbatim", function()
   assert_uses_column_type(last_arg(args), "SCHEMA_BATCH_SQL")
   eq(result["type_zoo"][1].data_type, "enum('happy','sad','neutral')",
     "enum value list survives the TSV round-trip, commas and quotes included")
-  eq(result["type_zoo"][2].data_type, "bigint unsigned", "unsigned modifier kept")
+  eq(result["type_zoo"][2].data_type, "bigint unsigned", "display width removed; unsigned kept")
 end)
 
 test("mysql get_column_info: type comes from COLUMN_TYPE verbatim", function()
@@ -1127,6 +1214,7 @@ test("mysql get_column_info: type comes from COLUMN_TYPE verbatim", function()
     "column_name\tdata_type\tis_nullable\tcolumn_default\tconstraints",
     "feeling\tenum('happy','sad','neutral')\tYES\t\t",
     "approx_float\tfloat\tYES\t\t",
+    "maria_id\tint(11) unsigned\tNO\t\t",
     "unit_price\tdecimal(10,2)\tNO\t\tPRI",
   }, "\n") .. "\n"
 
@@ -1140,8 +1228,9 @@ test("mysql get_column_info: type comes from COLUMN_TYPE verbatim", function()
   assert_uses_column_type(last_arg(args), "get_column_info SQL")
   eq(cols[1].data_type, "enum('happy','sad','neutral')", "enum list")
   eq(cols[2].data_type, "float", "float without a bogus precision")
-  eq(cols[3].data_type, "decimal(10,2)", "decimal keeps precision and scale")
-  eq(cols[3].constraints, "PRIMARY KEY", "COLUMN_KEY still maps to a constraint label")
+  eq(cols[3].data_type, "int unsigned", "MariaDB integer width removed; modifier kept")
+  eq(cols[4].data_type, "decimal(10,2)", "decimal keeps precision and scale")
+  eq(cols[4].constraints, "PRIMARY KEY", "COLUMN_KEY still maps to a constraint label")
 end)
 
 -- ── SQLite get_schema_batch ──────────────────────────────────────────────────
@@ -1232,9 +1321,8 @@ end
 
 -- Lives here rather than beside the other scanner-timeout tests because it needs
 -- await_batch. The pre-warm path prepends the same ATTACH prefix, so it pays the
--- same one-off extension fetch -- and it starts from a *shorter* budget than a
--- foreground query, so without the headroom it is the first thing to time out on
--- a cold connection.
+-- same one-off extension fetch and needs the same cold-install headroom as a
+-- foreground query.
 test("duckdb get_schema_batch_async: a cold scanner INSTALL gets the network timeout", function()
   duckdb._forget_installed_extensions()
   local url = "duckdb:async_scanner.db"
@@ -1245,6 +1333,24 @@ test("duckdb get_schema_batch_async: a cold scanner INSTALL gets the network tim
   assert(opts.timeout >= 60000,
     "the pre-warm path pays the same fetch, got " .. tostring(opts.timeout))
   duckdb.detach(url, "legacy")
+end)
+
+test("SQLite and DuckDB async schema pre-warm honor the configured timeout", function()
+  local grip = require("dadbod-grip")
+  grip.setup({ timeout = 4321 })
+  local ok, err = pcall(function()
+    for _, case in ipairs({
+      { name = "SQLite", run = function(cb) sqlite.get_schema_batch_async("sqlite:test.db", cb) end },
+      { name = "DuckDB", run = function(cb) duckdb.get_schema_batch_async("duckdb::memory:", cb) end },
+    }) do
+      local _, opts = capture_system_call("", function()
+        await_batch(function(cb) case.run(cb) end)
+      end)
+      eq(opts.timeout, 4321, case.name .. " configured async timeout")
+    end
+  end)
+  grip.setup({})
+  if not ok then error(err) end
 end)
 
 -- Adapters must not silently lose the async variant: warm_schema is a no-op

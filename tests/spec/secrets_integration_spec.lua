@@ -575,7 +575,8 @@ test("the secret-key list covers the audited libpq and token keywords", function
   for _, key in ipairs({
     "password", "sslpassword", "passwd", "pwd", "token", "motherduck_token",
     "access_token", "auth_token", "session_token", "api_key", "apikey",
-    "secret", "secret_access_key",
+    "secret", "secret_access_key", "oauth_client_secret", "scram_client_key",
+    "scram_server_key",
   }) do
     eq(keys[key], true, key .. " is classified as a credential")
   end

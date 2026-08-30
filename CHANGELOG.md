@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Scheduled callback failures can no longer produce a green test run.** The
+  headless harness records errors raised from `vim.schedule` callbacks and
+  exits nonzero; a subprocess regression test proves both focused specs and
+  the full runner fail correctly.
+- **Layout tests no longer corrupt Neovim's headless grid.** Width policy is
+  tested as pure arithmetic, the real headless workspace stays at its natural
+  geometry, and spinner cleanup uses the public `:redraw` command instead of
+  Neovim's experimental redraw API.
+- **Saved queries no longer depend on a connection name or URL.** Persisted
+  connections receive stable opaque IDs, new query metadata stores only that
+  ID, and rename, promotion, deduplication, recent-use, and attachment edits
+  preserve it. Safe legacy URL metadata remains readable; credential-bearing
+  legacy URLs are removed and never auto-connected. A loaded query pad rebinds
+  only after its saved connection switch succeeds.
+- **SQL Server now executes shared grid SQL correctly.** `LIMIT`/`OFFSET` is
+  translated to `OFFSET`/`FETCH`, every command enables quoted identifiers,
+  and TLS URL options support validated optional, mandatory, and strict modes
+  for both `sqlserver://` and `mssql://`.
+- **MariaDB integer display widths no longer leak into schema labels.** Types
+  such as `bigint(20) unsigned` render as `bigint unsigned` without losing
+  modifiers.
+- **Exports now distinguish the current page from every matching row.**
+  All-row exports preserve filters and sorting, large exports are confirmed,
+  clipboard output is capped, and file output uses a same-directory temporary
+  file followed by atomic rename so cancellation and failure leave no partial
+  destination.
+- **Public adapter timeouts now honor `setup({ timeout = ... })`.** The value is
+  used consistently by PostgreSQL, MySQL/MariaDB, SQLite, DuckDB, and SQL
+  Server instead of being documented but ignored by most blocking calls.
+- **Read-only file formats can no longer be overwritten as CSV.** XLSX and ORC
+  remain queryable, but write mode is offered only when Grip has an explicit
+  DuckDB `COPY` format. Picking a local file now opens it read-only unless the
+  user deliberately enables write mode.
+- **Hidden picker actions can no longer execute.** Contextual action predicates
+  now guard the key handler as well as the footer, so a hidden write, promote,
+  or connection action cannot run from its shortcut.
 - **Opening a table dropped the spinner, then froze.** `init.open()` ran three round-trips —
   the `SELECT`, the primary-key lookup, and the pagination `COUNT` — but only the `SELECT` was
   inside the float. On a remote connection the spinner vanished, the editor sat frozen through
@@ -96,6 +132,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`setup({ open_sidebar = false })`** opens directly into the main workspace.
+  The sidebar still opens on demand, clamps on terminal shrink, and does not
+  automatically grow over a deliberately narrow user size.
+- **A shared data-file extension registry** now routes Parquet, CSV, TSV, JSON,
+  NDJSON, JSONL, XLSX, ORC, Arrow, and IPC consistently from startup,
+  connections, and schema discovery. Direct S3 file URLs follow the same
+  route instead of falling through as table names.
+- **Required live integration scenarios** cover schema discovery, CRUD,
+  filtering, sorting, pagination, requery, atomic export, and DuckDB federation
+  against PostgreSQL 16, MySQL 8.4, and MariaDB 11.8 on pull requests, with SQL
+  Server 2025 as a nightly, manual, and tag gate. CI also runs Neovim 0.10 and
+  stable, uploads LuaCov artifacts, pins Actions by commit, and gives workflows
+  read-only permissions.
+- **Documentation contract tests** compare public commands, all default
+  mappings, and supported extensions against code so those lists cannot drift
+  silently again.
 - **A connection can reference its password instead of storing it.** Any `${VAR}` in a connection
   URL is resolved when you connect, from the `.env` file the new `env_file` entry field points at,
   falling back to the process environment. The secret stays where it already lives and never
@@ -166,6 +218,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Health checks cover every supported integration.** `sqlcmd` is reported
+  with the other database clients, and an installed Ollama executable satisfies
+  the AI-provider check without requiring a cloud API key.
 - **`gS` shows a distribution instead of a bare top-5 list.** Text, boolean and date columns list
   their top 8 values (was 5), and numeric columns show bucket ranges rather than individual
   values, since the top values of an `id`-like column are all count 1. The popup still issues
@@ -207,6 +262,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **DuckDB SQL, attachment DSNs, and credentials no longer appear in process
+  arguments.** Every DuckDB query is sent through stdin. Credentialed
+  PostgreSQL/MySQL attachments use invocation-scoped temporary secrets, never
+  persistent DuckDB secrets, and errors redact passwords and complete DSNs. A
+  process-level `/proc/<pid>/cmdline` test guards the boundary. Prefix setup
+  result sets are discarded before parsing so `CREATE SECRET` cannot replace
+  the user's actual query result.
 - **`psql`, `mysql` and `sqlcmd` passwords no longer travel in argv, and URLs no longer appear
   unredacted in error messages.** `psql -P`-style argv is readable by any user on the machine via
   `ps -eo args`, so the password now reaches those three clients through their environment instead:
@@ -214,10 +276,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   — `parse_dadbod_url` deliberately does not decode, and decoding those would break existing
   passwords containing `%`). Two limits, both worth stating plainly. This protects against *other
   users*, not against a process running as you, which can read your environment just as easily as
-  your argv. And it does **not** cover DuckDB federation: `ATTACH` inlines the attached database's
-  DSN into the SQL string, which grip passes to `duckdb -c`, so an attachment's password is in `ps`
-  output for the lifetime of every query against that connection. Closing that needs DuckDB's
-  secrets manager (`CREATE SECRET`) and is tracked separately. Separately, URLs in error
+  your argv. DuckDB federation is covered separately above because its credentials travel through
+  temporary secrets on stdin rather than client environment variables. Separately, URLs in error
   text are now redacted through the shared `sql.redact_url`, including the case where the password
   itself contains an `@` — the authority is split on the last `@`, not the first, which previously
   left `p@ssw0rd` masked as `***@ssw0rd`. DuckDB's federation path got the same treatment the hard

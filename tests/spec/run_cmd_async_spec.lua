@@ -55,6 +55,21 @@ test("run_cmd_async: real spawn delivers stdout/stderr/code, asynchronously", fu
   eq(got.code, 3, "exit code delivered")
 end)
 
+test("run_cmd_async: feeds stdin without adding it to argv", function()
+  local done, got = false, nil
+  local secret = "stdin-only-value-7f3c"
+  adapters.run_cmd_async({ "sh", "-c", "IFS= read -r line; printf '%s' \"$line\"" }, 5000,
+    function(stdout, stderr, code)
+      got = { stdout = stdout, stderr = stderr, code = code }
+      done = true
+    end, { stdin = secret .. "\n" })
+  vim.wait(2000, function() return done end, 1)
+  assert(done, "callback never fired")
+  eq(got.stdout, secret, "stdin delivered")
+  eq(got.stderr, "", "no stderr")
+  eq(got.code, 0, "exit code delivered")
+end)
+
 -- vim.system's own real callback is already asynchronous, so the happy-path
 -- test above can't tell "run_cmd_async defers via vim.schedule" apart from
 -- "vim.system just happens to always call back later anyway". Mock vim.system

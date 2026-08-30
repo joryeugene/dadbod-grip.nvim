@@ -3,6 +3,8 @@
 
 local ui    = require("dadbod-grip.ui")
 local paths = require("dadbod-grip.paths")
+local secrets = require("dadbod-grip.secrets")
+local sql_util = require("dadbod-grip.sql")
 
 local M = {}
 
@@ -19,8 +21,106 @@ local function sanitize(name)
   return name:gsub("[^%w%-_]", "-"):gsub("%-+", "-"):gsub("^%-", ""):gsub("%-$", "")
 end
 
+--- Remove and return leading Grip metadata without exposing it to the editor.
+local function extract_metadata(content)
+  local connection_id, legacy_url
+  while true do
+    local id = content:match("^%-%- grip:connection=([^\n]+)\n?")
+    if id then
+      connection_id = connection_id or id
+      content = content:gsub("^%-%- grip:connection=[^\n]*\n?", "", 1)
+    else
+      local url = content:match("^%-%- grip:url=([^\n]+)\n?")
+      if not url then break end
+      legacy_url = legacy_url or url
+      content = content:gsub("^%-%- grip:url=[^\n]*\n?", "", 1)
+    end
+  end
+  return content, connection_id, legacy_url
+end
+
+local SECRET_KEYS = {
+  password = true, passwd = true, pwd = true, token = true,
+  motherduck_token = true, access_token = true, auth_token = true,
+  session_token = true, api_key = true, apikey = true,
+  secret = true, secret_access_key = true,
+}
+
+local function has_literal_credential(url)
+  local password = sql_util.url_password(url)
+  if password and not secrets.has_template(password) then return true end
+  for key, value in url:gmatch("[?&]([^=&]+)=([^&]*)") do
+    if SECRET_KEYS[key:lower()] and value ~= "" and not secrets.has_template(value) then
+      return true
+    end
+  end
+  local pos = 1
+  while pos <= #url do
+    local _, value_start, key = url:find("([%w_]+)%s*=%s*", pos)
+    if not key then break end
+    pos = value_start + 1
+    local quote = url:sub(pos, pos)
+    local value
+    if quote == "'" or quote == '"' then
+      local i = pos + 1
+      while i <= #url do
+        if url:sub(i, i) == "\\" then
+          i = i + 2
+        elseif url:sub(i, i) == quote then
+          break
+        else
+          i = i + 1
+        end
+      end
+      value = url:sub(pos + 1, i - 1)
+      pos = i + 1
+    else
+      value = url:match("^%S*", pos) or ""
+      pos = pos + #value
+    end
+    if SECRET_KEYS[key:lower()] and value ~= "" and not secrets.has_template(value) then
+      return true
+    end
+  end
+  return false
+end
+
+local function apply_metadata(content)
+  local clean, connection_id, legacy_url = extract_metadata(content)
+  local connections = require("dadbod-grip.connections")
+  local bound_url
+
+  if connection_id then
+    local conn, reason = connections.find_by_id(connection_id)
+    if conn then
+      if conn.url == vim.g.db or connections.switch(conn.url, nil, conn.type) then
+        bound_url = conn.url
+      end
+    elseif reason == "ambiguous" then
+      vim.notify("Grip: saved query connection ID is ambiguous; kept the current connection",
+        vim.log.levels.WARN)
+    else
+      vim.notify("Grip: saved query connection no longer exists; kept the current connection",
+        vim.log.levels.WARN)
+    end
+  elseif legacy_url then
+    if has_literal_credential(legacy_url) then
+      vim.notify(
+        "Grip: legacy saved query contains credentials; it was not auto-connected. Resave it to remove them.",
+        vim.log.levels.WARN)
+    else
+      if legacy_url == vim.g.db or connections.switch(legacy_url, nil) then
+        bound_url = legacy_url
+      end
+      vim.notify("Grip: legacy saved-query metadata will migrate when you next save it",
+        vim.log.levels.WARN)
+    end
+  end
+  return clean, bound_url
+end
+
 --- Save query content to a named .sql file.
---- Optional url stored as first-line comment: -- grip:url=URL
+--- Persisted connections are referenced by opaque ID; URLs never enter SQL.
 function M.save(name, content, url)
   ensure_dir()
   local fname = sanitize(name)
@@ -29,14 +129,17 @@ function M.save(name, content, url)
     return
   end
   local path = queries_dir() .. "/" .. fname .. ".sql"
-  local body = content
-  if url and url ~= "" then
-    -- Strip any existing grip:url header before prepending new one
-    body = body:gsub("^%-%- grip:url=[^\n]*\n?", "")
-    body = "-- grip:url=" .. url .. "\n" .. body
-  end
+  local body = extract_metadata(content)
+  local connection_id = url and url ~= ""
+      and require("dadbod-grip.connections").ensure_id(url) or nil
+  if connection_id then body = "-- grip:connection=" .. connection_id .. "\n" .. body end
   vim.fn.writefile(vim.split(body, "\n"), path)
-  vim.notify("Grip: saved query → " .. fname .. ".sql  (gq to browse)", vim.log.levels.INFO)
+  if url and url ~= "" and not connection_id then
+    vim.notify("Grip: saved query without a connection; save the connection first to bind it",
+      vim.log.levels.WARN)
+  else
+    vim.notify("Grip: saved query → " .. fname .. ".sql  (gq to browse)", vim.log.levels.INFO)
+  end
 end
 
 --- Prompt for name and save buffer content.
@@ -57,18 +160,9 @@ function M.save_prompt(bufnr)
   end)
 end
 
---- Extract URL from saved query content (reads the grip:url header comment).
---- Returns (clean_content, url_or_nil).
-local function extract_url(content)
-  local url = content:match("^%-%- grip:url=([^\n]+)\n?")
-  if url then
-    local clean = content:gsub("^%-%- grip:url=[^\n]*\n?", "")
-    return clean, url
-  end
-  return content, nil
-end
-
---- Load a named query. Returns content string or nil.
+--- Load a named query.
+--- @return string|nil content
+--- @return string|nil bound_url  resolved connection only when switching succeeded
 function M.load(name)
   local fname = sanitize(name)
   local path = queries_dir() .. "/" .. fname .. ".sql"
@@ -76,7 +170,7 @@ function M.load(name)
     vim.notify("Grip: query not found: " .. fname, vim.log.levels.ERROR)
     return nil
   end
-  return table.concat(vim.fn.readfile(path), "\n")
+  return apply_metadata(table.concat(vim.fn.readfile(path), "\n"))
 end
 
 --- List all saved queries. Returns { {name, path, mtime}, ... }.
@@ -103,7 +197,7 @@ function M.delete(name)
   end
 end
 
---- Open a picker to load a saved query. Calls callback(content, name).
+--- Open a picker to load a saved query. Calls callback(content, name, bound_url).
 function M.pick(callback)
   local queries = M.list()
   if #queries == 0 then
@@ -119,7 +213,7 @@ function M.pick(callback)
       local ok, raw_lines = pcall(vim.fn.readfile, q.path)
       if not ok then return { "(file not readable)" } end
       local raw = table.concat(raw_lines, "\n")
-      local content = extract_url(raw)  -- strip "-- grip:url=..." header
+      local content = extract_metadata(raw)
       local out = {}
       for _, ln in ipairs(vim.split(content:match("^%s*(.-)%s*$"), "\n", { plain = true })) do
         table.insert(out, ln)
@@ -128,11 +222,8 @@ function M.pick(callback)
     end,
     on_select = function(q)
       local raw = table.concat(vim.fn.readfile(q.path), "\n")
-      local content, url = extract_url(raw)
-      if url and url ~= "" and url ~= vim.g.db then
-        require("dadbod-grip.connections").switch(url, q.name .. " (saved)")
-      end
-      callback(content, q.name)
+      local content, bound_url = apply_metadata(raw)
+      callback(content, q.name, bound_url)
     end,
     on_delete = function(q, refresh_fn)
       if ui.confirm("Delete '" .. q.name .. "'? (y/N): ") then
@@ -142,5 +233,8 @@ function M.pick(callback)
     end,
   })
 end
+
+M._extract_metadata = extract_metadata
+M._has_literal_credential = has_literal_credential
 
 return M

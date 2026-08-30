@@ -484,7 +484,8 @@ local function setup_keymaps(bufnr, url)
   -- load_saved: load saved query into buffer
   kmap("load_saved", "n", function()
     local saved = require("dadbod-grip.saved")
-    saved.pick(function(sql_content)
+    saved.pick(function(sql_content, _, bound_url)
+      if bound_url then vim.b[bufnr].db = bound_url end
       vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(sql_content, "\n"))
       vim.bo[bufnr].modified = false
     end)

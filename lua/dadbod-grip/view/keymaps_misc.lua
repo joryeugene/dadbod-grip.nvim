@@ -22,10 +22,11 @@ function M.setup(bufnr, ctx)
     local saved = require("dadbod-grip.saved")
     query_pad.open(s_url, {})
     vim.schedule(function()
-      saved.pick(function(sql_content)
+      saved.pick(function(sql_content, _, bound_url)
         -- Find the query pad buffer and load SQL into it
         for _, buf in ipairs(vim.api.nvim_list_bufs()) do
           if vim.api.nvim_buf_get_name(buf):match("grip://query") then
+            if bound_url then vim.b[buf].db = bound_url end
             vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(sql_content, "\n"))
             vim.bo[buf].modified = false
             break

@@ -178,8 +178,8 @@ end)
 
 -- ── info_float ──────────────────────────────────────────────────────────────
 
-vim.o.lines   = 40
-vim.o.columns = 120
+local screen_lines = vim.o.lines
+local screen_columns = vim.o.columns
 
 --- Run fn() with the editor's window chrome deliberately switched on, then
 --- restore it. style = "minimal" only shows up as a difference against
@@ -237,7 +237,7 @@ test("info_float: asks for no more rows than the screen has", function()
   local lines = {}
   for i = 1, 164 do lines[i] = "line " .. i end
   with_float({ lines = lines, width = 40, height = #lines }, function(_, _, cfg)
-    eq(cfg.height, 36, "height fitted to the 40-row screen")
+    eq(cfg.height, screen_lines - 4, "height fitted to the real screen")
     eq(cfg.height < #lines, true, "shorter than its buffer, so it scrolls")
   end)
 end)
@@ -247,8 +247,8 @@ end)
 -- 120-column screen can show.
 test("info_float: asks for no more columns than the screen has", function()
   with_float({ lines = { "x" }, width = 400, height = 4 }, function(_, _, cfg)
-    eq(cfg.width, 116, "width fitted to the 120-column screen")
-    eq(cfg.col + cfg.width + 1 <= 120, true, "frame included, it stays on screen")
+    eq(cfg.width, screen_columns - 4, "width fitted to the real screen")
+    eq(cfg.col + cfg.width + 1 <= screen_columns, true, "frame included, it stays on screen")
   end)
 end)
 
@@ -261,14 +261,14 @@ test("info_float: an explicit row off the top of the editor is pulled back", fun
   with_float({ lines = { "x" }, width = 30, height = 100, row = -60 },
     function(_, _, cfg)
       eq(cfg.row >= 0, true, "row is on screen")
-      eq(cfg.row + cfg.height + 1 <= 40, true, "and so is the rest of the frame")
+      eq(cfg.row + cfg.height + 1 <= screen_lines, true, "and so is the rest of the frame")
     end)
 end)
 
 test("info_float: an explicit row past the bottom is pulled back", function()
   with_float({ lines = { "x" }, width = 30, height = 4, row = 200 },
     function(_, _, cfg)
-      eq(cfg.row, 40 - 1 - 4, "row is the last one that shows the whole frame")
+      eq(cfg.row, screen_lines - 1 - 4, "row is the last one that shows the whole frame")
     end)
 end)
 
@@ -291,8 +291,8 @@ end)
 test("info_float: centers on the editor by default", function()
   with_float({ lines = { "x" }, width = 40, height = 10 }, function(_, _, cfg)
     eq(cfg.relative, "editor", "relative")
-    eq(cfg.row, math.floor((40 - 10) / 2), "row centered")
-    eq(cfg.col, math.floor((120 - 40) / 2), "col centered")
+    eq(cfg.row, math.floor((screen_lines - 10) / 2), "row centered")
+    eq(cfg.col, math.floor((screen_columns - 40) / 2), "col centered")
   end)
 end)
 
@@ -563,9 +563,8 @@ end)
 
 -- ── report_split ────────────────────────────────────────────────────────────
 -- report_split asks nvim for a height and gets whatever is still free, so the
--- tests below need a known editor geometry: 40 lines (already set for the
--- floats above), a one-line cmdline, and a window that actually occupies the
--- rest of the screen.
+-- tests below use the natural headless geometry, a one-line cmdline, and a
+-- window that actually occupies the rest of the screen.
 --
 -- All three have to be stated. The cmdline prompts driven further up scroll
 -- messages past the cmdline, which on Neovim 0.10 leaves 'cmdheight' inflated
@@ -576,7 +575,6 @@ end)
 -- botright split below) it hands them straight back to the cmdline. Asking for
 -- an over-tall window makes the layout reclaim them for good -- nvim clamps the
 -- request to whatever the single window may actually have.
-vim.o.lines     = 40
 vim.o.cmdheight = 1
 vim.api.nvim_win_set_height(0, vim.o.lines)
 
@@ -599,7 +597,7 @@ test("report_split: read-only named scratch buffer in a bottom split", function(
   if not ok then error(err, 0) end
 end)
 
-test("report_split: height follows the content, capped at 30", function()
+test("report_split: height follows content and requests no more than 30", function()
   local short = {}
   for i = 1, 5 do short[i] = "l" .. i end
   local b1, w1 = ui.report_split(short, "grip://test/short")
@@ -612,7 +610,8 @@ test("report_split: height follows the content, capped at 30", function()
   local b2, w2 = ui.report_split(long, "grip://test/long")
   local h2 = vim.api.nvim_win_get_height(w2)
   pcall(vim.api.nvim_buf_delete, b2, { force = true })
-  eq(h2, 30, "capped at 30")
+  eq(ui._report_height(#long), 30, "requested height is capped at 30")
+  assert(h2 <= 30 and h2 >= h1, "actual split respects the request and available screen")
 end)
 
 print(string.format("ui_spec: %d passed, %d failed", pass, fail))

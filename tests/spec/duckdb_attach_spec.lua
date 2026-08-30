@@ -39,14 +39,16 @@ eq(adapter._build_attach_prefix(url), "", "no attachments returns empty string")
 adapter._attach_unchecked(url, "postgres:dbname=sales host=localhost user=me", "pg")
 local prefix = adapter._build_attach_prefix(url)
 contains(prefix, "INSTALL postgres_scanner; LOAD postgres_scanner;", "prefix has extension install")
-contains(prefix, "ATTACH IF NOT EXISTS 'postgres:dbname=sales host=localhost user=me' AS pg;", "prefix has ATTACH")
+contains(prefix, "ATTACH IF NOT EXISTS 'postgres:dbname=sales host=localhost user=me' AS \"pg\";",
+  "prefix has ATTACH")
 
 -- second attachment
 adapter._attach_unchecked(url, "sqlite:legacy.db", "legacy")
 prefix = adapter._build_attach_prefix(url)
 contains(prefix, "INSTALL sqlite_scanner; LOAD sqlite_scanner;", "prefix has sqlite extension")
 -- resolve_dsn_path expands relative paths to absolute
-local expected_legacy = "ATTACH IF NOT EXISTS 'sqlite:" .. vim.fn.fnamemodify("legacy.db", ":p") .. "' AS legacy;"
+local expected_legacy = "ATTACH IF NOT EXISTS 'sqlite:" .. vim.fn.fnamemodify("legacy.db", ":p")
+  .. "' AS \"legacy\";"
 contains(prefix, expected_legacy, "prefix has sqlite ATTACH")
 contains(prefix, "postgres_scanner", "still has postgres extension")
 
@@ -95,6 +97,36 @@ eq(count, 1, "extension INSTALL only appears once despite 2 sqlite attachments")
 local _, attach_count = prefix:gsub("ATTACH IF NOT EXISTS", "")
 eq(attach_count, 2, "both ATTACH statements present")
 
+-- Credentialed server attachments use invocation-scoped DuckDB secrets. The
+-- secret is temporary by default; no PERSISTENT keyword may ever appear.
+local credentialed = adapter._attachment_sql({
+  dsn = "postgres:dbname=app host=db user=u password=hunter2 sslmode=require",
+  alias = "reporting",
+  extension = "postgres_scanner",
+}, 3)
+contains(credentialed, "CREATE SECRET grip_attachment_3 (TYPE postgres", "temporary secret created")
+contains(credentialed, "DATABASE 'app'", "database moved into secret")
+contains(credentialed, "PASSWORD 'hunter2'", "password moved into secret")
+contains(credentialed, "SSLMODE 'require'", "TLS option moved into secret")
+contains(credentialed,
+  "ATTACH IF NOT EXISTS '' AS \"reporting\" (TYPE postgres, SECRET grip_attachment_3);",
+  "attachment refers to secret")
+eq(credentialed:find("PERSISTENT", 1, true), nil, "secret is never persistent")
+eq(credentialed:find("postgres:dbname", 1, true), nil, "complete DSN is not copied into ATTACH")
+
+local url_secret = adapter._attachment_sql({
+  dsn = "postgres:uri=postgresql://reporter:hunter2@db.internal/app",
+  alias = "uri_source",
+  extension = "postgres_scanner",
+}, 4)
+contains(url_secret, "CREATE SECRET grip_attachment_4", "credentialed URI also uses a secret")
+contains(url_secret, "URI 'postgresql://reporter:hunter2@db.internal/app'", "URI is a secret field")
+
+local quoted_alias = adapter._attachment_sql({
+  dsn = "sqlite:legacy.db", alias = 'side\"; DROP TABLE users; --', extension = "sqlite_scanner",
+}, 1)
+contains(quoted_alias, 'AS "side""; DROP TABLE users; --";', "attachment alias is one quoted identifier")
+
 -- cleanup
 adapter.detach(url2, "a")
 adapter.detach(url2, "b")
@@ -111,6 +143,11 @@ eq(adapter.url_to_dsn("postgres://dbhost/analytics"),
 eq(adapter.url_to_dsn("postgresql://user:pass@localhost:5432/mydb"),
    "postgres:dbname=mydb user=user password=pass host=localhost port=5432",
    "url_to_dsn: pg with creds")
+eq(adapter.url_to_dsn("mariadb://user:pass@localhost:3307/mydb"),
+   "mysql:host=localhost user=user password=pass database=mydb port=3307",
+   "url_to_dsn: MariaDB uses mysql_scanner")
+eq(adapter._unsupported_attach_scheme("mariadb://localhost/mydb"), nil,
+   "mariadb URL is attachable")
 
 -- url_to_dsn: passthrough for non-URL DSNs
 eq(adapter.url_to_dsn("postgres:dbname=sales host=localhost"),
