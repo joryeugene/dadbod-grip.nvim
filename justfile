@@ -4,12 +4,12 @@
 # Default recipe: run tests
 default: test
 
-# Run all unit tests (328 specs across 14 modules)
-test:
+# Run all unit tests from a fresh deterministic SQLite fixture
+test: seed-sqlite
     nvim --headless -u tests/minimal_init.lua -l tests/run_specs.lua
 
 # Run a single spec file by name (e.g., just spec data)
-spec name:
+spec name: seed-sqlite
     nvim --headless -u tests/minimal_init.lua -l tests/spec/{{name}}_spec.lua
 
 # Lint with luacheck. Settings live in .luacheckrc; same args as CI.

@@ -13,10 +13,18 @@
 -- prepend it when needed: PATH="/opt/homebrew/opt/mysql-client/bin:$PATH".
 
 local URL = vim.env.GRIP_TEST_MYSQL_URL
+local REQUIRED = vim.env.GRIP_REQUIRE_MYSQL == "1"
+
+local function unavailable(reason)
+  if REQUIRED then
+    error("mysql_integration_spec: " .. reason .. " while GRIP_REQUIRE_MYSQL=1")
+  end
+  print("SKIP: mysql_integration_spec (" .. reason .. ")")
+  print("\nmysql_integration_spec: 0 passed, 0 failed (skipped)")
+end
 
 if not URL or URL == "" then
-  print("SKIP: mysql_integration_spec (GRIP_TEST_MYSQL_URL not set)")
-  print("\nmysql_integration_spec: 0 passed, 0 failed (skipped)")
+  unavailable("GRIP_TEST_MYSQL_URL not set")
   return
 end
 
@@ -27,14 +35,12 @@ local sql = require("dadbod-grip.sql")
 local SENTINEL = "zzz_explained"
 
 if vim.fn.executable("mysql") == 0 then
-  print("SKIP: mysql_integration_spec (mysql CLI not found)")
-  print("\nmysql_integration_spec: 0 passed, 0 failed (skipped)")
+  unavailable("mysql CLI not found")
   return
 end
 
 if not my.ping(URL) then
-  print("SKIP: mysql_integration_spec (cannot reach " .. URL .. ")")
-  print("\nmysql_integration_spec: 0 passed, 0 failed (skipped)")
+  unavailable("database is unreachable")
   return
 end
 

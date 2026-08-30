@@ -217,6 +217,77 @@ test("info_float: fills a fresh scratch buffer with lines", function()
   end)
 end)
 
+test("fit: leaves a size that already fits where it was", function()
+  local size, offset = ui.fit(10, 40)
+  eq(size, 10, "size"); eq(offset, math.floor((40 - 10) / 2), "offset")
+end)
+
+test("fit: clamps a size the screen cannot show", function()
+  local size, offset = ui.fit(164, 40)
+  eq(size, 36, "size")
+  eq(offset >= 0 and offset + size + 2 <= 40, true, "border included, it stays on screen")
+end)
+
+-- The float asks Neovim for the size in its config, and that is what this
+-- pins: in a TUI Neovim clamps an oversized window on its own, so the window
+-- itself would look fine here either way. Under ext_multigrid the requested
+-- size is the size the window gets, the buffer fits inside it, and nothing
+-- scrolls -- which is the bug this guards.
+test("info_float: asks for no more rows than the screen has", function()
+  local lines = {}
+  for i = 1, 164 do lines[i] = "line " .. i end
+  with_float({ lines = lines, width = 40, height = #lines }, function(_, _, cfg)
+    eq(cfg.height, 36, "height fitted to the 40-row screen")
+    eq(cfg.height < #lines, true, "shorter than its buffer, so it scrolls")
+  end)
+end)
+
+-- The width axis runs through the same fit as the height, and nothing else in
+-- this file would notice if it stopped: every other case asks for a width the
+-- 120-column screen can show.
+test("info_float: asks for no more columns than the screen has", function()
+  with_float({ lines = { "x" }, width = 400, height = 4 }, function(_, _, cfg)
+    eq(cfg.width, 116, "width fitted to the 120-column screen")
+    eq(cfg.col + cfg.width + 1 <= 120, true, "frame included, it stays on screen")
+  end)
+end)
+
+-- editor.lua's error float is the live caller doing this: it centres on its
+-- own line count, which it never clamps, so a tall one asks for a negative
+-- row. Neovim takes that literally under ext_multigrid and the top of the
+-- float is then off the editor, unreachable for the same reason an oversized
+-- one's tail is.
+test("info_float: an explicit row off the top of the editor is pulled back", function()
+  with_float({ lines = { "x" }, width = 30, height = 100, row = -60 },
+    function(_, _, cfg)
+      eq(cfg.row >= 0, true, "row is on screen")
+      eq(cfg.row + cfg.height + 1 <= 40, true, "and so is the rest of the frame")
+    end)
+end)
+
+test("info_float: an explicit row past the bottom is pulled back", function()
+  with_float({ lines = { "x" }, width = 30, height = 4, row = 200 },
+    function(_, _, cfg)
+      eq(cfg.row, 40 - 1 - 4, "row is the last one that shows the whole frame")
+    end)
+end)
+
+-- A cursor-relative offset is not an editor coordinate, so it is not the
+-- clamp's business: editor.lua opens the cell editor above the cursor row with
+-- a negative row on purpose, and clamping that to the editor would drop it
+-- back onto the cursor.
+-- nvim_win_get_config reports a cursor-relative float back as window-relative
+-- against the window the cursor was in, offsets verbatim, so `relative` is
+-- read as "win" here and the row is what carries the assertion.
+test("info_float: a cursor-relative float keeps its own negative row", function()
+  with_float({ lines = { "x" }, width = 30, height = 4,
+               relative = "cursor", row = -5, col = 0 },
+    function(_, _, cfg)
+      eq(cfg.relative, "win", "resolved against the cursor's window")
+      eq(cfg.row, -5, "row untouched"); eq(cfg.col, 0, "col untouched")
+    end)
+end)
+
 test("info_float: centers on the editor by default", function()
   with_float({ lines = { "x" }, width = 40, height = 10 }, function(_, _, cfg)
     eq(cfg.relative, "editor", "relative")

@@ -174,13 +174,60 @@ function M.confirm(prompt)
   return answer == "y" or answer == "yes"
 end
 
+--- Fit a float to the screen it is drawn on.
+---
+--- Callers size these floats to their content, and content is regularly larger
+--- than the editor: the `?` help is 164 rows. In a TUI Neovim clamps such a
+--- window for us, so it ends up shorter than its buffer and scrolls. Under
+--- `ext_multigrid` the UI draws windows itself and Neovim hands out the size
+--- that was asked for: the whole buffer then fits inside the window, so
+--- nothing ever scrolls and everything past the screen edge is unreachable --
+--- `<C-d>` and `G` both leave `topline` at 1. Neovide runs that way, and the
+--- help is unusable there without this.
+---
+--- The same four cells come off both axes, for different reasons: vertically
+--- two rows of border plus the status line and the command line, horizontally
+--- two columns of border plus one spare column on each side, which keeps a
+--- full-width frame off the screen edge. The offset is the one this module has
+--- always used, so a float that already fits opens exactly where it did
+--- before, and a fitted one lands on [1, total - 2] with its frame whole.
+---
+--- @param size  integer requested rows or columns
+--- @param total integer rows or columns the editor has
+--- @return integer size, integer offset
+function M.fit(size, total)
+  local fitted = math.min(size, math.max(1, total - 4))
+  return fitted, math.floor((total - fitted) / 2)
+end
+
+--- Keep a caller's own offset on screen. Counting its border, a float occupies
+--- [offset - 1, offset + size], so total - 1 - size is the last offset that
+--- leaves the far edge of the frame visible.
+---
+--- A caller that derives an offset from content it never clamped -- editor.lua
+--- centres its error float on its line count -- otherwise pushes the float off
+--- the top of the editor, and what runs off is unreachable there for the same
+--- reason an oversized float's tail is. Flush against the near edge is a
+--- placement a caller can mean, though, so 0 is left alone: only what would
+--- land outside the editor is pulled back.
+---
+--- @param offset integer requested row or column
+--- @param size   integer fitted rows or columns of the float
+--- @param total  integer rows or columns the editor has
+--- @return integer offset
+local function onscreen(offset, size, total)
+  return math.max(0, math.min(offset, total - 1 - size))
+end
+
 --- Open an editor-relative float and return its window and buffer.
 ---
 --- Covers only what the info floats across the plugin share: a scratch buffer,
---- centered geometry, style = "minimal" and the configured border. Sizing rules
---- stay with the caller — every float has its own idea of how wide it should be.
---- Keys left nil are not passed to nvim_open_win at all, so a caller that never
---- set `title`/`zindex` keeps the stock window it had before.
+--- centered geometry, style = "minimal" and the configured border. How big a
+--- float wants to be stays with the caller — every float has its own idea of
+--- how wide it should be — but how big it is allowed to be does not: whatever
+--- is asked for goes through M.fit, so no caller can ask for a float larger
+--- than the screen. Keys left nil are not passed to nvim_open_win at all, so a
+--- caller that never set `title`/`zindex` keeps the stock window it had before.
 ---
 --- @param opts table
 ---   lines      string[]|nil  fill a fresh scratch buffer with these
@@ -190,7 +237,12 @@ end
 ---   width      integer       required
 ---   height     integer       required
 ---   relative   string|nil    default "editor"
----   row, col   integer|nil   default: centered for width/height
+---   row, col   integer|nil   default: centered for the fitted width/height.
+---                            An editor-relative float is held on screen,
+---                            frame included, whether the offset is the
+---                            caller's or the default; against anything else
+---                            the caller's offset is passed through untouched
+---                            and defaults to 0.
 ---   enter      boolean|nil   focus the float (default true)
 ---   style, border, title, title_pos, zindex, footer, footer_pos
 ---                            forwarded as-is; style/border default to
@@ -205,12 +257,30 @@ function M.info_float(opts)
     end
   end
 
+  local relative    = opts.relative or "editor"
+  local height, row = M.fit(opts.height, vim.o.lines)
+  local width,  col = M.fit(opts.width,  vim.o.columns)
+
+  -- Both offsets are editor coordinates, so they only mean anything for an
+  -- editor-relative float: there the caller's own offset is held on screen
+  -- alongside the centred default. Against the cursor the caller owns its
+  -- placement outright -- editor.lua opens above the cursor row with a
+  -- negative offset, which clamping would throw away -- so nothing is imposed
+  -- on it beyond the size.
+  if relative == "editor" then
+    row = onscreen(opts.row or row, height, vim.o.lines)
+    col = onscreen(opts.col or col, width,  vim.o.columns)
+  else
+    row = opts.row or 0
+    col = opts.col or 0
+  end
+
   local cfg = {
-    relative  = opts.relative or "editor",
-    width     = opts.width,
-    height    = opts.height,
-    row       = opts.row or math.floor((vim.o.lines   - opts.height) / 2),
-    col       = opts.col or math.floor((vim.o.columns - opts.width) / 2),
+    relative  = relative,
+    width     = width,
+    height    = height,
+    row       = row,
+    col       = col,
     style     = opts.style or "minimal",
     border    = opts.border or M.border(),
     title     = opts.title,
