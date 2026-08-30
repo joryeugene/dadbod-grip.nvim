@@ -640,23 +640,22 @@ end)
 
 test("duckdb query: SQL with HTTP URL prepends INSTALL/LOAD httpfs", function()
   with_executable(function()
-    local args = capture_system_args("col\nval\n", function()
+    local args, opts = capture_system_call("col\nval\n", function()
       duckdb.query("SELECT * FROM 'https://example.com/data.csv'", "duckdb::memory:")
     end)
-    local sql_arg = args[#args]
-    contains(sql_arg, "INSTALL httpfs", "should prepend INSTALL httpfs")
-    contains(sql_arg, "LOAD httpfs", "should prepend LOAD httpfs")
-    contains(sql_arg, "https://example.com/data.csv", "original SQL preserved")
+    assert(not vim.tbl_contains(args, "-c"), "DuckDB SQL must not be in argv")
+    contains(opts.stdin, "INSTALL httpfs", "should prepend INSTALL httpfs")
+    contains(opts.stdin, "LOAD httpfs", "should prepend LOAD httpfs")
+    contains(opts.stdin, "https://example.com/data.csv", "original SQL preserved")
   end)
 end)
 
 test("duckdb query: SQL without HTTP URL does not prepend httpfs", function()
   with_executable(function()
-    local args = capture_system_args("col\nval\n", function()
+    local _, opts = capture_system_call("col\nval\n", function()
       duckdb.query("SELECT * FROM users", "duckdb::memory:")
     end)
-    local sql_arg = args[#args]
-    assert(not sql_arg:find("httpfs", 1, true), "should not contain httpfs: " .. sql_arg)
+    assert(not opts.stdin:find("httpfs", 1, true), "should not contain httpfs: " .. opts.stdin)
   end)
 end)
 
@@ -677,11 +676,10 @@ end)
 
 test("duckdb query: http URL also triggers httpfs", function()
   with_executable(function()
-    local args = capture_system_args("col\nval\n", function()
+    local _, opts = capture_system_call("col\nval\n", function()
       duckdb.query("SELECT * FROM 'http://example.com/data.csv'", "duckdb::memory:")
     end)
-    local sql_arg = args[#args]
-    contains(sql_arg, "httpfs", "http should also trigger httpfs")
+    contains(opts.stdin, "httpfs", "http should also trigger httpfs")
   end)
 end)
 
@@ -836,35 +834,33 @@ end)
 
 test("duckdb get_constraints: queries duckdb_constraints() for table", function()
   with_executable(function()
-    local captured_args
+    local captured_opts
     local orig = vim.system
-    vim.system = function(a, _o, cb)
-      captured_args = a
+    vim.system = function(_a, opts, cb)
+      captured_opts = opts
       local r = { stdout = "", stderr = "", code = 0 }
       if cb then cb(r) else return { wait = function() return r end } end
     end
     duckdb.get_constraints("users", "duckdb::memory:")
     vim.system = orig
-    local sql_arg = captured_args[#captured_args]
-    contains(sql_arg, "duckdb_constraints", "queries duckdb_constraints()")
-    contains(sql_arg, "users", "filters by table name")
+    contains(captured_opts.stdin, "duckdb_constraints", "queries duckdb_constraints()")
+    contains(captured_opts.stdin, "users", "filters by table name")
   end)
 end)
 
 test("duckdb get_constraints: filters by schema name", function()
   with_executable(function()
-    local captured_args
+    local captured_opts
     local orig = vim.system
-    vim.system = function(a, _o, cb)
-      captured_args = a
+    vim.system = function(_a, opts, cb)
+      captured_opts = opts
       local r = { stdout = "", stderr = "", code = 0 }
       if cb then cb(r) else return { wait = function() return r end } end
     end
     duckdb.get_constraints("myschema.users", "duckdb:test.db")
     vim.system = orig
-    local sql_arg = captured_args[#captured_args]
-    contains(sql_arg, "myschema", "includes schema filter")
-    contains(sql_arg, "users", "includes table filter")
+    contains(captured_opts.stdin, "myschema", "includes schema filter")
+    contains(captured_opts.stdin, "users", "includes table filter")
   end)
 end)
 

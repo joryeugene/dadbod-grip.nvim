@@ -81,8 +81,9 @@ end
 --- @param args  string[]   argv for vim.system
 --- @param timeout_ms number|nil  process timeout in ms (default 30000)
 --- @param callback fun(stdout: string, stderr: string, code: number)
---- @param opts table|nil  { env = table<string,string> } merged into the
----   inherited environment, same contract as M.run_cmd's opts.env.
+--- @param opts table|nil  { stdin = string, env = table<string,string> } stdin
+---   to feed the process and env merged into the inherited environment, the
+---   same contract as M.run_cmd.
 function M.run_cmd_async(args, timeout_ms, callback, opts)
   local t = timeout_ms or 30000
   local watchdog
@@ -104,7 +105,12 @@ function M.run_cmd_async(args, timeout_ms, callback, opts)
     deliver(TIMED_OUT.stdout, TIMED_OUT.stderr, TIMED_OUT.code)
   end, t + M._exit_grace_ms)
 
-  local sys_opts = { text = true, timeout = t, env = opts and opts.env or nil }
+  local sys_opts = {
+    text = true,
+    timeout = t,
+    stdin = opts and opts.stdin or nil,
+    env = opts and opts.env or nil,
+  }
   local ok, err = pcall(vim.system, args, sys_opts, function(r)
     vim.schedule(function()
       deliver(r.stdout or "", r.stderr or "", r.code)
