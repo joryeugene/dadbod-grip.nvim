@@ -106,7 +106,9 @@ local function sqlcmd_args(parsed, sql_str, opts)
   -- there is no -Q at all.
   if sql_str then
     args[#args + 1] = "-Q"
-    args[#args + 1] = nocount and ("SET NOCOUNT ON;\n" .. sql_str) or sql_str
+    local session = "SET QUOTED_IDENTIFIER ON;\n"
+    if nocount then session = session .. "SET NOCOUNT ON;\n" end
+    args[#args + 1] = session .. sql_str
   end
 
   if parsed.dbname and parsed.dbname ~= "" then
@@ -137,7 +139,8 @@ end
 
 --- Build and run the sqlcmd command, blocking.
 local function sqlcmd(parsed, sql_str, timeout_ms, opts)
-  return adapters.run_cmd(sqlcmd_args(parsed, sql_str, opts), timeout_ms or DEFAULT_TIMEOUT,
+  return adapters.run_cmd(sqlcmd_args(parsed, sql_str, opts),
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
     { env = sqlcmd_env(parsed) })
 end
 
@@ -145,7 +148,8 @@ end
 --- carry one batch, and SET SHOWPLAN_TEXT has to be alone in its own.
 local function sqlcmd_batch(parsed, batches, timeout_ms)
   local script = table.concat(batches, "\nGO\n") .. "\nGO\n"
-  return adapters.run_cmd(sqlcmd_args(parsed, nil), timeout_ms or DEFAULT_TIMEOUT,
+  return adapters.run_cmd(sqlcmd_args(parsed, nil),
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
     { stdin = script, env = sqlcmd_env(parsed) })
 end
 
@@ -208,6 +212,29 @@ local function parse_sqlcmd_table(raw)
   return { columns = columns, rows = rows }
 end
 
+--- Translate the LIMIT/OFFSET tail emitted by the shared query builder into
+--- SQL Server's OFFSET/FETCH syntax. The adapter boundary is the only place
+--- that knows the dialect, so every initial query and requery gets the fix.
+local function normalize_query_sql(sql_str)
+  local base, limit, offset = sql_str:match(
+    "^(.-)%s+[Ll][Ii][Mm][Ii][Tt]%s+(%d+)%s+[Oo][Ff][Ff][Ss][Ee][Tt]%s+(%d+)%s*;?%s*$")
+  if not base then
+    base, limit = sql_str:match("^(.-)%s+[Ll][Ii][Mm][Ii][Tt]%s+(%d+)%s*;?%s*$")
+    offset = "0"
+  end
+  if not base then return sql_str end
+
+  -- OFFSET/FETCH requires an outer ORDER BY. Ignore any ORDER BY inside the
+  -- raw-query wrapper; it does not satisfy SQL Server's outer SELECT.
+  local lower = base:lower()
+  local raw_alias_end = lower:find("%)%s+as%s+_grip")
+  local outer = raw_alias_end and lower:sub(raw_alias_end) or lower
+  if not outer:find("%sorder%s+by%s") then
+    base = base .. " ORDER BY (SELECT NULL)"
+  end
+  return string.format("%s OFFSET %s ROWS FETCH NEXT %s ROWS ONLY", base, offset, limit)
+end
+
 local function run_query(sql_str, url, timeout_ms)
   if vim.fn.executable("sqlcmd") == 0 then
     return nil, "sqlcmd not found. Install Microsoft sqlcmd tools."
@@ -216,7 +243,7 @@ local function run_query(sql_str, url, timeout_ms)
   local parsed, parse_err = parse_url(url)
   if not parsed then return nil, parse_err end
 
-  local stdout, stderr, code = sqlcmd(parsed, sql_str, timeout_ms)
+  local stdout, stderr, code = sqlcmd(parsed, normalize_query_sql(sql_str), timeout_ms)
   if code ~= 0 then
     return nil, sqlcmd_error(stdout, stderr, code)
   end
@@ -243,7 +270,8 @@ local function run_query_async(sql_str, url, timeout_ms, callback)
     return
   end
 
-  adapters.run_cmd_async(sqlcmd_args(parsed, sql_str), timeout_ms or DEFAULT_TIMEOUT,
+  adapters.run_cmd_async(sqlcmd_args(parsed, normalize_query_sql(sql_str)),
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
     function(stdout, stderr, code)
       if code ~= 0 then
         callback(nil, sqlcmd_error(stdout, stderr, code))
@@ -594,7 +622,8 @@ function M.explain(sql_str, url)
   local parsed, parse_err = parse_url(url)
   if not parsed then return nil, parse_err end
 
-  local stdout, stderr, code = sqlcmd_batch(parsed, { "SET SHOWPLAN_TEXT ON", sql_str })
+  local stdout, stderr, code = sqlcmd_batch(parsed,
+    { "SET SHOWPLAN_TEXT ON", normalize_query_sql(sql_str) })
   if code ~= 0 then
     return nil, sqlcmd_error(stdout, stderr, code)
   end
@@ -615,5 +644,6 @@ M._parse_url = parse_url
 M._parse_sqlcmd_table = parse_sqlcmd_table
 M._sqlcmd_args = sqlcmd_args
 M._sqlcmd_env = sqlcmd_env
+M._normalize_query_sql = normalize_query_sql
 
 return M

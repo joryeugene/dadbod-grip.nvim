@@ -441,6 +441,18 @@ test("sqlserver rejects unsafe or contradictory TLS URL values before spawning",
   contains(err, "cannot be combined", "conflict explained")
 end)
 
+test("sqlserver translates shared LIMIT pagination to OFFSET/FETCH", function()
+  eq(sqlserver._normalize_query_sql('SELECT * FROM "orders" LIMIT 25'),
+    'SELECT * FROM "orders" ORDER BY (SELECT NULL) OFFSET 0 ROWS FETCH NEXT 25 ROWS ONLY',
+    "first page gets a deterministic legal ordering")
+  eq(sqlserver._normalize_query_sql(
+      'SELECT * FROM "orders" ORDER BY "total" ASC LIMIT 25 OFFSET 50'),
+    'SELECT * FROM "orders" ORDER BY "total" ASC OFFSET 50 ROWS FETCH NEXT 25 ROWS ONLY',
+    "sort and page offset preserved")
+  eq(sqlserver._normalize_query_sql("SELECT TOP 5 * FROM users"),
+    "SELECT TOP 5 * FROM users", "native SQL Server query unchanged")
+end)
+
 test("sqlserver query: parses sqlcmd tab output", function()
   with_executable(function()
     local out = table.concat({
@@ -526,6 +538,21 @@ test("sqlserver query: still sends SET NOCOUNT ON (keeps row count out of the gr
       sqlserver.query("SELECT 1", "sqlserver://sa:pw@localhost:1433/grip_test")
     end)
     contains(last_arg(args), "SET NOCOUNT ON", "query must still set NOCOUNT")
+  end)
+end)
+
+test("sqlserver enables double-quoted identifiers for every command", function()
+  with_executable(function()
+    local query_args = capture_system_args("id\n--\n1\n", function()
+      sqlserver.query('SELECT * FROM "orders"', "sqlserver://sa:pw@localhost/grip_test")
+    end)
+    contains(last_arg(query_args), "SET QUOTED_IDENTIFIER ON", "query session")
+
+    local exec_args = capture_system_args("\n(1 rows affected)\n", function()
+      sqlserver.execute('UPDATE "orders" SET "status" = \'done\' WHERE "id" = 1',
+        "sqlserver://sa:pw@localhost/grip_test")
+    end)
+    contains(last_arg(exec_args), "SET QUOTED_IDENTIFIER ON", "execute session")
   end)
 end)
 
@@ -694,6 +721,18 @@ test("duckdb query: SQL without HTTP URL does not prepend httpfs", function()
     end)
     assert(not opts.stdin:find("httpfs", 1, true), "should not contain httpfs: " .. opts.stdin)
   end)
+end)
+
+test("duckdb query: attachment setup rows cannot replace query results", function()
+  local output = table.concat({
+    "Success",
+    "true",
+    "_grip_boundary",
+    "__dadbod_grip_result_boundary__",
+    "count_star()",
+    "15",
+  }, "\n") .. "\n"
+  eq(duckdb._strip_csv_setup(output), "count_star()\n15\n", "setup output stripped")
 end)
 
 test("duckdb query: httpfs timeout is at least 30 seconds", function()

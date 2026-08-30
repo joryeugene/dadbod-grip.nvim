@@ -16,6 +16,16 @@ local TIMED_OUT = { stdout = "", stderr = "command timed out", code = 1 }
 --- watchdog fires here. Exported so tests can shorten the wait.
 M._exit_grace_ms = 3000
 
+--- Resolve the public setup({ timeout = ... }) value at call time. Keeping it
+--- here makes all CLI adapters honor the same option without five copies of
+--- the configuration lookup.
+function M.configured_timeout(fallback)
+  local ok, grip = pcall(require, "dadbod-grip")
+  if not ok or type(grip.get_opts) ~= "function" then return fallback end
+  local value = grip.get_opts().timeout
+  return type(value) == "number" and value or fallback
+end
+
 --- Run a CLI command and wait for it to finish, pumping the full Neovim event
 --- loop during the wait. This allows vim.schedule_wrap timer callbacks (such as
 --- the ui.blocking spinner) to fire while a CLI process is in progress.

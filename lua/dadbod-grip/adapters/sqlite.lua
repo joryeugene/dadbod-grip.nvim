@@ -60,7 +60,7 @@ end
 
 local function sqlite3(db_path, sql_str, timeout_ms)
   return adapters.run_cmd(sqlite3_args(db_path, sql_str, adapters.session_opts()),
-    timeout_ms or DEFAULT_TIMEOUT)
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT))
 end
 
 function M.query(sql_str, url)

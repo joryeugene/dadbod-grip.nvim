@@ -91,13 +91,13 @@ end
 --- Run a statement, blocking.
 local function mysql_query(parsed, sql_str, timeout_ms)
   return adapters.run_cmd(mysql_args(parsed, sql_str, adapters.session_opts()),
-    timeout_ms or DEFAULT_TIMEOUT, { env = mysql_env(parsed) })
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT), { env = mysql_env(parsed) })
 end
 
 --- Run a statement without blocking; same argv and same env as mysql_query.
 local function mysql_query_async(parsed, sql_str, timeout_ms, callback)
   adapters.run_cmd_async(mysql_args(parsed, sql_str, adapters.session_opts()),
-    timeout_ms or DEFAULT_TIMEOUT, callback, { env = mysql_env(parsed) })
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT), callback, { env = mysql_env(parsed) })
 end
 
 function M.query(sql_str, url)

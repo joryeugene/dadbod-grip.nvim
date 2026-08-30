@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# sqlcmd runs inside the container, so a host path supplied with `-i` is not
+# visible there. Remove that pair and stream the file over the already-open
+# stdin channel instead. `-e SQLCMDPASSWORD` inherits the value without putting
+# it in Docker's argv.
+input_file=""
+args=()
+while (($#)); do
+  if [[ "$1" == "-i" ]]; then
+    [[ $# -ge 2 ]] || { echo "sqlcmd wrapper: -i requires a file" >&2; exit 2; }
+    input_file="$2"
+    shift 2
+  else
+    args+=("$1")
+    shift
+  fi
+done
+
+if [[ -n "$input_file" ]]; then
+  exec docker exec -i -e SQLCMDPASSWORD grip-sqlserver \
+    /opt/mssql-tools18/bin/sqlcmd "${args[@]}" < "$input_file"
+fi
+
+exec docker exec -i -e SQLCMDPASSWORD grip-sqlserver \
+  /opt/mssql-tools18/bin/sqlcmd "${args[@]}"

@@ -351,6 +351,28 @@ local function build_attach_prefix(url)
   return table.concat(parts, "\n") .. "\n"
 end
 
+-- DuckDB's CSV mode prints a result set for every statement received on stdin.
+-- CREATE SECRET currently returns a `Success,true` table, so simply prepending
+-- attachment setup makes that table look like the user's query result. Put a
+-- sentinel result after setup and discard everything through it. The sentinel
+-- stays on stdin with the SQL; it never enters argv.
+local CSV_BOUNDARY = "__dadbod_grip_result_boundary__"
+
+local function with_csv_setup(setup_sql, sql_str)
+  if setup_sql == "" then return sql_str, false end
+  return setup_sql
+    .. "SELECT '" .. CSV_BOUNDARY .. "' AS _grip_boundary;\n"
+    .. sql_str, true
+end
+
+local function strip_csv_setup(stdout)
+  local _, boundary_end = (stdout or ""):find(CSV_BOUNDARY, 1, true)
+  if not boundary_end then return stdout end
+  local line_end = stdout:find("\n", boundary_end + 1, true)
+  if not line_end then return "" end
+  return stdout:sub(line_end + 1)
+end
+
 --- True when the INSTALL statements build_attach_prefix() just emitted may still
 --- have to fetch something. The prefix always carries them -- a warm INSTALL is a
 --- local no-op, so there is no reason to vary the SQL -- but the first one per
@@ -475,12 +497,12 @@ local function duckdb_args(db, opts, flags)
 end
 
 local function duckdb(db_path, sql_str, timeout_ms, url)
-  local effective_sql = sql_str
-  local effective_timeout = timeout_ms or DEFAULT_TIMEOUT
+  local setup_sql = ""
+  local effective_timeout = timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT)
 
   -- Prepend ATTACH statements for cross-database federation
   if url then
-    effective_sql = build_attach_prefix(url) .. effective_sql
+    setup_sql = build_attach_prefix(url)
     if attach_install_pending(url) then
       effective_timeout = math.max(effective_timeout, NETWORK_TIMEOUT)
     end
@@ -494,12 +516,15 @@ local function duckdb(db_path, sql_str, timeout_ms, url)
     else
       prefix = "INSTALL httpfs; LOAD httpfs;\n"
     end
-    effective_sql = prefix .. effective_sql
+    setup_sql = prefix .. setup_sql
     effective_timeout = math.max(effective_timeout, NETWORK_TIMEOUT)
   end
 
+  local effective_sql, has_setup = with_csv_setup(setup_sql, sql_str)
+
   local args = duckdb_args(db_path, adapters.session_opts(), { "-csv", "-header" })
   local stdout, stderr, code = adapters.run_cmd(args, effective_timeout, { stdin = effective_sql })
+  if has_setup then stdout = strip_csv_setup(stdout) end
 
   -- Track httpfs install state from stderr output
   if sql_str:find("https?://") then
@@ -538,7 +563,8 @@ end
 --- Non-blocking async variant: spawns DuckDB and calls callback(stdout, stderr, code)
 --- from the main Neovim loop via vim.schedule. Used for schema pre-warming.
 local function duckdb_async(db_path, sql_str, timeout_ms, url, callback)
-  local effective_sql = url and (build_attach_prefix(url) .. sql_str) or sql_str
+  local setup_sql = url and build_attach_prefix(url) or ""
+  local effective_sql, has_setup = with_csv_setup(setup_sql, sql_str)
   local effective_timeout = timeout_ms or 8000
   -- Same one-off extension fetch as in duckdb(), from a shorter starting budget.
   if url and attach_install_pending(url) then
@@ -547,6 +573,7 @@ local function duckdb_async(db_path, sql_str, timeout_ms, url, callback)
   local args = duckdb_args(db_path, adapters.session_opts(), { "-csv", "-header" })
   adapters.run_cmd_async(args, effective_timeout, function(stdout, stderr, code)
     if url then note_ext_installed(url, code) end
+    if has_setup then stdout = strip_csv_setup(stdout) end
     -- Same reason as in duckdb(): the ATTACH prefix is in this SQL.
     callback(stdout, redact_query_error(stderr, url), code)
   end, { stdin = effective_sql })
@@ -555,7 +582,7 @@ end
 --- Run DML without CSV mode (to get change count output).
 local function duckdb_exec(db_path, sql_str, timeout_ms, url)
   local effective_sql = sql_str
-  local effective_timeout = timeout_ms or DEFAULT_TIMEOUT
+  local effective_timeout = timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT)
   if url then
     effective_sql = build_attach_prefix(url) .. effective_sql
     -- Same one-off extension fetch as in duckdb(): a DML statement against an
@@ -1502,6 +1529,7 @@ end
 M._extract_path = extract_path
 M._args = duckdb_args
 M._build_attach_prefix = build_attach_prefix
+M._strip_csv_setup = strip_csv_setup
 M._attachment_sql = attachment_sql
 M._parse_dsn_options = parse_dsn_options
 M._detect_extension = detect_extension
