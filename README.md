@@ -2,6 +2,14 @@
 
 <table><tr>
 <td valign="middle">
+<pre>
+D   ███████╗███████╗██╗███████╗
+A  ██╔═════╝██╔══██║██║██╔══██║
+D  ██║  ███╗██████╔╝██║███████║
+b  ██║   ██║██╔══██╗██║██╔════╝
+o  ╚██████╔╝██║  ██║██║██║
+d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
+</pre>
 <p>
 <a href="https://jorypestorious.com/dadbod-grip-web/"><img src="https://img.shields.io/badge/docs-website-4ade80.svg" alt="Documentation"></a>&nbsp;
 <a href="https://github.com/joryeugene/dadbod-grip.nvim/blob/main/LICENSE"><img src="https://img.shields.io/github/license/joryeugene/dadbod-grip.nvim.svg" alt="MIT License"></a>&nbsp;

@@ -59,6 +59,8 @@ test("public commands match lazy triggers and the help manual", function()
 end)
 
 test("README keeps the onboarding command path", function()
+  assert(readme:find("D   ███████╗███████╗██╗███████╗", 1, true),
+    "README Dadbod Grip wordmark missing")
   for _, name in ipairs({ "GripConnect", "GripStart", "Grip", "GripQuery" }) do
     assert(readme:find("`:" .. name, 1, true), "README onboarding missing :" .. name)
   end
