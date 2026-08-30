@@ -632,10 +632,7 @@ local function setup_keymaps(url)
   local buf = _sidebar_bufnr
   local km = require("dadbod-grip.keymaps")
   local function kmap(action, fn, opts)
-    local key = km.get(action)
-    if not key then return end
-    local o = vim.tbl_extend("force", { buffer = buf, silent = true }, opts or {})
-    vim.keymap.set("n", key, fn, o)
+    km.bind("sidebar", buf, action, "n", fn, opts)
   end
 
   local state = get_state(url)
@@ -961,9 +958,7 @@ local function setup_keymaps(url)
   -- tab_4-9: ER diagram float or open table in a specific view facet
   for n = 4, 9 do
     local view_name = km.TAB_VIEWS[n]
-    local tab_key = km.get("tab_" .. n)
-    if tab_key then
-      vim.keymap.set("n", tab_key, function()
+    kmap("tab_" .. n, function()
         if view_name == "er_diagram" then
           require("dadbod-grip.er_diagram").toggle(url)
           return
@@ -977,8 +972,7 @@ local function setup_keymaps(url)
         local target_win = find_right_win()
         if target_win then vim.api.nvim_set_current_win(target_win) end
         grip.open(tbl, url, { reuse_win = target_win, view = view_name })
-      end, { buffer = buf, silent = true })
-    end
+      end)
   end
 
   -- sidebar_attach: attach external DB (DuckDB federation)
@@ -1006,8 +1000,7 @@ local function setup_keymaps(url)
     require("dadbod-grip.er_diagram").toggle(url, tbl, { focus = tbl ~= nil })
   end)
 
-  -- sidebar_escape: close sidebar
-  kmap("sidebar_escape", function() M.close() end)
+  kmap("sidebar_close", function() M.close() end)
 
   -- palette: command palette
   kmap("palette", function()

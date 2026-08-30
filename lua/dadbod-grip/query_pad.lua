@@ -31,18 +31,19 @@ M._has_real_content = _has_real_content  -- exported for unit tests
 --- override buffer-local keymaps that completion plugins (blink.cmp etc.) register
 --- on every BufEnter. Last registration wins; ours must be last.
 local function setup_completion_keymaps(bufnr)
+  local km = require("dadbod-grip.keymaps")
   local function fk(s)
     return vim.api.nvim_replace_termcodes(s, true, true, true)
   end
 
   -- C-Space: alias for <C-x><C-o>. Vim passes the actual typed word as base,
   -- so context parsing (table/column/keyword) works correctly.
-  vim.keymap.set("i", "<C-Space>", function()
+  km.bind("query_pad", bufnr, "qpad_complete", "i", function()
     vim.api.nvim_feedkeys(fk("<C-x><C-o>"), "n", false)
-  end, { buffer = bufnr, silent = true, desc = "Grip: trigger SQL completion" })
+  end, { desc = "Grip: trigger SQL completion" })
 
   -- Tab: navigate cmp popup → navigate native popup → trigger omnifunc → literal tab.
-  vim.keymap.set("i", "<Tab>", function()
+  km.bind("query_pad", bufnr, "qpad_complete_next", "i", function()
     local ok, cmp = pcall(require, "cmp")
     if ok and cmp.visible() then
       cmp.select_next_item({ behavior = cmp.SelectBehavior.Select })
@@ -57,7 +58,7 @@ local function setup_completion_keymaps(bufnr)
         vim.api.nvim_feedkeys(fk("<Tab>"), "n", false)
       end
     end
-  end, { buffer = bufnr, silent = true, desc = "Grip: trigger or navigate completion" })
+  end, { desc = "Grip: trigger or navigate completion" })
 
   -- Down/Up/S-Tab: navigate popup (cmp or native), fall through otherwise.
   local function nav(next_key, prev_key, is_next)
@@ -76,12 +77,15 @@ local function setup_completion_keymaps(bufnr)
       end
     end
   end
-  vim.keymap.set("i", "<Down>",  nav("<Down>",  "<Up>",   true),  { buffer = bufnr, silent = true, desc = "Grip: next completion or down" })
-  vim.keymap.set("i", "<Up>",    nav("<Down>",  "<Up>",   false), { buffer = bufnr, silent = true, desc = "Grip: prev completion or up" })
-  vim.keymap.set("i", "<S-Tab>", nav("<S-Tab>", "<S-Tab>",false), { buffer = bufnr, silent = true, desc = "Grip: prev completion or shift-tab" })
+  km.bind("query_pad", bufnr, "qpad_complete_down", "i", nav("<Down>", "<Up>", true),
+    { desc = "Grip: next completion or down" })
+  km.bind("query_pad", bufnr, "qpad_complete_up", "i", nav("<Down>", "<Up>", false),
+    { desc = "Grip: prev completion or up" })
+  km.bind("query_pad", bufnr, "qpad_complete_prev", "i", nav("<S-Tab>", "<S-Tab>", false),
+    { desc = "Grip: prev completion or shift-tab" })
 
   -- CR: confirm selected item; otherwise normal newline.
-  vim.keymap.set("i", "<CR>", function()
+  km.bind("query_pad", bufnr, "qpad_complete_accept", "i", function()
     local ok, cmp = pcall(require, "cmp")
     if ok and cmp.visible() and cmp.get_selected_entry() then
       cmp.confirm({ select = false })
@@ -90,7 +94,7 @@ local function setup_completion_keymaps(bufnr)
     else
       vim.api.nvim_feedkeys(fk("<CR>"), "n", false)
     end
-  end, { buffer = bufnr, silent = true, desc = "Grip: confirm completion or newline" })
+  end, { desc = "Grip: confirm completion or newline" })
 end
 
 --- Get or create the query pad buffer.
@@ -360,10 +364,7 @@ local function setup_keymaps(bufnr, url)
 
   local km = require("dadbod-grip.keymaps")
   local function kmap(action, mode, fn, opts)
-    local key = km.get(action)
-    if not key then return end
-    local o = vim.tbl_extend("force", { buffer = bufnr, silent = true }, opts or {})
-    vim.keymap.set(mode, key, fn, o)
+    km.bind("query_pad", bufnr, action, mode, fn, opts)
   end
 
   -- qpad_execute: statement-under-cursor takes priority; fall back to full buffer
@@ -385,7 +386,7 @@ local function setup_keymaps(bufnr, url)
     if sql then run_sql(cur_url(), sql, true) end
   end, { desc = "Grip: run query in new split" })
 
-  kmap("qpad_execute_new", "v", function()
+  kmap("qpad_execute_new", "x", function()
     local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
     vim.api.nvim_feedkeys(esc, "nx", false)
     local start_line = vim.fn.line("'<")
@@ -400,7 +401,7 @@ local function setup_keymaps(bufnr, url)
   end
 
   -- Visual qpad_execute: run selection (line-wise: runs all selected lines)
-  kmap("qpad_execute", "v", function()
+  kmap("qpad_execute", "x", function()
     -- feedkeys Esc to exit visual mode and set '< '> marks, then run
     local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
     vim.api.nvim_feedkeys(esc, "nx", false)
@@ -468,7 +469,7 @@ local function setup_keymaps(bufnr, url)
       require("dadbod-grip").open(name, u)
     end)
   end
-  vim.keymap.set("n", "go", _pick_table, { buffer = bufnr, silent = true, desc = "Grip: pick table" })
+  kmap("table_picker_go",  "n", _pick_table, { desc = "Grip: pick table" })
   kmap("table_picker",     "n", _pick_table, { desc = "Grip: pick table" })
   kmap("table_picker_alt", "n", _pick_table, { desc = "Grip: pick table" })
 
@@ -554,9 +555,7 @@ local function setup_keymaps(bufnr, url)
   -- tab_4-9: ER diagram float or jump to grid + switch to that view
   for n = 4, 9 do
     local view_name = km.TAB_VIEWS[n]
-    local tab_key = km.get("tab_" .. n)
-    if tab_key then
-      vim.keymap.set("n", tab_key, function()
+    kmap("tab_" .. n, "n", function()
         local view_mod = require("dadbod-grip.view")
         view_mod.close_all_floats(nil)
         if view_name == "er_diagram" then
@@ -574,8 +573,7 @@ local function setup_keymaps(bufnr, url)
             require("dadbod-grip").open(name, u)
           end)
         end
-      end, { buffer = bufnr, silent = true, desc = "Grip: view " .. view_name })
-    end
+      end, { desc = "Grip: view " .. view_name })
   end
 end
 

@@ -11,7 +11,7 @@ local M = {}
 function M.setup(bufnr, ctx)
   local view = ctx.view
   local VIEW_LABELS = ctx.VIEW_LABELS
-  local map, kmap, km = ctx.map, ctx.kmap, ctx.km
+  local kmap, km = ctx.kmap, ctx.km
 
   -- 1: schema sidebar (already in grid = always primary: open/focus sidebar)
   kmap("tab_1", function()
@@ -54,10 +54,9 @@ function M.setup(bufnr, ctx)
   -- 4-9: view tabs (4=ER diagram float, 5-9=inline grid views)
   for n = 4, 9 do
     local view_name = km.TAB_VIEWS[n]
-    local tab_key = km.get("tab_" .. n)
-    if view_name and tab_key then
+    if view_name then
       if view_name == "er_diagram" then
-        map(tab_key, function()
+        kmap("tab_" .. n, function()
           local session = ctx.session()
           view.close_all_floats(session)
           local s_url = session and session.url
@@ -66,7 +65,7 @@ function M.setup(bufnr, ctx)
           require("dadbod-grip.er_diagram").toggle(s_url)
         end, "ER diagram (key 4)")
       else
-        map(tab_key, function()
+        kmap("tab_" .. n, function()
           view.close_all_floats(ctx.session())
           view.switch_view(bufnr, view_name)
         end, "View: " .. (VIEW_LABELS[view_name] or view_name))

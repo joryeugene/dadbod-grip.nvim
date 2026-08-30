@@ -225,14 +225,18 @@ function M.open(prompt, initial_value, on_save, opts)
 
   -- Keymaps (buf-local)
   -- NOTE: INSERT <Esc> is intentionally NOT mapped; natural Vim exits to NORMAL mode
-  vim.keymap.set({ "i", "n" }, "<CR>",  do_save,   { buffer = edit_buf, noremap = true })
-  vim.keymap.set({ "i", "n" }, "<C-s>", do_save,   { buffer = edit_buf, noremap = true })
-  vim.keymap.set("n",           "<Esc>", do_cancel, { buffer = edit_buf, noremap = true })
-  vim.keymap.set("n",           "q",     do_cancel, { buffer = edit_buf, noremap = true, nowait = true })
-  vim.keymap.set("i",           "<C-c>", do_cancel, { buffer = edit_buf, noremap = true })
+  local km = require("dadbod-grip.keymaps")
+  for _, mode in ipairs({ "i", "n" }) do
+    km.bind("cell_editor", edit_buf, "editor_save", mode, do_save, { noremap = true })
+    km.bind("cell_editor", edit_buf, "editor_save_alt", mode, do_save, { noremap = true })
+  end
+  km.bind("cell_editor", edit_buf, "editor_cancel", "n", do_cancel, { noremap = true })
+  km.bind("cell_editor", edit_buf, "editor_cancel_q", "n", do_cancel,
+    { noremap = true, nowait = true })
+  km.bind("cell_editor", edit_buf, "editor_cancel_insert", "i", do_cancel, { noremap = true })
 
   -- gx: open current cell value as URL (NORMAL mode only)
-  vim.keymap.set("n", "gx", function()
+  km.bind("cell_editor", edit_buf, "editor_open_url", "n", function()
     local lines = vim.api.nvim_buf_get_lines(edit_buf, 0, -1, false)
     local val = table.concat(lines, "\n"):match("^%s*(.-)%s*$")
     if val:match("^https?://") or val:match("^ftp://") then
@@ -246,7 +250,7 @@ function M.open(prompt, initial_value, on_save, opts)
     else
       vim.notify("Not a URL", vim.log.levels.INFO)
     end
-  end, { buffer = edit_buf, noremap = true, nowait = true, desc = "Open URL in browser" })
+  end, { noremap = true, nowait = true, desc = "Open URL in browser" })
 
   -- Also cancel if the float loses focus
   vim.api.nvim_create_autocmd("WinLeave", {

@@ -15,7 +15,7 @@ local M = {}
 function M.setup(bufnr, ctx)
   local view = ctx.view
   local open_info_float = ctx.open_info_float
-  local kmap, vmap, kvmap, get_visual_rows, edit_cell, km = ctx.kmap, ctx.vmap, ctx.kvmap, ctx.get_visual_rows, ctx.edit_cell, ctx.km
+  local kmap, kvmap, get_visual_rows, edit_cell, km = ctx.kmap, ctx.kvmap, ctx.get_visual_rows, ctx.edit_cell, ctx.km
 
   -- gs: preview staged SQL (or pending mutation SQL) in float
   kmap("grid_preview_sql", function()
@@ -433,7 +433,7 @@ function M.setup(bufnr, ctx)
   -- K (visual): stack-inspect multiple selected rows in one float.
   -- Each row becomes a labeled block separated by a blank line.
   -- 1 row selected → same float as normal K. N rows → stacked blocks.
-  vmap("K", function()
+  kvmap("grid_row_view", function()
     local row_indices = get_visual_rows()
     if not row_indices or #row_indices == 0 then return end
     local session = ctx.session()

@@ -225,14 +225,20 @@ Action names (stable API) with their defaults:
   query_history    = "gh"      query history browser
   load_saved       = "gq"      load saved query
   welcome          = "Q"       welcome / home screen
+  schema_browser   = "gb"      schema sidebar (open/focus/close)
 
   Shared: grid + sidebar ~
   query_pad        = "q"       open query pad
+
+  Grid only ~
   ai               = "A"       AI SQL generation
-  schema_browser   = "gb"      schema sidebar (open/focus/close)
+
+  Shared: query pad + sidebar ~
+  goto_grid        = "gw"      jump to grid window
+  open_notebook    = "gn"      open a .md or .sql notebook
 
   Shared: grid + query pad ~
-  goto_grid        = "gw"      jump to grid window
+  table_picker_go  = "go"      short table-picker key
 
   Tab views (1-9 slots, surface behaviour varies) ~
   tab_1            = "1"       tab_2            = "2"
@@ -310,7 +316,12 @@ Action names (stable API) with their defaults:
   qpad_execute     = "<C-CR>"  qpad_execute_new = "<S-CR>"
   qpad_save        = "<C-s>"   qpad_ai          = "gA"
   qpad_format      = "gF"      qpad_close       = "q"
-  open_notebook    = "gn"
+
+  Query pad completion (when completion=true) ~
+  qpad_complete       = "<C-Space>"
+  qpad_complete_next  = "<Tab>"    qpad_complete_prev = "<S-Tab>"
+  qpad_complete_down  = "<Down>"   qpad_complete_up   = "<Up>"
+  qpad_complete_accept= "<CR>"
 
   Schema sidebar ~
   sidebar_open     = "<CR>"    sidebar_open_spl = "<S-CR>"
@@ -324,6 +335,11 @@ Action names (stable API) with their defaults:
   sidebar_drop     = "D"       sidebar_create   = "+"
   sidebar_attach   = "ga"      sidebar_detach   = "gd"
   sidebar_conns    = "gc"      sidebar_close    = "<Esc>"
+
+  Cell editor ~
+  editor_save      = "<CR>"    editor_save_alt     = "<C-s>"
+  editor_cancel    = "<Esc>"   editor_cancel_q      = "q"
+  editor_cancel_insert = "<C-c>"  editor_open_url   = "gx"
 
 No default keymaps are set outside the grip buffer.
 
@@ -348,14 +364,16 @@ All commands are global and available after the plugin loads.
 :GripSchema
   Open or focus the schema browser sidebar. Shows tables and views with
   expandable columns, type abbreviations, and PK/FK markers. The `gb`
-  keymap focuses the sidebar from any buffer, or closes it when already
-  inside.
+  keymap focuses the sidebar from the grid or query pad, or closes it when
+  already inside the sidebar.
 
                                                                *:GripTables*
 :GripTables
   Open the table picker. Shows a floating list with column preview (PK,
   FK markers, and types). Uses grip_picker with zero external dependencies.
-  Also reachable via `go`, `gT`, or `gt` from any grip buffer.
+  Also reachable via `gT` or `gt` from every primary surface. `go` is the
+  short picker key in the grid and query pad; in the sidebar it opens the
+  table under the cursor with newest rows first.
 
                                                                 *:GripQuery*
 :GripQuery [sql]
@@ -829,7 +847,7 @@ referenced row in the target table. A new grid opens showing just that
 row. Press `<C-o>` to go back. The title bar shows a breadcrumb trail
 of your navigation path.
 
-Press `gr` on any row to navigate the other direction: it opens the rows
+Press `gm` on any row to navigate the other direction: it opens the rows
 in other tables that reference the current row (reverse foreign key).
 If the cursor is on a column that other tables reference (usually the
 primary key) its value is used; otherwise the row's primary key is used.
@@ -849,8 +867,8 @@ to scanning each table's foreign keys once.
 ==============================================================================
 10. SCHEMA BROWSER                                          *grip-schema*
 
-Toggle with `:GripSchema` or `gb` from a grid buffer. Opens a left sidebar
-showing all tables and views for the current connection.
+Toggle with `:GripSchema` or `gb` from a grid or query-pad buffer. Opens a
+left sidebar showing all tables and views for the current connection.
 
 Schema browser keymaps:
   <CR>            Open table in grid (or open parent table from column)
@@ -883,8 +901,8 @@ markers for primary keys and foreign keys.
 ==============================================================================
 11. QUERY PAD                                             *grip-query-pad*
 
-Open with `:GripQuery` or `q` from any grip buffer. Creates a persistent
-scratch SQL buffer with filetype=sql and built-in completion.
+Open with `:GripQuery` or `q` from the grid or schema sidebar. Creates a
+persistent scratch SQL buffer with filetype=sql and built-in completion.
 
 Content protection: pressing `q` or `2` focuses the pad without replacing
 anything. Clicking a table in the sidebar or picker appends the new query
@@ -907,6 +925,9 @@ Query pad keymaps:
   <S-CR>      Execute and always open result in a new split (never reuses
                   an existing grid, even an unpinned one)
   <C-Space>       Trigger SQL completion manually
+  <Tab>/<S-Tab>   Trigger or move through completion choices
+  <Down>/<Up>     Move through completion choices, or move normally
+  <CR>            Accept completion, or insert a newline
   <C-s>           Save query with :GripSave
   gq              Load saved query (picker with SQL preview)
   gA              AI SQL generation (natural language)

@@ -86,8 +86,8 @@ local function _build_actions()
     act("[query]    Jump to grid",           k("goto_grid"),        "Focus the grid window",                                       { "query" }),
     act("[query]    Format SQL",             k("qpad_format"),      "Reformat SQL (external tool cascade -> Lua fallback)",         { "query" }),
 
-    -- ── AI (grid / sidebar) ────────────────────────────────────────────────
-    act("[ai]       AI SQL generation",      k("ai"),               "Generate SQL from a plain-English description",               { "grid", "sidebar" }),
+    -- ── AI (grid) ──────────────────────────────────────────────────────────
+    act("[ai]       AI SQL generation",      k("ai"),               "Generate SQL from a plain-English description",               { "grid" }),
 
     -- ── Grid: editing ─────────────────────────────────────────────────────
     act("[grid]     Edit cell",              k("grid_edit"),        "Open inline cell editor",                                     { "grid" }),

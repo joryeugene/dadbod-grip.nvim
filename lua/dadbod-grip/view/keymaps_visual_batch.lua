@@ -12,7 +12,7 @@ local M = {}
 --- edit / delete / NULL over the selected rows.
 function M.setup(bufnr, ctx)
   local view = ctx.view
-  local vmap, kvmap, get_visual_rows = ctx.vmap, ctx.kvmap, ctx.get_visual_rows
+  local kvmap, get_visual_rows = ctx.kvmap, ctx.get_visual_rows
 
   -- Visual gg/G/j/k: clamp selection to the data-row range so it stops at the
   -- last data row instead of overshooting onto the separator/footer/hint line
@@ -27,10 +27,10 @@ function M.setup(bufnr, ctx)
       vim.api.nvim_win_set_cursor(0, { target, cursor[2] })
     end
   end
-  vmap("gg", visual_nav(function() return 0 end), "First data row (visual)")
-  vmap("G", visual_nav(function() return math.huge end), "Last data row (visual)")
-  vmap("j", visual_nav(function(_, line) return line + 1 end), "Down, clamped to data rows")
-  vmap("k", visual_nav(function(_, line) return line - 1 end), "Up, clamped to data rows")
+  kvmap("grid_row_first", visual_nav(function() return 0 end), "First data row (visual)")
+  kvmap("grid_row_last", visual_nav(function() return math.huge end), "Last data row (visual)")
+  kvmap("grid_row_down", visual_nav(function(_, line) return line + 1 end), "Down, clamped to data rows")
+  kvmap("grid_row_up", visual_nav(function(_, line) return line - 1 end), "Up, clamped to data rows")
 
   -- Visual e: batch edit (set all selected cells in column to same value)
   kvmap("grid_v_edit", function()

@@ -326,7 +326,7 @@ work without credentials.
 
 ### SQL Notebooks
 
-- **Notebook picker** via `gn` from the grid, query pad, or schema sidebar. Scans `.md` and `.sql` files in your project and shows a preview of each.
+- **Notebook picker** via `gn` from the query pad or schema sidebar. Scans `.md` and `.sql` files in your project and shows a preview of each.
 - **Block execution** via `<C-CR>` with cursor inside any `` ```sql ``` `` fence: that block's SQL executes, surrounding Markdown prose is untouched.
 - **Smart fallback**: cursor outside any fence runs the full buffer; visual selection always runs the selected text. Same key, context-aware behavior.
 - **No special format**: any Markdown file with SQL fences is a notebook. Write the question, then a SQL block, then what to look for in the result. Each block runs independently against the current connection.
@@ -334,8 +334,8 @@ work without credentials.
 
 ### Schema and Workflow
 - **ER diagram** via `gG` or `4`: a tree-spine float showing tables with PK/FK/column summary, arranged by FK depth with box-drawing connectors. `4` opens the full map; `gG` from a table context focuses that table plus direct parents and children. Press `<CR>` on any table to open its grid. Press `f` to follow a foreign key and `H` to go back (breadcrumb trail updates). `Tab`/`S-Tab` cycle between tables. Press `gG` or `q` to close. Column names truncate gracefully; overflow columns show a right-aligned `+N` count. Works from the grid, the query pad, and the schema sidebar.
-- **Schema browser** via `:GripSchema` or `gb` showing a sidebar tree with columns, types, and PK/FK markers. `gb` opens/focuses the browser from any buffer; pressing `gb` from inside closes it.
-- **Table picker** via `:GripTables` or `gT` / `gt` providing a fuzzy finder with column preview. Available from all three buffers: grid, query pad, and sidebar. In the sidebar, `go` opens the table under cursor with `ORDER BY created_at / PK DESC` so the latest rows appear first.
+- **Schema browser** via `:GripSchema` or `gb` showing a sidebar tree with columns, types, and PK/FK markers. `gb` opens or focuses the browser from the grid and query pad; pressing it inside the sidebar closes it.
+- **Table picker** via `:GripTables` or `gT` / `gt` providing a fuzzy finder with column preview. Available from all three buffers: grid, query pad, and sidebar. `go` is the short picker key in the grid and query pad; in the sidebar, it opens the table under cursor with `ORDER BY created_at / PK DESC` so the latest rows appear first.
 - **SQL query pad** via `:GripQuery` or `q`. A persistent scratch buffer that pipes results into editable grids. Clicking a table in the sidebar or picker never replaces pad content: new queries append below existing SQL with a blank separator so all your work stays intact. `<C-CR>` runs the visual selection or the full buffer; when cursor is inside a `` ```sql ``` `` fence, only that block runs. `gn` opens the notebook picker to load any `.md` or `.sql` file. `gA` reads existing pad content and modifies it rather than generating from scratch. Pressing `q` or `2` focuses the pad without overwriting anything.
 - **Built-in SQL completion** with table names, column names, SQL keywords, and alias tracking. No extra plugins required. In DuckDB federated sessions, columns from all attached databases appear with schema-qualified names (e.g. `pg.users.email`). Works with nvim-cmp (source `dadbod_grip`), blink.cmp, or standalone via `<C-Space>` and auto-trigger.
 - **Saved queries** via `:GripSave` and `:GripLoad` persisting to project-local `.grip/queries/` files.
@@ -840,17 +840,17 @@ require("dadbod-grip").setup({
 })
 ```
 
-Action names are stable API. The full list is in `lua/dadbod-grip/keymaps.lua`.
+Action names are stable API. The complete machine-readable catalog is in [`keymaps.json`](keymaps.json); it is generated from `lua/dadbod-grip/keymaps.lua` and checked against the mappings installed by each primary surface.
 
 Common actions worth knowing:
 
 | Action name | Default | Surface |
 |---|---|---|
 | `palette` | `<C-p>` | all |
-| `ai` | `A` | grid + sidebar |
+| `ai` | `A` | grid |
 | `qpad_ai` | `gA` | query pad |
 | `qpad_execute` | `<C-CR>` | query pad |
-| `open_notebook` | `gn` | query pad |
+| `open_notebook` | `gn` | query pad + sidebar |
 | `grid_apply` | `a` | grid |
 | `grid_fk_follow` | `gf` | grid |
 | `grid_fk_referencing` | `gm` | grid |

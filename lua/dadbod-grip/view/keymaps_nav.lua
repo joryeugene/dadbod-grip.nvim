@@ -79,6 +79,14 @@ function M.setup(bufnr, ctx)
     reveal_col_edge(win, bufnr, cursor[1], bp)
   end
 
+  -- h/l remain native character motions, but registering them makes setup()
+  -- remaps and disables effective. Preserve Vim counts and edge behavior.
+  local function native_horizontal(motion)
+    return function() vim.cmd("normal! " .. vim.v.count1 .. motion) end
+  end
+  kmap("grid_col_left", native_horizontal("h"), "Move left")
+  kmap("grid_col_right", native_horizontal("l"), "Move right")
+
   -- Tab: next column
   kmap("grid_col_tab", function() nav_col(1) end, "Next column")
   -- S-Tab: previous column
