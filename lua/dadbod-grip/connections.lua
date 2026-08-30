@@ -61,6 +61,19 @@ local function ensure_global_grip_dir()
   paths.ensure_dir(vim.fn.expand("~") .. "/.grip")
 end
 
+--- Stable opaque identity for a persisted connection. This is an identifier,
+--- not a secret; entropy only needs to make accidental collisions negligible.
+local function new_connection_id(url)
+  local seed = table.concat({
+    tostring(url),
+    tostring(os.time()),
+    tostring(vim.fn.getpid()),
+    tostring(vim.uv.hrtime()),
+    tostring(math.random()),
+  }, ":")
+  return "conn_" .. vim.fn.sha256(seed):sub(1, 24)
+end
+
 -- Extensions that DuckDB can query directly (file-as-table).
 local LOCAL_FILE_EXTS = {
   ".parquet", ".csv", ".tsv", ".json", ".ndjson", ".jsonl",
@@ -198,6 +211,7 @@ local function read_json_connections(path, source)
     if type(entry) == "table" and entry.name and entry.url then
       local c = { name = entry.name, url = entry.url,
                   type = entry.type, source = source or "file" }
+      if entry.id then c.id = entry.id end
       if entry.attachments then c.attachments = entry.attachments end
       if entry.last_used then c.last_used = entry.last_used end
       if entry.env_file then c.env_file = entry.env_file end
@@ -362,13 +376,17 @@ local function write_file_connections(conns)
       by_url[c.url] = c
       table.insert(order, c.url)
     elseif (c.last_used or 0) > (by_url[c.url].last_used or 0) then
+      c.id = c.id or by_url[c.url].id
       by_url[c.url] = c
+    elseif not by_url[c.url].id and c.id then
+      by_url[c.url].id = c.id
     end
   end
   local data = {}
   for _, url in ipairs(order) do
     local c = by_url[url]
     local entry = { name = c.name, url = c.url }
+    if c.id then entry.id = c.id end
     if c.type then entry.type = c.type end
     if c.attachments and #c.attachments > 0 then entry.attachments = c.attachments end
     if c.last_used then entry.last_used = c.last_used end
@@ -379,6 +397,76 @@ local function write_file_connections(conns)
   end
   local json = vim.fn.json_encode(data)
   vim.fn.writefile({ json }, connections_path())
+end
+
+--- Resolve a persisted connection by opaque ID.
+--- @return table|nil connection
+--- @return string|nil reason "missing" or "ambiguous"
+function M.find_by_id(id)
+  if type(id) ~= "string" or id == "" then return nil, "missing" end
+  local found
+  for _, c in ipairs(read_file_connections()) do
+    if c.id == id then
+      if found and found.url ~= c.url then return nil, "ambiguous" end
+      found = found or c
+    end
+  end
+  if not found then return nil, "missing" end
+  return found
+end
+
+--- Return the stable ID for a persisted URL, assigning one lazily when an old
+--- connections.json entry predates IDs. Unsaved/discovered URLs return nil.
+function M.ensure_id(url)
+  if type(url) ~= "string" or url == "" then return nil end
+
+  local local_conns = read_local_connections()
+  local global_conns = configured_connections_path()
+      and {} or read_json_connections(global_connections_path(), "global")
+  local id
+  for _, list in ipairs({ local_conns, global_conns }) do
+    for _, c in ipairs(list) do
+      if c.url == url and c.id then
+        id = c.id
+        break
+      end
+    end
+    if id then break end
+  end
+
+  local persisted = false
+  for _, list in ipairs({ local_conns, global_conns }) do
+    for _, c in ipairs(list) do
+      if c.url == url then persisted = true end
+    end
+  end
+  if not persisted then return nil end
+  id = id or new_connection_id(url)
+
+  local local_changed, global_changed = false, false
+  for _, c in ipairs(local_conns) do
+    if c.url == url and not c.id then c.id, local_changed = id, true end
+  end
+  for _, c in ipairs(global_conns) do
+    if c.url == url and not c.id then c.id, global_changed = id, true end
+  end
+  if local_changed then write_file_connections(local_conns) end
+  if global_changed then
+    ensure_global_grip_dir()
+    local data = {}
+    for _, c in ipairs(global_conns) do
+      local entry = { id = c.id, name = c.name, url = c.url }
+      if c.type then entry.type = c.type end
+      if c.attachments and #c.attachments > 0 then entry.attachments = c.attachments end
+      if c.last_used then entry.last_used = c.last_used end
+      if c.env_file then entry.env_file = c.env_file end
+      if c.mode then entry.mode = c.mode end
+      if c.color then entry.color = c.color end
+      table.insert(data, entry)
+    end
+    vim.fn.writefile({ vim.fn.json_encode(data) }, global_connections_path())
+  end
+  return id
 end
 
 --- Read g:dbs (DBUI-compatible: list or dict of connections).
@@ -448,7 +536,9 @@ function M.list()
         -- a 2s TTL, and mutating it would leak these settings into a later
         -- fetch whose file entry no longer carries them.
         c = vim.tbl_extend("force", {}, c)
-        for _, field in ipairs({ "type", "env_file", "mode", "color", "attachments" }) do
+        for _, field in ipairs({
+          "id", "type", "env_file", "mode", "color", "attachments", "last_used",
+        }) do
           if c[field] == nil then c[field] = filed[field] end
         end
       end
@@ -478,7 +568,7 @@ function M.list()
     end
     -- Persist to global if not already there
     if not global_seen[c.url] then
-      table.insert(global_existing, { name = c.name, url = c.url })
+      table.insert(global_existing, { id = new_connection_id(c.url), name = c.name, url = c.url })
       global_seen[c.url] = true
       new_global = true
     end
@@ -490,7 +580,10 @@ function M.list()
     local gdata = {}
     for _, gc in ipairs(global_existing) do
       local gentry = { name = gc.name, url = gc.url }
+      if gc.id then gentry.id = gc.id end
       if gc.type then gentry.type = gc.type end
+      if gc.attachments and #gc.attachments > 0 then gentry.attachments = gc.attachments end
+      if gc.last_used then gentry.last_used = gc.last_used end
       if gc.env_file then gentry.env_file = gc.env_file end
       if gc.mode then gentry.mode = gc.mode end
       if gc.color then gentry.color = gc.color end
@@ -604,15 +697,17 @@ end
 --- URL is already present, otherwise inserts a new entry. Pure (no I/O) so it
 --- can be shared by M.add() and M.switch()'s single-read/single-write path.
 local function upsert_conn(conns, name, url)
+  local found = false
   for _, c in ipairs(conns) do
     if c.url == url then
       c.name = name
       if is_file_url(url) then c.type = "file" end
-      return
+      found = true
     end
   end
+  if found then return end
   local conn_type = is_file_url(url) and "file" or nil
-  table.insert(conns, { name = name, url = url, type = conn_type })
+  table.insert(conns, { id = new_connection_id(url), name = name, url = url, type = conn_type })
 end
 
 --- Update last_used on a matching entry in an in-memory list (MRU tracking).
@@ -1366,13 +1461,18 @@ function M.pick(opts)
               return
             end
           end
-          local promoted = { name = c.name, url = c.url, type = c.type,
-                              env_file = c.env_file, mode = c.mode, color = c.color }
+          local promoted = { id = c.id or new_connection_id(c.url),
+                              name = c.name, url = c.url, type = c.type,
+                              env_file = c.env_file, mode = c.mode, color = c.color,
+                              attachments = c.attachments, last_used = c.last_used }
           table.insert(global_conns, promoted)
           local gdata = {}
           for _, gc in ipairs(global_conns) do
             local entry = { name = gc.name, url = gc.url }
+            if gc.id then entry.id = gc.id end
             if gc.type then entry.type = gc.type end
+            if gc.attachments and #gc.attachments > 0 then entry.attachments = gc.attachments end
+            if gc.last_used then entry.last_used = gc.last_used end
             if gc.env_file then entry.env_file = gc.env_file end
             if gc.mode then entry.mode = gc.mode end
             if gc.color then entry.color = gc.color end

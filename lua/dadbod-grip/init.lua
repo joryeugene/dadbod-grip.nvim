@@ -1826,12 +1826,12 @@ function M.setup(opts)
   vim.api.nvim_create_user_command("GripSave", function(cmd_opts)
     local saved = require("dadbod-grip.saved")
     local name = vim.trim(cmd_opts.args or "")
+    local bufnr = vim.api.nvim_get_current_buf()
     if name == "" then
-      local bufnr = vim.api.nvim_get_current_buf()
       saved.save_prompt(bufnr)
     else
-      local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-      saved.save(name, table.concat(lines, "\n"))
+      local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+      saved.save(name, table.concat(lines, "\n"), vim.b[bufnr].db or vim.g.db)
     end
   end, {
     nargs = "?",
