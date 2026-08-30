@@ -402,6 +402,43 @@ test("sqlserver parse_url: full URL parses all fields", function()
   eq(r.host, "db.host", "host")
   eq(r.port, "14330", "port")
   eq(r.dbname, "grip_test", "dbname")
+  eq(r.encrypt, "mandatory", "certificate-validating encryption is the default")
+end)
+
+test("sqlserver TLS URL options map to sqlcmd for both schemes", function()
+  for _, scheme in ipairs({ "sqlserver", "mssql" }) do
+    local parsed = assert(sqlserver._parse_url(scheme
+      .. "://sa:secret@db.host:1433/grip_test?encrypt=strict&server_certificate=%2Ftmp%2Fdb+cert.pem"))
+    eq(parsed.dbname, "grip_test", scheme .. " dbname excludes query")
+    eq(parsed.encrypt, "strict", scheme .. " strict parsed")
+    eq(parsed.server_certificate, "/tmp/db cert.pem", scheme .. " certificate decoded")
+    local args = sqlserver._sqlcmd_args(parsed, "SELECT 1")
+    has_arg(args, "-Ns", scheme .. " strict encryption")
+    has_arg(args, "-J", scheme .. " certificate pinning")
+    has_arg(args, "/tmp/db cert.pem", scheme .. " certificate path")
+  end
+end)
+
+test("sqlserver TLS defaults to validation and allows explicit local trust", function()
+  local secure = assert(sqlserver._parse_url("sqlserver://sa:pw@db/app"))
+  has_arg(sqlserver._sqlcmd_args(secure, "SELECT 1"), "-Nm", "secure default")
+
+  local local_dev = assert(sqlserver._parse_url(
+    "sqlserver://sa:pw@localhost/app?encrypt=optional&trust_server_certificate=true"))
+  local args = sqlserver._sqlcmd_args(local_dev, "SELECT 1")
+  has_arg(args, "-No", "optional encryption")
+  has_arg(args, "-C", "explicit certificate bypass")
+end)
+
+test("sqlserver rejects unsafe or contradictory TLS URL values before spawning", function()
+  local parsed, err = sqlserver._parse_url("sqlserver://sa:pw@db/app?encrypt=maybe")
+  eq(parsed, nil, "invalid encryption rejected")
+  contains(err, "optional, mandatory, or strict", "valid values named")
+
+  parsed, err = sqlserver._parse_url(
+    "mssql://sa:pw@db/app?server_certificate=%2Ftmp%2Fdb.pem&trust_server_certificate=true")
+  eq(parsed, nil, "pinning and bypass cannot be combined")
+  contains(err, "cannot be combined", "conflict explained")
 end)
 
 test("sqlserver query: parses sqlcmd tab output", function()
@@ -1098,11 +1135,11 @@ local function assert_uses_column_type(sql, label)
     label .. " must not rebuild the type from CHARACTER_MAXIMUM_LENGTH")
 end
 
-test("mysql get_schema_batch: type comes from COLUMN_TYPE verbatim", function()
+test("mysql get_schema_batch: type comes from COLUMN_TYPE with MariaDB widths normalized", function()
   local tsv = table.concat({
     "table_name\tcolumn_name\tdata_type\tis_nullable",
     "type_zoo\tfeeling\tenum('happy','sad','neutral')\tYES",
-    "type_zoo\tbig_unsigned\tbigint unsigned\tYES",
+    "type_zoo\tbig_unsigned\tbigint(20) unsigned\tYES",
   }, "\n") .. "\n"
 
   local args, result
@@ -1115,7 +1152,7 @@ test("mysql get_schema_batch: type comes from COLUMN_TYPE verbatim", function()
   assert_uses_column_type(last_arg(args), "SCHEMA_BATCH_SQL")
   eq(result["type_zoo"][1].data_type, "enum('happy','sad','neutral')",
     "enum value list survives the TSV round-trip, commas and quotes included")
-  eq(result["type_zoo"][2].data_type, "bigint unsigned", "unsigned modifier kept")
+  eq(result["type_zoo"][2].data_type, "bigint unsigned", "display width removed; unsigned kept")
 end)
 
 test("mysql get_column_info: type comes from COLUMN_TYPE verbatim", function()
@@ -1123,6 +1160,7 @@ test("mysql get_column_info: type comes from COLUMN_TYPE verbatim", function()
     "column_name\tdata_type\tis_nullable\tcolumn_default\tconstraints",
     "feeling\tenum('happy','sad','neutral')\tYES\t\t",
     "approx_float\tfloat\tYES\t\t",
+    "maria_id\tint(11) unsigned\tNO\t\t",
     "unit_price\tdecimal(10,2)\tNO\t\tPRI",
   }, "\n") .. "\n"
 
@@ -1136,8 +1174,9 @@ test("mysql get_column_info: type comes from COLUMN_TYPE verbatim", function()
   assert_uses_column_type(last_arg(args), "get_column_info SQL")
   eq(cols[1].data_type, "enum('happy','sad','neutral')", "enum list")
   eq(cols[2].data_type, "float", "float without a bogus precision")
-  eq(cols[3].data_type, "decimal(10,2)", "decimal keeps precision and scale")
-  eq(cols[3].constraints, "PRIMARY KEY", "COLUMN_KEY still maps to a constraint label")
+  eq(cols[3].data_type, "int unsigned", "MariaDB integer width removed; modifier kept")
+  eq(cols[4].data_type, "decimal(10,2)", "decimal keeps precision and scale")
+  eq(cols[4].constraints, "PRIMARY KEY", "COLUMN_KEY still maps to a constraint label")
 end)
 
 -- ── SQLite get_schema_batch ──────────────────────────────────────────────────

@@ -10,10 +10,54 @@ local M = { readonly = true }
 
 local DEFAULT_TIMEOUT = 30000
 
---- Parse a dadbod-style SQL Server URL into connection components.
---- "sqlserver://user:pass@host:port/dbname" → {user, pass, host, port, dbname}
+local function decode_query_value(value)
+  return (value:gsub("+", " "):gsub("%%(%x%x)", function(hex)
+    return string.char(tonumber(hex, 16))
+  end))
+end
+
+--- Parse a dadbod-style SQL Server URL and its TLS query options.
+--- Both sqlserver:// and mssql:// are accepted by the shared URL parser.
+--- @return table|nil parsed
+--- @return string|nil err
 local function parse_url(url)
-  return sql_util.parse_dadbod_url(url, "1433")
+  local base, query = url:match("^(.-)%?(.*)$")
+  local parsed = sql_util.parse_dadbod_url(base or url, "1433")
+  if not parsed then return nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url) end
+
+  local params = {}
+  for part in (query or ""):gmatch("[^&]+") do
+    local key, value = part:match("^([^=]+)=?(.*)$")
+    if key then params[decode_query_value(key):lower()] = decode_query_value(value) end
+  end
+
+  local encrypt = (params.encrypt or "mandatory"):lower()
+  local encrypt_aliases = {
+    optional = "optional", o = "optional", ["false"] = "optional", no = "optional", ["0"] = "optional",
+    mandatory = "mandatory", m = "mandatory", ["true"] = "mandatory", yes = "mandatory", ["1"] = "mandatory",
+    strict = "strict", s = "strict",
+  }
+  parsed.encrypt = encrypt_aliases[encrypt]
+  if not parsed.encrypt then
+    return nil, "SQL Server encrypt must be optional, mandatory, or strict"
+  end
+
+  local trust = (params.trust_server_certificate or "false"):lower()
+  if trust == "true" or trust == "yes" or trust == "1" then
+    parsed.trust_server_certificate = true
+  elseif trust ~= "false" and trust ~= "no" and trust ~= "0" and trust ~= "" then
+    return nil, "SQL Server trust_server_certificate must be true or false"
+  end
+
+  parsed.server_certificate = params.server_certificate
+  if parsed.server_certificate == "" then parsed.server_certificate = nil end
+  if parsed.server_certificate and parsed.encrypt == "optional" then
+    return nil, "SQL Server server_certificate requires mandatory or strict encryption"
+  end
+  if parsed.server_certificate and parsed.trust_server_certificate then
+    return nil, "SQL Server server_certificate cannot be combined with trust_server_certificate=true"
+  end
+  return parsed
 end
 
 --- Split a possibly schema-qualified table name; unqualified names are "dbo".
@@ -41,6 +85,9 @@ local function sqlcmd_args(parsed, sql_str, opts)
   local args = {
     "sqlcmd",
     "-S", server,
+    -- Supplying -N makes sqlcmd validate the server certificate unless the
+    -- URL explicitly opts into -C. Mandatory is the secure default.
+    "-N" .. ({ optional = "o", mandatory = "m", strict = "s" })[parsed.encrypt or "mandatory"],
     "-W",
     "-s", "\t",
     -- Without -b sqlcmd exits 0 even when the server rejects the statement, so
@@ -48,6 +95,12 @@ local function sqlcmd_args(parsed, sql_str, opts)
     -- reported as a success.
     "-b",
   }
+
+  if parsed.trust_server_certificate then args[#args + 1] = "-C" end
+  if parsed.server_certificate then
+    args[#args + 1] = "-J"
+    args[#args + 1] = parsed.server_certificate
+  end
 
   -- No sql_str means the statements arrive on stdin (GO-separated batches), so
   -- there is no -Q at all.
@@ -160,8 +213,8 @@ local function run_query(sql_str, url, timeout_ms)
     return nil, "sqlcmd not found. Install Microsoft sqlcmd tools."
   end
 
-  local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url) end
+  local parsed, parse_err = parse_url(url)
+  if not parsed then return nil, parse_err end
 
   local stdout, stderr, code = sqlcmd(parsed, sql_str, timeout_ms)
   if code ~= 0 then
@@ -184,9 +237,9 @@ local function run_query_async(sql_str, url, timeout_ms, callback)
     return
   end
 
-  local parsed = parse_url(url)
+  local parsed, parse_err = parse_url(url)
   if not parsed then
-    vim.schedule(function() callback(nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url)) end)
+    vim.schedule(function() callback(nil, parse_err) end)
     return
   end
 
@@ -214,8 +267,8 @@ function M.execute(sql_str, url)
   if vim.fn.executable("sqlcmd") == 0 then
     return nil, "sqlcmd not found. Install Microsoft sqlcmd tools."
   end
-  local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url) end
+  local parsed, parse_err = parse_url(url)
+  if not parsed then return nil, parse_err end
   local stdout, stderr, code = sqlcmd(parsed, sql_str, nil, { nocount = false })
   if code ~= 0 then
     return nil, sqlcmd_error(stdout, stderr, code)
@@ -538,8 +591,8 @@ function M.explain(sql_str, url)
   if vim.fn.executable("sqlcmd") == 0 then
     return nil, "sqlcmd not found. Install Microsoft sqlcmd tools."
   end
-  local parsed = parse_url(url)
-  if not parsed then return nil, "Invalid SQL Server URL: " .. sql_util.redact_url(url) end
+  local parsed, parse_err = parse_url(url)
+  if not parsed then return nil, parse_err end
 
   local stdout, stderr, code = sqlcmd_batch(parsed, { "SET SHOWPLAN_TEXT ON", sql_str })
   if code ~= 0 then

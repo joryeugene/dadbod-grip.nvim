@@ -7,6 +7,7 @@
 -- foreign keys, unicode, empty result sets, pagination-scale rows.
 
 SET NOCOUNT ON;
+SET QUOTED_IDENTIFIER ON;
 
 IF OBJECT_ID('dbo.order_items', 'U') IS NOT NULL DROP TABLE dbo.order_items;
 IF OBJECT_ID('dbo.orders', 'U') IS NOT NULL DROP TABLE dbo.orders;
