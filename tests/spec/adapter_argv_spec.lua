@@ -17,7 +17,8 @@ local script = {
   "cat > \"$GRIP_DB_STDIN_FILE\"",
   "case \"${0##*/}\" in",
   "  psql)",
-  "    printf 'PGDATABASE=%s\\nPGPASSWORD=%s\\nPGOPTIONS=%s\\n' \"$PGDATABASE\" \"$PGPASSWORD\" \"$PGOPTIONS\" > \"$GRIP_DB_ENV_FILE\"",
+  "    printf 'PGSERVICE=%s\\nPGPASSWORD=%s\\nPGOPTIONS=%s\\n' \"$PGSERVICE\" \"$PGPASSWORD\" \"$PGOPTIONS\" > \"$GRIP_DB_ENV_FILE\"",
+  "    cat \"$PGSERVICEFILE\" >> \"$GRIP_DB_ENV_FILE\"",
   "    printf 'value\\n1\\n'",
   "    ;;",
   "  mysql)",
@@ -53,7 +54,7 @@ local cases = {
     name = "postgresql", mod = pg,
     url = "postgresql://argv_user:pg_password_secret@db.internal:55432/analytics?sslmode=require",
     password = "pg_password_secret", schema_token = "information_schema",
-    env_token = "PGDATABASE=postgresql://argv_user@db.internal:55432/analytics?sslmode=require",
+    env_token = "host=db.internal",
   },
   {
     name = "mysql", mod = mysql,
@@ -98,6 +99,11 @@ local function inspect(case, label, call, expected_stdin)
     string.format("%s %s stdin missing %q: %s", case.name, label, expected_stdin, stdin))
   if case.env_token then
     assert(env:find(case.env_token, 1, true), case.name .. " environment missing credential channel: " .. env)
+  end
+  if case.name == "postgresql" then
+    assert(env:find("port=55432", 1, true) and env:find("dbname=analytics", 1, true)
+      and env:find("user=argv_user", 1, true) and env:find("sslmode=require", 1, true),
+      "PostgreSQL service file did not preserve the URI: " .. env)
   end
   return stdin
 end

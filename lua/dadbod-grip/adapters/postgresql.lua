@@ -10,6 +10,7 @@ local esc = sql_util.escape_literal
 local M = {}
 
 local DEFAULT_TIMEOUT = 30000
+local SERVICE_NAME = "dadbod_grip"
 
 --- Split a possibly schema-qualified table name; unqualified names are "public".
 local function split_table_name(table_name)
@@ -26,6 +27,80 @@ local function percent_decode(s)
   return (s:gsub("%%(%x%x)", function(hex)
     return string.char(tonumber(hex, 16))
   end))
+end
+
+local function service_set(params, order, key, value)
+  if params[key] == nil then order[#order + 1] = key end
+  params[key] = value
+end
+
+--- Convert a PostgreSQL URI into a temporary libpq service definition.
+--- PGDATABASE treats a URI as a literal database name, so a service file is
+--- the libpq-supported way to keep the connection string out of argv without
+--- losing URI query parameters.
+local function pg_service_lines(url)
+  local rest = url:match("^postgresql://(.*)$") or url:match("^postgres://(.*)$")
+  if not rest then return nil, nil, "Invalid PostgreSQL URL" end
+
+  local base, query = rest:match("^([^?]*)(.*)$")
+  query = query ~= "" and query:sub(2) or ""
+  local authority, path = base:match("^([^/]*)(/.*)$")
+  if not authority then authority = base end
+
+  local user, password, hostspec = sql_util.split_authority(authority)
+  local params, order = {}, {}
+  if user and user ~= "" then service_set(params, order, "user", percent_decode(user)) end
+  if password and password ~= "" then password = percent_decode(password) else password = nil end
+  if path and #path > 1 then service_set(params, order, "dbname", percent_decode(path:sub(2))) end
+
+  if hostspec and hostspec ~= "" then
+    local hosts, ports, saw_port = {}, {}, false
+    for part in hostspec:gmatch("[^,]+") do
+      local host, port = part:match("^%[([^]]+)%]:(%d*)$")
+      if not host then host = part:match("^%[([^]]+)%]$") end
+      if not host then host, port = part:match("^(.*):(%d+)$") end
+      host = host or part
+      hosts[#hosts + 1] = percent_decode(host)
+      ports[#ports + 1] = port or ""
+      if port then saw_port = true end
+    end
+    service_set(params, order, "host", table.concat(hosts, ","))
+    if saw_port then service_set(params, order, "port", table.concat(ports, ",")) end
+  end
+
+  for pair in query:gmatch("[^&]+") do
+    local key, value = pair:match("^([^=]+)=?(.*)$")
+    key, value = percent_decode(key or ""), percent_decode(value or "")
+    if not key:match("^[a-z_][a-z0-9_]*$") or value:find("[\r\n]") then
+      return nil, nil, "Invalid PostgreSQL URL parameter"
+    end
+    if key == "ssl" and value == "true" then key, value = "sslmode", "require" end
+    if key == "password" then
+      password = value
+    else
+      service_set(params, order, key, value)
+    end
+  end
+
+  local lines = { "[" .. SERVICE_NAME .. "]" }
+  for _, key in ipairs(order) do
+    local value = params[key]
+    if value:find("[\r\n]") then return nil, nil, "Invalid PostgreSQL URL value" end
+    lines[#lines + 1] = key .. "=" .. value
+  end
+  return lines, password
+end
+
+local function write_service_file(url)
+  local lines, password, parse_err = pg_service_lines(url)
+  if not lines then return nil, nil, parse_err end
+  local path = vim.fn.tempname()
+  local ok, result = pcall(vim.fn.writefile, lines, path)
+  if not ok or result ~= 0 or vim.fn.setfperm(path, "rw-------") ~= 1 then
+    pcall(vim.fn.delete, path)
+    return nil, nil, "Could not create PostgreSQL connection service"
+  end
+  return path, password
 end
 
 --- Split url into (url-with-password-removed, percent-encoded-password-or-nil).
@@ -53,13 +128,14 @@ local function strip_password(url)
   return scheme .. user .. "@" .. host .. tail, pass
 end
 
---- Constant argv for one psql invocation. The connection URI and statement
---- are delivered through PGDATABASE and stdin so neither appears in `ps`.
+--- Constant argv for one psql invocation. Connection parameters use a
+--- temporary libpq service file and the statement uses stdin.
 local function psql_args()
-  return { "psql", "-X", "--no-password", "--csv" }
+  return { "psql", "-X", "--no-password", "--set=ON_ERROR_STOP=1", "--csv" }
 end
 
---- opts.env for one psql invocation. PGDATABASE carries the password-free URI.
+--- opts.env for one psql invocation. PGSERVICEFILE carries password-free
+--- connection parameters and PGPASSWORD carries the decoded password.
 ---
 --- PGPASSWORD carries whatever strip_password pulled out of the URL, decoded
 --- exactly once (see percent_decode above). It is omitted -- an empty table,
@@ -76,10 +152,15 @@ end
 --- not put into read-only mode by this.
 --- @param url string
 --- @param opts table|nil  { readonly = boolean }
-local function psql_env(url, opts)
-  local stripped_url, pass = strip_password(url)
-  local env = { PGDATABASE = stripped_url }
-  if pass then env.PGPASSWORD = percent_decode(pass) end
+local function psql_env(url, opts, service_path, service_password)
+  local _, pass = strip_password(url)
+  local env = {}
+  if service_path then
+    env.PGSERVICE = SERVICE_NAME
+    env.PGSERVICEFILE = service_path
+  end
+  pass = service_password or (pass and percent_decode(pass))
+  if pass then env.PGPASSWORD = pass end
   if opts and opts.readonly then
     env.PGOPTIONS = "-c default_transaction_read_only=on"
   end
@@ -113,9 +194,13 @@ function M.readonly_caveat(url)
 end
 
 local function psql(url, sql_str, timeout_ms)
-  return adapters.run_cmd(psql_args(),
+  local service_path, password, service_err = write_service_file(url)
+  if not service_path then return "", service_err, 1 end
+  local stdout, stderr, code = adapters.run_cmd(psql_args(),
     timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
-    { stdin = sql_str, env = psql_env(url, adapters.session_opts()) })
+    { stdin = sql_str, env = psql_env(url, adapters.session_opts(), service_path, password) })
+  pcall(vim.fn.delete, service_path)
+  return stdout, stderr, code
 end
 
 local function split_routine_name(routine_name)
@@ -368,11 +453,15 @@ end
 --- Calls callback(tables), or callback(nil) when psql fails.
 --- Used to pre-warm the completion cache on connection switch / GripAttach.
 function M.get_schema_batch_async(url, callback)
+  local service_path, password = write_service_file(url)
+  if not service_path then vim.schedule(function() callback(nil) end); return end
   adapters.run_cmd_async(psql_args(),
     adapters.configured_timeout(DEFAULT_TIMEOUT), function(stdout, _, code)
+      pcall(vim.fn.delete, service_path)
       if code ~= 0 then callback(nil); return end
       callback(parse_schema_batch(stdout))
-    end, { stdin = SCHEMA_BATCH_SQL, env = psql_env(url, adapters.session_opts()) })
+    end, { stdin = SCHEMA_BATCH_SQL,
+      env = psql_env(url, adapters.session_opts(), service_path, password) })
 end
 
 function M.explain(sql_str, url)
@@ -648,12 +737,12 @@ end
 --- Ping the server by running SELECT 1. Returns true on success, false on any error.
 function M.ping(url)
   if vim.fn.executable("psql") == 0 then return false end
-  local _, _, code = adapters.run_cmd(psql_args(), 5000,
-    { stdin = "SELECT 1", env = psql_env(url, adapters.session_opts()) })
+  local _, _, code = psql(url, "SELECT 1", 5000)
   return code == 0
 end
 
 M._psql_args = psql_args
 M._psql_env = psql_env
+M._pg_service_lines = pg_service_lines
 
 return M

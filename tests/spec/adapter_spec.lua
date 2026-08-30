@@ -249,6 +249,15 @@ test("pg query: passes -X to skip .psqlrc", function()
   end)
 end)
 
+test("pg query: stdin errors stop psql with a nonzero exit", function()
+  with_executable(function()
+    local args = capture_system_args("", function()
+      pg.query("SELECT * FROM missing_table", "postgresql://localhost/db")
+    end)
+    has_arg(args, "--set=ON_ERROR_STOP=1", "stdin errors must preserve -c exit behavior")
+  end)
+end)
+
 test("pg ping: passes -X to skip .psqlrc", function()
   with_executable(function()
     local args = capture_system_args("", function()
@@ -1316,7 +1325,13 @@ for _, case in ipairs(BATCH_ARGV_CASES) do
     assert(async_argv ~= nil, case.name .. ": async path must spawn a process")
     eq_argv(async_argv, sync_argv, case.name .. " async argv must match sync argv")
     eq(async_opts.stdin, sync_opts.stdin, case.name .. " async stdin must match sync stdin")
-    assert(vim.deep_equal(async_opts.env, sync_opts.env), case.name .. " async env must match sync env")
+    local sync_env = vim.deepcopy(sync_opts.env or {})
+    local async_env = vim.deepcopy(async_opts.env or {})
+    if case.name == "pg" then
+      assert(sync_env.PGSERVICEFILE and async_env.PGSERVICEFILE, "pg service files missing")
+      sync_env.PGSERVICEFILE, async_env.PGSERVICEFILE = nil, nil
+    end
+    assert(vim.deep_equal(async_env, sync_env), case.name .. " async env must match sync env")
   end)
 end
 
