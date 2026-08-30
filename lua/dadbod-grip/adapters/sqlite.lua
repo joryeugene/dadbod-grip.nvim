@@ -274,7 +274,7 @@ function M.get_schema_batch_async(url, callback)
   if not db_path then vim.schedule(function() callback(nil) end); return end
 
   adapters.run_cmd_async(sqlite3_args(db_path, SCHEMA_BATCH_SQL, adapters.session_opts()),
-    DEFAULT_TIMEOUT, function(stdout, _, code)
+    adapters.configured_timeout(DEFAULT_TIMEOUT), function(stdout, _, code)
       if code ~= 0 then callback(nil); return end
       callback(parse_schema_batch(stdout))
     end)

@@ -115,6 +115,10 @@ function M.border()
   return require("dadbod-grip").get_opts().border
 end
 
+local function report_height(line_count)
+  return math.min(30, line_count + 2)
+end
+
 --- Open a read-only report in a bottom split and return its buffer and window.
 ---
 --- The shape shared by GripDiff and GripProfile: a named scratch buffer, a
@@ -134,12 +138,14 @@ function M.report_split(lines, name)
   vim.cmd("botright split")
   local winid = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(winid, bufnr)
-  vim.api.nvim_win_set_height(winid, math.min(30, #lines + 2))
+  vim.api.nvim_win_set_height(winid, report_height(#lines))
   vim.api.nvim_set_option_value("cursorline", true, { win = winid })
   vim.api.nvim_set_option_value("wrap", false, { win = winid })
 
   return bufnr, winid
 end
+
+M._report_height = report_height
 
 --- Prompt on the cmdline; return nil when the user cancels.
 ---
@@ -441,10 +447,9 @@ function M.blocking(msg, fn)
   -- to borrow, and every one after it must find a live window to relabel.
   _spinner = { msg = msg }
 
-  -- Flush to terminal NOW, before fn() runs. nvim__redraw is private API on
-  -- purpose: there is no public equivalent that flushes from inside a blocking
-  -- call (:redraw is a no-op while we hold the loop).
-  vim.api.nvim__redraw({ flush = true })
+  -- Best-effort paint before fn() runs. Keep this on Neovim's stable Ex
+  -- command rather than the experimental nvim__redraw API.
+  pcall(vim.cmd, "redraw")
 
   -- Animate: timer fires during vim.system():wait() and vim.wait() event loop pumps.
   -- libuv timer callbacks are "fast events" - nvim API calls are forbidden there.
@@ -457,7 +462,7 @@ function M.blocking(msg, fn)
     if vim.api.nvim_buf_is_valid(buf) then
       pcall(vim.api.nvim_buf_set_lines, buf, 0, -1, false,
         { "", "  " .. frames[fi] .. " " .. ((_spinner and _spinner.msg) or msg), "" })
-      vim.api.nvim__redraw({ flush = true })
+      pcall(vim.cmd, "redraw")
     end
   end))
 
@@ -478,7 +483,7 @@ function M.blocking(msg, fn)
   vim.o.eventignore = ei
 
   -- Flush the close to terminal so the float disappears before the next render.
-  vim.api.nvim__redraw({ flush = true })
+  pcall(vim.cmd, "redraw")
 
   if not ok then error(rets[1], 2) end
   return unpack_(rets)

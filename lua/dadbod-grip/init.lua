@@ -66,7 +66,7 @@ end
 --- Detect if arg is a queryable file path or URL for DuckDB file-as-table.
 local function is_queryable_file(arg)
   local is_path = arg:match("^/") or arg:match("^~/") or arg:match("^%./") or arg:match("^%.%./")
-  local is_url = arg:match("^https?://")
+  local is_url = arg:match("^https?://") or arg:match("^s3://")
   if not is_path and not is_url then
     return false
   end
@@ -121,7 +121,7 @@ local function resolve_query(arg, page_size)
 
   -- File-as-table or URL-as-table: route to DuckDB
   if is_queryable_file(arg) then
-    if arg:match("^https?://") then
+    if arg:match("^https?://") or arg:match("^s3://") then
       -- Remote URL: pass through to DuckDB httpfs
       local file_sql = string.format("SELECT * FROM '%s'", esc(arg))
       return query.new_raw(file_sql, page_size), nil, arg
@@ -209,6 +209,11 @@ end
 local function do_apply_file_writeback(bufnr, session)
   local st = session.state
   local file_path = session.file_path
+  local fmt = filetypes.write_format(file_path)
+  if not fmt then
+    vim.notify("Write mode does not support this file format", vim.log.levels.ERROR)
+    return
+  end
 
   local updates = data.get_updates(st)
   local inserts = data.get_inserts(st)
@@ -226,15 +231,6 @@ local function do_apply_file_writeback(bufnr, session)
     vim.notify("Write-back cancelled", vim.log.levels.INFO)
     return
   end
-
-  -- Detect output format from file extension
-  local ext = file_path:lower():match("%.([^.]+)$") or ""
-  local fmt_map = {
-    parquet = "PARQUET", csv = "CSV", tsv = "CSV",
-    json = "JSON", ndjson = "JSON", jsonl = "JSON",
-    arrow = "ARROW", ipc = "ARROW",
-  }
-  local fmt = fmt_map[ext] or "CSV"
 
   local safe_path = esc(file_path)
   local stmts = {}
@@ -966,6 +962,11 @@ function M.open(arg, url, opts)
     local active = vim.g.db
     local resolved = db.resolved_url(active)
     conn = (resolved and resolved:match("^duckdb:")) and active or "duckdb::memory:"
+    if opts and opts.write and not filetypes.write_format(file_path) then
+      vim.notify("Write mode does not support this file format; opened read-only",
+        vim.log.levels.WARN)
+      opts = vim.tbl_extend("force", {}, opts, { write = false })
+    end
   end
 
   if not conn or conn == "" then
@@ -1835,16 +1836,16 @@ function M.setup(opts)
     local saved = require("dadbod-grip.saved")
     local name = vim.trim(cmd_opts.args or "")
     if name ~= "" then
-      local content = saved.load(name)
+      local content, bound_url = saved.load(name)
       if content then
         local query_pad = require("dadbod-grip.query_pad")
-        local url = db.get_url()
+        local url = bound_url or db.get_url()
         query_pad.open(url, { initial_sql = content })
       end
     else
-      saved.pick(function(content)
+      saved.pick(function(content, _, bound_url)
         local query_pad = require("dadbod-grip.query_pad")
-        local url = db.get_url()
+        local url = bound_url or db.get_url()
         query_pad.open(url, { initial_sql = content })
       end)
     end

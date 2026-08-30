@@ -143,6 +143,11 @@ eq(adapter.url_to_dsn("postgres://dbhost/analytics"),
 eq(adapter.url_to_dsn("postgresql://user:pass@localhost:5432/mydb"),
    "postgres:dbname=mydb user=user password=pass host=localhost port=5432",
    "url_to_dsn: pg with creds")
+eq(adapter.url_to_dsn("mariadb://user:pass@localhost:3307/mydb"),
+   "mysql:host=localhost user=user password=pass database=mydb port=3307",
+   "url_to_dsn: MariaDB uses mysql_scanner")
+eq(adapter._unsupported_attach_scheme("mariadb://localhost/mydb"), nil,
+   "mariadb URL is attachable")
 
 -- url_to_dsn: passthrough for non-URL DSNs
 eq(adapter.url_to_dsn("postgres:dbname=sales host=localhost"),

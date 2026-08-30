@@ -869,8 +869,8 @@ local function setup_keymaps(url)
   -- load_saved: load saved query into query pad
   kmap("load_saved", function()
     local saved = require("dadbod-grip.saved")
-    saved.pick(function(sql_content)
-      require("dadbod-grip.query_pad").open(url, { initial_sql = sql_content })
+    saved.pick(function(sql_content, _, bound_url)
+      require("dadbod-grip.query_pad").open(bound_url or url, { initial_sql = sql_content })
     end)
   end)
 
@@ -1126,18 +1126,20 @@ local function setup_keymaps(url)
   end)
 end
 
---- Compute sidebar width.
-local function sidebar_width()
-  local w = math.floor(vim.o.columns * SIDEBAR_WIDTH_RATIO)
+--- Compute the automatic sidebar width for an editor width.
+local function sidebar_width_for(columns)
+  local w = math.floor(columns * SIDEBAR_WIDTH_RATIO)
   return math.max(SIDEBAR_MIN_WIDTH, math.min(SIDEBAR_MAX_WIDTH, w))
+end
+
+local function sidebar_width()
+  return sidebar_width_for(vim.o.columns)
 end
 
 --- Shrink a sidebar that no longer fits the editor, but never grow one the
 --- user deliberately made narrower than the automatic target.
 local function clamp_sidebar_width(current, columns)
-  local target = math.max(SIDEBAR_MIN_WIDTH,
-    math.min(SIDEBAR_MAX_WIDTH, math.floor(columns * SIDEBAR_WIDTH_RATIO)))
-  return math.min(current, target)
+  return math.min(current, sidebar_width_for(columns))
 end
 
 vim.api.nvim_create_autocmd("VimResized", {
@@ -1272,6 +1274,7 @@ function M._reset_state()
 end
 
 M._clamp_sidebar_width = clamp_sidebar_width
+M._sidebar_width_for = sidebar_width_for
 
 M._truncate_name = truncate_name
 M._build_nodes = build_nodes

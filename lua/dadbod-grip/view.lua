@@ -9,6 +9,7 @@ local qmod    = require("dadbod-grip.query")
 local editor  = require("dadbod-grip.editor")
 local VERSION = require("dadbod-grip.version")
 local ui      = require("dadbod-grip.ui")
+local filetypes = require("dadbod-grip.filetypes")
 
 local M = {}
 M._sessions = {}  -- [bufnr] = { state, url, query_sql }
@@ -409,8 +410,7 @@ local function is_editable(session)
   if not session or not session.state then return false end
   if not session.state.readonly then return true end
   return session.write_mode == true
-    and session.file_path ~= nil
-    and not session.file_path:match("^https?://")
+    and filetypes.write_format(session.file_path) ~= nil
 end
 M._is_editable = is_editable  -- exposed for cell_buffer.lua
 

@@ -1249,7 +1249,7 @@ function M.pick(opts)
       elseif c._temp then
         prompt_temp_connection()
       elseif c._local_file then
-        M.switch(c.url, nil, "file", { write = true })
+        M.switch(c.url, nil, "file")
       else
         -- Lazy-seed the portal DB on first selection
         if c._is_demo and c._demo_sql and c._demo_sql ~= "" then
@@ -1298,12 +1298,13 @@ function M.pick(opts)
         label          = "!:write",
         close_on_select = true,
         when           = function(c)
-          return not c._new and not c._temp and not c._section_header and not c._local_file
-              and (c.type == "file" or (not c.type and is_file_url(c.url)))
+          return not c._new and not c._temp and not c._section_header
+              and (c._local_file or c.type == "file" or (not c.type and is_file_url(c.url)))
+              and filetypes.write_format(c.url) ~= nil
         end,
         fn             = function(c)
-          if c._new or c._temp or c._section_header or c._local_file then return end
-          M.switch(c.url, c.name, c.type, { write = true })
+          if c._new or c._temp or c._section_header then return end
+          M.switch(c.url, c._local_file and nil or c.name, c.type or "file", { write = true })
         end,
       },
       {

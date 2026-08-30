@@ -121,13 +121,35 @@ test("load resolves an ID without renaming the connection", function()
     vim.g.db = "sqlite:/tmp/other.db"
 
     with_switch_spy(function(calls)
-      eq(saved.load("bound"), "SELECT 3", "metadata stripped")
+      local content, bound_url = saved.load("bound")
+      eq(content, "SELECT 3", "metadata stripped")
+      eq(bound_url, url, "caller can rebind its query pad")
       eq(#calls, 1, "connection switched")
       eq(calls[1][1], url, "resolved URL")
       eq(calls[1][2], nil, "saved query name is never used as connection name")
       eq(calls[1][3], "sqlite", "stored type forwarded")
     end)
     eq(read_json(ctx.local_file)[1].name, "production", "persisted name unchanged")
+  end)
+end)
+
+test("a failed metadata switch does not rebind the caller", function()
+  with_storage(function(ctx)
+    write_json(ctx.local_file, {
+      { id = "conn_unavailable", name = "unavailable", url = "sqlite:/tmp/unavailable.db" },
+    })
+    paths.ensure_dir(ctx.query_dir)
+    vim.fn.writefile({ "-- grip:connection=conn_unavailable", "SELECT 3.5" },
+      ctx.query_dir .. "/unavailable.sql")
+    vim.g.db = "sqlite:/tmp/current.db"
+
+    local switch = connections.switch
+    connections.switch = function() return false end
+    local ok, content, bound_url = pcall(saved.load, "unavailable")
+    connections.switch = switch
+    if not ok then error(content) end
+    eq(content, "SELECT 3.5", "SQL still loads")
+    eq(bound_url, nil, "failed switch keeps the caller on its current connection")
   end)
 end)
 
@@ -216,6 +238,12 @@ test("legacy safe URLs switch unnamed and credentialed URLs never switch", funct
     assert(table.concat(vim.fn.readfile(ctx.query_dir .. "/credentialed.sql"), "\n")
       :find(password, 1, true), "load must not silently rewrite the user's file")
   end)
+end)
+
+test("legacy conninfo credential keys are detected case-insensitively", function()
+  assert(saved._has_literal_credential("postgres:HOST=db USER=app PASSWORD=literal-secret"))
+  assert(saved._has_literal_credential("mysql:host=db TOKEN='literal token'"))
+  assert(not saved._has_literal_credential("postgres:HOST=db PASSWORD='${DB_PASSWORD}'"))
 end)
 
 print(string.format("saved_spec: %d passed, %d failed", pass, fail))

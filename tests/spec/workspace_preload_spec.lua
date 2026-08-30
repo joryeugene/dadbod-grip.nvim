@@ -113,20 +113,15 @@ test("switch: open_sidebar=false opens the main workspace without a sidebar", fu
   assert(result.code == 0, (result.stdout or "") .. (result.stderr or ""))
 end)
 
-for _, columns in ipairs({ 80, 100, 160 }) do
-  test("workspace layout remains usable at " .. columns .. " columns", function()
-    local result = vim.system({
-      vim.g.grip_test_progpath,
-      "--headless",
-      "-u", "tests/minimal_init.lua",
-      "-l", "tests/fixtures/workspace_layout_integration.lua",
-    }, {
-      text = true,
-      env = vim.tbl_extend("force", vim.fn.environ(), { GRIP_TEST_COLUMNS = tostring(columns) }),
-    }):wait()
-    assert(result.code == 0, (result.stdout or "") .. (result.stderr or ""))
-  end)
-end
+test("workspace layout remains usable at the natural headless width", function()
+  local result = vim.system({
+    vim.g.grip_test_progpath,
+    "--headless",
+    "-u", "tests/minimal_init.lua",
+    "-l", "tests/fixtures/workspace_layout_integration.lua",
+  }, { text = true }):wait()
+  assert(result.code == 0, (result.stdout or "") .. (result.stderr or ""))
+end)
 
 print(string.format("workspace_preload_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

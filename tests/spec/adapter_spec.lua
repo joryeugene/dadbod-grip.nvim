@@ -848,6 +848,21 @@ test("duckdb attach: a DSN with no scanner keeps the default validation timeout"
   duckdb.detach(url, "plain")
 end)
 
+test("duckdb attach: plain validation honors the configured timeout", function()
+  local grip = require("dadbod-grip")
+  grip.setup({ timeout = 4321 })
+  local ok, err = pcall(function()
+    local url = "duckdb:attach_configured_timeout.db"
+    local _, opts = capture_system_call("42\n", function()
+      duckdb.attach(url, "/tmp/plain.duckdb", "plain")
+    end)
+    eq(opts.timeout, 4321, "configured timeout")
+    duckdb.detach(url, "plain")
+  end)
+  grip.setup({})
+  if not ok then error(err) end
+end)
+
 -- ── SQLite get_constraints ───────────────────────────────────────────────────
 
 test("sqlite get_constraints: queries sqlite_master with table name", function()
@@ -1306,9 +1321,8 @@ end
 
 -- Lives here rather than beside the other scanner-timeout tests because it needs
 -- await_batch. The pre-warm path prepends the same ATTACH prefix, so it pays the
--- same one-off extension fetch -- and it starts from a *shorter* budget than a
--- foreground query, so without the headroom it is the first thing to time out on
--- a cold connection.
+-- same one-off extension fetch and needs the same cold-install headroom as a
+-- foreground query.
 test("duckdb get_schema_batch_async: a cold scanner INSTALL gets the network timeout", function()
   duckdb._forget_installed_extensions()
   local url = "duckdb:async_scanner.db"
@@ -1319,6 +1333,24 @@ test("duckdb get_schema_batch_async: a cold scanner INSTALL gets the network tim
   assert(opts.timeout >= 60000,
     "the pre-warm path pays the same fetch, got " .. tostring(opts.timeout))
   duckdb.detach(url, "legacy")
+end)
+
+test("SQLite and DuckDB async schema pre-warm honor the configured timeout", function()
+  local grip = require("dadbod-grip")
+  grip.setup({ timeout = 4321 })
+  local ok, err = pcall(function()
+    for _, case in ipairs({
+      { name = "SQLite", run = function(cb) sqlite.get_schema_batch_async("sqlite:test.db", cb) end },
+      { name = "DuckDB", run = function(cb) duckdb.get_schema_batch_async("duckdb::memory:", cb) end },
+    }) do
+      local _, opts = capture_system_call("", function()
+        await_batch(function(cb) case.run(cb) end)
+      end)
+      eq(opts.timeout, 4321, case.name .. " configured async timeout")
+    end
+  end)
+  grip.setup({})
+  if not ok then error(err) end
 end)
 
 -- Adapters must not silently lose the async variant: warm_schema is a no-op

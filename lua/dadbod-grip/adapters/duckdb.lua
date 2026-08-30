@@ -565,8 +565,8 @@ end
 local function duckdb_async(db_path, sql_str, timeout_ms, url, callback)
   local setup_sql = url and build_attach_prefix(url) or ""
   local effective_sql, has_setup = with_csv_setup(setup_sql, sql_str)
-  local effective_timeout = timeout_ms or 8000
-  -- Same one-off extension fetch as in duckdb(), from a shorter starting budget.
+  local effective_timeout = timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT)
+  -- Same one-off extension fetch as in duckdb().
   if url and attach_install_pending(url) then
     effective_timeout = math.max(effective_timeout, NETWORK_TIMEOUT)
   end
@@ -1236,8 +1236,8 @@ function M.url_to_dsn(url)
     end
   end
 
-  -- MySQL URL -> mysql_scanner DSN
-  local my_rest = url:match("^mysql://(.+)")
+  -- MySQL/MariaDB URL -> mysql_scanner DSN
+  local my_rest = url:match("^mysql://(.+)") or url:match("^mariadb://(.+)")
   if my_rest then
     local my_user, my_pass, my_host, my_port, my_db = split_url_rest(my_rest)
     if my_user then
@@ -1281,7 +1281,7 @@ end
 --- postgres/mysql URL forms into scanner DSNs; sqlite/duckdb/motherduck URLs
 --- it hands through because ATTACH takes those as-is.
 local ATTACHABLE_SCHEMES = {
-  postgres = true, postgresql = true, mysql = true,
+  postgres = true, postgresql = true, mysql = true, mariadb = true,
   sqlite = true, duckdb = true, md = true, motherduck = true,
 }
 
@@ -1302,7 +1302,7 @@ local function unsupported_attach_scheme(dsn)
   if not scheme or ATTACHABLE_SCHEMES[scheme:lower()] then return nil end
   return string.format(
     "DuckDB has no scanner for %s:// -- it cannot ATTACH that database. "
-    .. "Attachable: postgres, mysql, sqlite, motherduck.", scheme)
+    .. "Attachable: postgres, mysql/mariadb, sqlite, motherduck.", scheme)
 end
 
 --- Attach an external database to a DuckDB session.
@@ -1324,14 +1324,14 @@ function M.attach(url, dsn, alias, template)
   -- Validate: try the ATTACH before storing (a broken attachment kills all queries)
   local ext = detect_extension(dsn)
   local test_sql = ""
-  local timeout = DEFAULT_TIMEOUT
+  local timeout = adapters.configured_timeout(DEFAULT_TIMEOUT)
   if ext then
     test_sql = string.format("INSTALL %s; LOAD %s;\n", ext, ext)
     -- This is the first INSTALL of the scanner in most sessions -- the attachment
     -- has to exist before any query can carry the prefix -- so this is the call
     -- most likely to be paying for the download. Validation that times out at 10s
     -- rejects a perfectly good DSN with "Failed to attach database".
-    if not _installed_ext[ext] then timeout = NETWORK_TIMEOUT end
+    if not _installed_ext[ext] then timeout = math.max(timeout, NETWORK_TIMEOUT) end
   end
   test_sql = test_sql .. attachment_sql({ dsn = dsn, alias = alias, extension = ext }, 1) .. "\n"
   test_sql = test_sql .. "SELECT 42;"
@@ -1510,7 +1510,7 @@ function M.get_schema_batch_async(url, callback)
   local main_catalog = main_catalog_name(db_path)
   local sql_str = _make_schema_batch_sql(has_attachments, main_catalog)
 
-  duckdb_async(db_path, sql_str, 8000, url, function(stdout, _, code)
+  duckdb_async(db_path, sql_str, nil, url, function(stdout, _, code)
     if code ~= 0 then callback(nil); return end
     callback(_parse_schema_batch_rows(db_util.parse_csv(stdout), main_catalog))
   end)

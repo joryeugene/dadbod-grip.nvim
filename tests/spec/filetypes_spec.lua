@@ -40,5 +40,16 @@ test("unsupported and malformed values are rejected", function()
   eq(filetypes.has_supported_extension({}), false)
 end)
 
+test("write formats are explicit and never fall back to CSV", function()
+  eq(filetypes.write_format("/tmp/data.parquet"), "PARQUET")
+  eq(filetypes.write_format("/tmp/data.tsv"), "CSV")
+  eq(filetypes.write_format("/tmp/data.jsonl"), "JSON")
+  eq(filetypes.write_format("/tmp/data.ipc"), "ARROW")
+  eq(filetypes.write_format("/tmp/data.xlsx"), nil)
+  eq(filetypes.write_format("/tmp/data.orc"), nil)
+  eq(filetypes.write_format("https://example.test/data.csv"), nil)
+  eq(filetypes.write_format("s3://bucket/data.parquet"), nil)
+end)
+
 print(string.format("\nfiletypes_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then vim.cmd("cquit 1") end

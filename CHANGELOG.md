@@ -13,11 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   headless harness records errors raised from `vim.schedule` callbacks and
   exits nonzero; a subprocess regression test proves both focused specs and
   the full runner fail correctly.
+- **Layout tests no longer corrupt Neovim's headless grid.** Width policy is
+  tested as pure arithmetic, the real headless workspace stays at its natural
+  geometry, and spinner cleanup uses the public `:redraw` command instead of
+  Neovim's experimental redraw API.
 - **Saved queries no longer depend on a connection name or URL.** Persisted
   connections receive stable opaque IDs, new query metadata stores only that
   ID, and rename, promotion, deduplication, recent-use, and attachment edits
   preserve it. Safe legacy URL metadata remains readable; credential-bearing
-  legacy URLs are removed and never auto-connected.
+  legacy URLs are removed and never auto-connected. A loaded query pad rebinds
+  only after its saved connection switch succeeds.
 - **SQL Server now executes shared grid SQL correctly.** `LIMIT`/`OFFSET` is
   translated to `OFFSET`/`FETCH`, every command enables quoted identifiers,
   and TLS URL options support validated optional, mandatory, and strict modes
@@ -33,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Public adapter timeouts now honor `setup({ timeout = ... })`.** The value is
   used consistently by PostgreSQL, MySQL/MariaDB, SQLite, DuckDB, and SQL
   Server instead of being documented but ignored by most blocking calls.
+- **Read-only file formats can no longer be overwritten as CSV.** XLSX and ORC
+  remain queryable, but write mode is offered only when Grip has an explicit
+  DuckDB `COPY` format. Picking a local file now opens it read-only unless the
+  user deliberately enables write mode.
+- **Hidden picker actions can no longer execute.** Contextual action predicates
+  now guard the key handler as well as the footer, so a hidden write, promote,
+  or connection action cannot run from its shortcut.
 - **Opening a table dropped the spinner, then froze.** `init.open()` ran three round-trips —
   the `SELECT`, the primary-key lookup, and the pagination `COUNT` — but only the `SELECT` was
   inside the float. On a remote connection the spinner vanished, the editor sat frozen through
@@ -125,7 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   automatically grow over a deliberately narrow user size.
 - **A shared data-file extension registry** now routes Parquet, CSV, TSV, JSON,
   NDJSON, JSONL, XLSX, ORC, Arrow, and IPC consistently from startup,
-  connections, and schema discovery.
+  connections, and schema discovery. Direct S3 file URLs follow the same
+  route instead of falling through as table names.
 - **Required live integration scenarios** cover schema discovery, CRUD,
   filtering, sorting, pagination, requery, atomic export, and DuckDB federation
   against PostgreSQL 16, MySQL 8.4, and MariaDB 11.8 on pull requests, with SQL

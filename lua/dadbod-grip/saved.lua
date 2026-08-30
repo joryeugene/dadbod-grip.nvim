@@ -54,9 +54,33 @@ local function has_literal_credential(url)
       return true
     end
   end
-  for key in pairs(SECRET_KEYS) do
-    local value = url:match(key .. "%s*=%s*([^%s]+)")
-    if value and not secrets.has_template(value) then return true end
+  local pos = 1
+  while pos <= #url do
+    local _, value_start, key = url:find("([%w_]+)%s*=%s*", pos)
+    if not key then break end
+    pos = value_start + 1
+    local quote = url:sub(pos, pos)
+    local value
+    if quote == "'" or quote == '"' then
+      local i = pos + 1
+      while i <= #url do
+        if url:sub(i, i) == "\\" then
+          i = i + 2
+        elseif url:sub(i, i) == quote then
+          break
+        else
+          i = i + 1
+        end
+      end
+      value = url:sub(pos + 1, i - 1)
+      pos = i + 1
+    else
+      value = url:match("^%S*", pos) or ""
+      pos = pos + #value
+    end
+    if SECRET_KEYS[key:lower()] and value ~= "" and not secrets.has_template(value) then
+      return true
+    end
   end
   return false
 end
@@ -64,11 +88,14 @@ end
 local function apply_metadata(content)
   local clean, connection_id, legacy_url = extract_metadata(content)
   local connections = require("dadbod-grip.connections")
+  local bound_url
 
   if connection_id then
     local conn, reason = connections.find_by_id(connection_id)
     if conn then
-      if conn.url ~= vim.g.db then connections.switch(conn.url, nil, conn.type) end
+      if conn.url == vim.g.db or connections.switch(conn.url, nil, conn.type) then
+        bound_url = conn.url
+      end
     elseif reason == "ambiguous" then
       vim.notify("Grip: saved query connection ID is ambiguous; kept the current connection",
         vim.log.levels.WARN)
@@ -82,12 +109,14 @@ local function apply_metadata(content)
         "Grip: legacy saved query contains credentials; it was not auto-connected. Resave it to remove them.",
         vim.log.levels.WARN)
     else
-      if legacy_url ~= vim.g.db then connections.switch(legacy_url, nil) end
+      if legacy_url == vim.g.db or connections.switch(legacy_url, nil) then
+        bound_url = legacy_url
+      end
       vim.notify("Grip: legacy saved-query metadata will migrate when you next save it",
         vim.log.levels.WARN)
     end
   end
-  return clean
+  return clean, bound_url
 end
 
 --- Save query content to a named .sql file.
@@ -131,7 +160,9 @@ function M.save_prompt(bufnr)
   end)
 end
 
---- Load a named query. Returns content string or nil.
+--- Load a named query.
+--- @return string|nil content
+--- @return string|nil bound_url  resolved connection only when switching succeeded
 function M.load(name)
   local fname = sanitize(name)
   local path = queries_dir() .. "/" .. fname .. ".sql"
@@ -166,7 +197,7 @@ function M.delete(name)
   end
 end
 
---- Open a picker to load a saved query. Calls callback(content, name).
+--- Open a picker to load a saved query. Calls callback(content, name, bound_url).
 function M.pick(callback)
   local queries = M.list()
   if #queries == 0 then
@@ -191,8 +222,8 @@ function M.pick(callback)
     end,
     on_select = function(q)
       local raw = table.concat(vim.fn.readfile(q.path), "\n")
-      local content = apply_metadata(raw)
-      callback(content, q.name)
+      local content, bound_url = apply_metadata(raw)
+      callback(content, q.name, bound_url)
     end,
     on_delete = function(q, refresh_fn)
       if ui.confirm("Delete '" .. q.name .. "'? (y/N): ") then

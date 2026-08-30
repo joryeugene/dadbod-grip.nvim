@@ -125,7 +125,7 @@ jobs:
               echo "GRIP_EXPECT_MYSQL_FLAVOR=mariadb-11.8" >> "$GITHUB_ENV"
               echo "GRIP_REQUIRE_MYSQL=1" >> "$GITHUB_ENV"
               echo "GRIP_TEST_LIVE_URL=mariadb://root:grip@127.0.0.1:33306/grip_test" >> "$GITHUB_ENV"
-              echo "GRIP_TEST_DUCKDB_FEDERATION_URL=mysql://root:grip@127.0.0.1:33306/grip_test" >> "$GITHUB_ENV"
+              echo "GRIP_TEST_DUCKDB_FEDERATION_URL=mariadb://root:grip@127.0.0.1:33306/grip_test" >> "$GITHUB_ENV"
               ;;
           esac
           duckdb -c "INSTALL sqlite_scanner; INSTALL $scanner;"

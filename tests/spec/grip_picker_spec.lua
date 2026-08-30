@@ -546,6 +546,28 @@ test("filter: non-closing action invalidates cache when it changes what display(
   close_all_floats()
 end)
 
+test("contextual action cannot run while its footer entry is hidden", function()
+  local calls = 0
+  local buf = open_picker_capture_buf({
+    title = "Context",
+    items = { { name = "read-only" } },
+    display = function(item) return item.name end,
+    actions = {
+      {
+        key = "!", label = "!:write", close_on_select = true,
+        when = function() return false end,
+        fn = function() calls = calls + 1 end,
+      },
+    },
+  })
+  assert(buf, "buf should exist")
+  press(buf, "!")
+  vim.wait(20)
+  eq(calls, 0, "hidden action did not run")
+  assert(vim.api.nvim_buf_is_valid(buf), "hidden action did not close the picker")
+  close_all_floats()
+end)
+
 test("filter: item deletion still respects an active filter (not a stale cached list)", function()
   -- refresh_fn (D + on_delete) reassigns `items` while a filter can already
   -- be active. The post-delete render must re-filter the new item list, not

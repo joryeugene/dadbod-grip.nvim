@@ -407,6 +407,7 @@ function M.open(opts)
       if #flist == 0 then return end
       local item = flist[cursor]
       if not item then return end
+      if action.when and not action.when(item) then return end
       if action.close_on_select then
         _selected = true
         close()

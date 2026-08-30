@@ -17,8 +17,7 @@ d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
 <a href="https://github.com/joryeugene/dadbod-grip.nvim/actions/workflows/test.yml"><img src="https://github.com/joryeugene/dadbod-grip.nvim/actions/workflows/test.yml/badge.svg" alt="Tests"></a>&nbsp;
 <a href="https://github.com/rockerBOO/awesome-neovim"><img src="https://img.shields.io/badge/awesome--neovim-listed-4ade80.svg" alt="Awesome Neovim"></a>&nbsp;
 </p>
-<b>Editable database grids for Neovim.</b><br>
-Connect to PostgreSQL, MySQL, SQLite, DuckDB, or MotherDuck and edit tables like Vim buffers.
+<b>Dadbod Grip turns database tables into editable Vim buffers, with schema browsing, staged mutations, generated SQL, relationship navigation, and cross-database federation inside Neovim.</b>
 </td>
 <td align="center" valign="middle" width="180">
 <img src="https://jorypestorious.com/dadbod-grip-web/mascot.gif" width="160" alt="Chonk the dadbod-grip mascot"><br>
@@ -26,22 +25,11 @@ Connect to PostgreSQL, MySQL, SQLite, DuckDB, or MotherDuck and edit tables like
 </td>
 </tr></table>
 
-**Connect to PostgreSQL, MySQL, SQLite, or DuckDB and edit tables like Vim buffers.** Rows stage with color coding, preview as SQL, and commit in a single transaction. Undo committed changes. Follow foreign keys through a breadcrumb trail. Open any Markdown file as a runnable SQL notebook and execute individual blocks with `<C-CR>`. Generate SQL from natural language.
+**Workflow.** Browse a schema, edit rows with Vim motions, follow foreign keys, and run saved SQL without leaving the editor.
 
-A command palette (`<C-p>`) surfaces every action without memorizing keymaps. The query pad has SQL syntax highlighting, a formatter, and built-in completion. Every Vim motion works. There are no required Lua or Neovim-plugin dependencies; install only the database CLI for the adapters you use.
+**Safety.** Changes remain staged until you review the generated SQL and apply one transaction, and the core plugin adds no required Lua dependencies.
 
-| **Editing** | **Analysis** | **Schema & AI** |
-|---|---|---|
-| **Command palette** `<C-p>` searchable action list | **Data profiling** sparkline distributions | **FK navigation** breadcrumb trail |
-| **SQL Notebooks** `gn` pick .md and .sql files from project | **Block execution** `<C-CR>` runs fence under cursor · narrative untouched | **Demo notebook** `:GripStart` · seventeen tables · one investigation |
-| **SQL formatter** `gF` sql-formatter · pg_format · Lua fallback | **Query Doctor** plain-English EXPLAIN | **DDL** create · rename · drop via UI |
-| **SQL syntax highlighting** query pad with treesitter | **Visual staging** violet · green · red rows | **File as table** Parquet · CSV · JSON · remote URLs |
-| **Local Files picker** open CSV/JSON/Parquet from cwd without typing a path | **Live SQL preview** float updates as you stage | **AI SQL** Anthropic · OpenAI · Gemini · Ollama |
-| **Inline cell editing** popup with Vim normal mode (`<Esc>`) | **Data diff** `gD` compare tables by primary key | **Multi-DB** PostgreSQL · SQLite · MySQL · DuckDB · MotherDuck · SQL Server (read-only) |
-| **Mutation preview** full SQL before apply | **Column filter builder** `gF` with operators and wildcards | **Schema grouping** sidebar sections per attached database |
-| **Cross-DB federation** `:GripAttach` Postgres · MySQL · SQLite · MotherDuck | **Export** CSV · TSV · JSON · SQL · Markdown · Table | **Connection health** `T` tests all connection types |
-| **Surface nav** `1`-`3` sidebar · query pad · grid | **ER diagram** `4` tree-spine layout with FK follow | **Remappable keymaps** override or disable any key via `setup()` |
-| **Write mode** `--write` · edit files and write back to disk | **Watch mode** `--watch` · auto-refresh grid on a timer | **Depth views** `5`-`9` Stats · Columns · FK · Indexes · Constraints |
+**In this frame.** The schema sidebar, query pad, and editable grid keep navigation, SQL, and pending mutations visible together.
 
 <p align="center">
 <img src="https://jorypestorious.com/dadbod-grip-web/live.png" alt="dadbod-grip: schema sidebar, query pad, and editable grid with color-coded mutations" width="900">
@@ -70,7 +58,7 @@ An example database is included. `:GripStart` recreates it from the bundled seed
 { "joryeugene/dadbod-grip.nvim" }
 ```
 
-Then `:checkhealth dadbod-grip` to verify your setup, `:GripStart` to explore the demo database, or `:GripConnect` to pick your own. Schema sidebar + query pad open automatically.
+Then run `:checkhealth dadbod-grip` to verify your setup, `:GripStart` to explore the demo database, or `:GripConnect` to choose a connection. The schema sidebar and query pad open automatically.
 
 ### Auto-discovery of local Docker stacks
 
@@ -257,6 +245,7 @@ them yourself will not stick.
 
 ```vim
 :GripAttach postgres:dbname=sales host=localhost user=me  pg
+:GripAttach mariadb://user:${DB_PASSWORD}@localhost/sales  maria
 :GripAttach sqlite:legacy.db  legacy
 :GripAttach md:cloud_analytics  cloud
 ```

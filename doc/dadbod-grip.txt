@@ -1267,7 +1267,7 @@ server_certificate cannot be combined with trust_server_certificate=true
 and requires mandatory or strict encryption.
 
 DuckDB federation: attach external databases via :GripAttach. Supports
-PostgreSQL (postgres_scanner), MySQL (mysql_scanner), SQLite
+PostgreSQL (postgres_scanner), MySQL/MariaDB (mysql_scanner), SQLite
 (sqlite_scanner), and MotherDuck. See |grip-federation| for details.
 
 ==============================================================================
@@ -1419,6 +1419,9 @@ session. Grip exposes this through :GripAttach and :GripDetach commands.
 Attach a PostgreSQL database: >
   :GripAttach postgres:dbname=sales host=localhost user=me  pg
 <
+Attach a MySQL or MariaDB database: >
+  :GripAttach mariadb://user:${DB_PASSWORD}@localhost/sales  maria
+<
 Attach a local SQLite file: >
   :GripAttach sqlite:legacy.db  legacy
 <
@@ -1439,8 +1442,8 @@ attachment: >
   :GripAttach md:shared_analytics  cloud
 <
 Extensions are managed automatically. Attaching a postgres: DSN installs
-and loads postgres_scanner. Attaching sqlite: loads sqlite_scanner.
-Attaching md: loads motherduck.
+and loads postgres_scanner. Attaching mysql: or mariadb: loads mysql_scanner.
+Attaching sqlite: loads sqlite_scanner. Attaching md: loads motherduck.
 
 Attachments persist in .grip/connections.json under the parent DuckDB
 connection. They restore automatically when you reconnect.
