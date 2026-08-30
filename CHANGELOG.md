@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.10.1] - 2026-08-30
+
+### Security
+
+- **AI provider requests no longer expose secrets or content in process arguments.** Grip invokes
+  curl with a constant `curl --disable --silent --show-error --config -` command and sends the
+  provider URL, headers, API key, prompt, schema context, existing SQL, and JSON body through curl
+  config on stdin. Shell commands used by `api_key = "cmd:..."` also arrive through shell stdin.
+  Transport and provider failures remain actionable without reproducing remote stderr, keys,
+  prompts, or request bodies.
+- **Database statements no longer appear in client argv.** PostgreSQL, MySQL/MariaDB, SQLite, and
+  SQL Server now receive queries, schema reads, and mutations through stdin. PostgreSQL uses an
+  invocation-scoped libpq service file for the password-free connection parameters because
+  `PGDATABASE` treats a URI as a literal database name; its password remains in `PGPASSWORD`.
+  MySQL keeps its SQL mode and optional read-only session statement on stdin, and SQL Server keeps
+  `QUOTED_IDENTIFIER` and `NOCOUNT` behavior unchanged. SQL Server seed commands use
+  `SQLCMDPASSWORD` instead of `-P`.
+- **Linux process-boundary regressions inspect `/proc/<pid>/cmdline`.** The tests prove that API
+  keys, provider URLs, prompts, schema text, SQL, mutation values, passwords, and complete DSNs
+  stay out of argv while the intended stdin, environment, or invocation-scoped service channel
+  receives them.
+
+### Fixed
+
+- **Attached-UI layout regressions are reproducible locally.** `just e2e-visual` opens the seeded
+  workspace in a real tmux-backed Neovim UI, renders the grid at 100, 80, and 160 columns, and
+  fails when the sidebar or main workspace violates its layout contract.
+- **PostgreSQL stdin execution preserves failure semantics.** `ON_ERROR_STOP` makes a rejected
+  statement exit nonzero as it did under `psql -c`, so server errors cannot be parsed as successful
+  empty results.
+- **Public setup and privacy documentation matches the code.** Query-pad AI uses `gA`; the demo
+  requires either the DuckDB or SQLite CLI but no database server; the process boundary includes AI,
+  formatting, and discovery helpers; and environment-carried credentials explicitly retain their
+  same-user visibility limit. The backlog now contains only active, deferred, or genuinely unshipped
+  work.
+
 ## [3.10.0] - 2026-08-29
 
 ### Fixed
@@ -548,7 +584,8 @@ older tags are left in place so anyone pinned to them keeps working.
 - **joryeugene** — SQL Server adapter, PostgreSQL routines in the schema sidebar, focused ER diagram
   ([PR #17](https://github.com/joryeugene/dadbod-grip.nvim/pull/17)).
 
-[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.10.0...HEAD
+[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.10.1...HEAD
+[3.10.1]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.10.1
 [3.10.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.10.0
 [3.9.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.9.0
 [3.8.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.8.0

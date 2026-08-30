@@ -37,6 +37,8 @@ end
 
 local readme = read("README.md")
 local help = read("doc/dadbod-grip.txt")
+local todo = read("TODO.md")
+local changelog = read("CHANGELOG.md")
 
 test("public commands match lazy triggers and both manuals", function()
   grip.setup({})
@@ -95,6 +97,41 @@ end)
 test("README uses the repository's canonical documentation URL", function()
   assert(readme:find("https://jorypestorious.com/dadbod-grip-web/", 1, true))
   assert(not readme:find("joryeugene.github.io/dadbod-grip-web", 1, true))
+end)
+
+test("onboarding and process-privacy claims match current behavior", function()
+  assert(readme:find("**AI SQL generation** via `gA` or `:GripAsk`", 1, true))
+  assert(readme:find("`gA` in the query pad generates SQL", 1, true))
+  assert(not readme:find("`A` in the query pad generates SQL", 1, true))
+
+  for name, text in pairs({ README = readme, help = help }) do
+    assert(text:find("all database SQL and AI request content through stdin", 1, true),
+      name .. " must document the stdin boundary")
+    assert(text:find("running as your user may still read those environment variables", 1, true),
+      name .. " must document the same-user environment limit")
+    assert(not text:find("--init-command", 1, true), name .. " still documents removed mysql argv setup")
+  end
+
+  assert(readme:find("no database server or manual setup", 1, true), "README demo requirements")
+  assert(help:find("database server or manual setup", 1, true), "help demo requirements")
+  assert(not readme:find("Only `db.lua` and adapters run shell commands", 1, true),
+    "README still claims an incomplete process boundary")
+end)
+
+test("TODO contains only active or unshipped work", function()
+  assert(todo:find("## Now", 1, true) and todo:find("## Next", 1, true)
+    and todo:find("## Deferred", 1, true) and todo:find("## Product ideas", 1, true))
+  assert(not todo:find("- [x]", 1, true), "completed checkbox retained")
+  assert(not todo:find("TOP N pagination", 1, true), "stale SQL Server pagination claim retained")
+  assert(todo:find("`##temp`", 1, true), "unresolved SQL Server temp-table limitation missing")
+  assert(not todo:find("GripFill", 1, true), "shipped GripFill work retained")
+end)
+
+test("release version has matching changelog notes", function()
+  local version = require("dadbod-grip.version")
+  assert(version == "3.10.1", "unexpected release version: " .. tostring(version))
+  assert(changelog:find("## [" .. version .. "] - 2026-08-30", 1, true),
+    "changelog section missing for " .. version)
 end)
 
 print(string.format("\ndocs_contract_spec: %d passed, %d failed", pass, fail))

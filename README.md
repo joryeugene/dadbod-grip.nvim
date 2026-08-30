@@ -171,13 +171,16 @@ very next connect, with no restart.
 What this buys you: the secret lives in exactly one place you already control, and
 `~/.grip/connections.json` never receives it. `vim.g.db` holds the *template*, and expansion
 happens at a single point on the way to the database client, so no code path that writes to disk
-ever sees the expanded URL. Passwords also travel to `psql`, `mysql` and `sqlcmd` in the process
-environment rather than in `argv`, so they do not show up in another user's `ps`.
+ever sees the expanded URL. Passwords also travel to `psql`, `mysql`, and `sqlcmd` in the process
+environment rather than in `argv`, so they do not show up in another user's `ps`. Processes
+running as your user may still read those environment variables.
 
-DuckDB queries and attachment declarations are sent through stdin, never `duckdb -c`, so SQL and
-DSNs do not appear in process arguments. Credentialed PostgreSQL/MySQL attachments use a temporary,
-invocation-scoped DuckDB secret and attach by secret name. Grip never creates persistent DuckDB
-secrets (DuckDB stores those unencrypted on disk).
+Grip sends all database SQL and AI request content through stdin. Statements, prompts, schema
+context, existing SQL, and JSON request bodies therefore stay out of process arguments. The AI
+transport also passes its URL and headers through `curl --config -`, and API-key lookup commands
+run through shell stdin. DuckDB attachment declarations use the same stdin boundary. Credentialed
+PostgreSQL/MySQL attachments use a temporary, invocation-scoped DuckDB secret and attach by secret
+name. Grip never creates persistent DuckDB secrets because DuckDB stores them unencrypted on disk.
 
 Saved queries bind to an opaque connection ID, not to a URL. Persisted connections receive an
 `"id"` lazily, and new query files carry `-- grip:connection=<id>`. Renaming, promoting, or editing
@@ -193,7 +196,7 @@ either, keep those connections un-templated.
 
 An entry can carry `"mode": "ro"`, and grip then connects with the client's own read-only switch:
 `PGOPTIONS=-c default_transaction_read_only=on` for postgres, a `SET SESSION TRANSACTION READ ONLY`
-merged into mysql's init command, `-readonly` for sqlite and duckdb. Grid editing is off, and the
+statement sent to mysql through stdin, and `-readonly` for sqlite and duckdb. Grid editing is off, and the
 DDL commands (`:GripCreate`, `:GripDrop`, `:GripRename`, `:GripFill`, the sidebar's create/drop and
 the column operations) decline up front instead of prompting and failing at the server.
 
@@ -319,7 +322,7 @@ work without credentials.
 - **Column statistics** via `gS` showing count, distinct, nulls, min/max, and an ASCII distribution: numeric columns get eight labelled buckets, everything else gets its top values, both as horizontal bars.
 - **Aggregate on selection** via `ga` in visual mode showing count/sum/avg/min/max.
 - **Query Doctor** via `:GripExplain` translating EXPLAIN plans into plain-English health checks with cost bars and index suggestions.
-- **AI SQL generation** via `A` or `:GripAsk` turning natural language into SQL queries using Anthropic, OpenAI, Gemini, or local Ollama. AI reads existing query pad SQL to modify it rather than generating from scratch. Schema context cached per connection.
+- **AI SQL generation** via `gA` or `:GripAsk` turning natural language into SQL queries using Anthropic, OpenAI, Gemini, or local Ollama. AI reads existing query pad SQL to modify it rather than generating from scratch. Schema context cached per connection.
 
 ### SQL Notebooks
 
@@ -693,7 +696,7 @@ identity while loading files from your local checkout.
 }
 ```
 
-**Demo** (Softrear Analyst Portal, no database needed):
+**Demo** (Softrear Analyst Portal; requires either the `duckdb` or `sqlite3` CLI, but no database server or manual setup):
 
 ```lua
 { "<leader>dd", "<cmd>GripStart<cr>", desc = "DB demo" },
@@ -867,7 +870,7 @@ Common actions worth knowing:
 That's the whole setup. One command. From there:
 - `<CR>` on a table in the schema sidebar opens the grid
 - `<C-CR>` in the query pad runs SQL into a grid
-- `A` in the query pad generates SQL from natural language
+- `gA` in the query pad generates SQL from natural language
 
 Everything else (`:GripSchema`, `:GripQuery`, `:GripTables`) still works individually if you prefer.
 
@@ -941,7 +944,7 @@ grip.open_smart()
   └──────────────────────────────┬───────────────────────┘
                                  │
   ╔══════════════════════════════▼═══════════════════════╗
-  ║  DB.LUA  ─  I/O BOUNDARY                             ║
+  ║  DB.LUA  ─  DATABASE I/O BOUNDARY                    ║
   ║  CSV parse · adapter dispatch · transaction safety   ║
   ╚═════╦════════════╦════════════╦════════════╦═════════╝
         ║            ║            ║            ║
@@ -956,7 +959,7 @@ grip.open_smart()
 Design principles:
 - **Immutable state**: `data.lua` never mutates. Every operation returns a new state table.
 - **Query as value**: `query.lua` treats query specs as plain Lua tables composed by pure functions.
-- **I/O at the boundary**: Only `db.lua` and adapters run shell commands. Everything else is pure.
+- **Explicit process boundaries**: Adapters own database CLI I/O, `ai.lua` owns provider and key-command I/O, and formatter and discovery modules own their external tools. Grip sends SQL and AI request content through stdin.
 - **Adapter pattern**: URL scheme → adapter module. Each adapter implements query, execute, get_primary_keys, get_column_info, get_foreign_keys, get_indexes, get_table_stats, list_tables, and explain.
 - **Transaction safety**: Apply wraps all DML in BEGIN/COMMIT with ROLLBACK on error.
 

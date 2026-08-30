@@ -500,7 +500,9 @@ All commands are global and available after the plugin loads.
 :GripStart
   Open the built-in demo database (Softrear Inc. Analyst Portal). Recreates
   its SQLite database from the bundled seed on every run, then opens the
-  schema browser. The demo is disposable and is never treated as user data.
+  schema browser. It requires either the duckdb or sqlite3 CLI, but no
+  database server or manual setup. The demo is disposable and is never
+  treated as user data.
 
                                                                 *:GripHome*
 :GripHome
@@ -1074,13 +1076,17 @@ connect with no restart.
 Grip stores and exposes the *template*: `vim.g.db` holds the url with the
 placeholder still in it, and expansion happens at a single point on the way
 to the database client. No code path that writes to disk ever sees the
-expanded url. Passwords also reach psql, mysql and sqlcmd through the
-process environment rather than argv, so they are not visible in `ps`.
+expanded url. Passwords also reach psql, mysql, and sqlcmd through the process
+environment rather than argv, so they are not visible in another user's `ps`.
+Processes running as your user may still read those environment variables.
 
-DuckDB queries and attachment declarations are sent through stdin, never
-`duckdb -c`, so SQL and DSNs are absent from argv. Credentialed PostgreSQL
-and MySQL attachments use invocation-scoped temporary DuckDB secrets and
-attach by secret name. Grip never creates persistent DuckDB secrets.
+Grip sends all database SQL and AI request content through stdin. Statements,
+prompts, schema context, existing SQL, and JSON request bodies are absent from
+argv. AI URLs and headers also travel through `curl --config -`, and API-key
+lookup commands run through shell stdin. DuckDB attachment declarations use
+the same stdin boundary. Credentialed PostgreSQL and MySQL attachments use
+invocation-scoped temporary DuckDB secrets and attach by secret name. Grip
+never creates persistent DuckDB secrets.
 
 Limit: a templated url is grip-only. vim-dadbod's `:DB` and any statusline
 reading `g:db` see the literal `${NAME}`. Keep such connections un-templated
@@ -1092,7 +1098,7 @@ Read-only mode ~
 With `"mode": "ro"` grip connects using the client's own read-only switch:
 
   postgresql   PGOPTIONS=-c default_transaction_read_only=on
-  mysql        SET SESSION TRANSACTION READ ONLY, merged into --init-command
+  mysql        SET SESSION TRANSACTION READ ONLY through stdin
   sqlite       sqlite3 -readonly
   duckdb       duckdb -readonly
   sqlserver    already read-only; `mode` does not apply

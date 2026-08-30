@@ -3,8 +3,9 @@ local connections = require("dadbod-grip.connections")
 local query_pad = require("dadbod-grip.query_pad")
 local schema = require("dadbod-grip.schema")
 
+local url = "sqlite:tests/seed_sqlite.db"
 grip.setup({ open_sidebar = true })
-assert(connections.switch("sqlite:tests/seed_sqlite.db", "seed", "sqlite"))
+assert(connections.switch(url, "seed", "sqlite"))
 assert(vim.wait(5000, function()
   return schema.is_open() and query_pad.get_pad_bufnr()
     and vim.fn.bufnr("grip://welcome") ~= -1
@@ -57,6 +58,14 @@ if tmux_sync and tmux_sync ~= "" then
       string.format("attached UI did not resize to %d columns", width))
   end
 
+  grip.open("users", url)
+  assert(vim.wait(3000, function() return vim.fn.bufnr("grip://users") ~= -1 end, 10),
+    "users grid did not open")
+  local grid_lines = vim.api.nvim_buf_get_lines(vim.fn.bufnr("grip://users"), 0, -1, false)
+  local grid = table.concat(grid_lines, "\n")
+  assert(grid:find("Alice", 1, true), "users grid did not render seeded rows")
+
+  vim.cmd("redraw")
   signal("ready")
   wait_for_width(80)
   vim.wait(1000, function() return vim.api.nvim_win_get_width(sidebar.id) == 24 end, 10)
@@ -64,10 +73,12 @@ if tmux_sync and tmux_sync ~= "" then
   assert(width_at_80 == 24,
     string.format("sidebar width at 80 columns is %d, expected 24", width_at_80))
   assert(vim.api.nvim_win_get_width(pad.id) >= 50, "workspace became too narrow at 80 columns")
+  vim.cmd("redraw")
   signal("80")
   wait_for_width(160)
   assert(vim.api.nvim_win_get_width(sidebar.id) == 24,
     "sidebar regrew after the attached UI expanded")
+  vim.cmd("redraw")
   signal("160")
   wait_for_width(100)
   assert(vim.api.nvim_win_get_width(sidebar.id) == 24,
