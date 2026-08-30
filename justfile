@@ -67,6 +67,75 @@ start:
 dev:
     nvim --cmd "set rtp^=."
 
+# Render and verify the real attached workspace at 100, 80, and 160 columns
+e2e-visual: seed-sqlite
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    command -v tmux >/dev/null || { echo "e2e-visual requires tmux" >&2; exit 1; }
+    command -v timeout >/dev/null || { echo "e2e-visual requires timeout" >&2; exit 1; }
+
+    nvim_bin="${NVIM:-nvim}"
+    command -v "$nvim_bin" >/dev/null || { echo "Neovim not found: $nvim_bin" >&2; exit 1; }
+
+    session="grip-e2e-$$-$RANDOM"
+    sync="$session"
+    expected_columns="${GRIP_E2E_EXPECT_COLUMNS:-100}"
+
+    cleanup() { tmux kill-session -t "$session" 2>/dev/null || true; }
+    trap cleanup EXIT INT TERM
+
+    tmux new-session -d -s "$session" -c "$PWD" /bin/bash --noprofile --norc
+    tmux set-window-option -t "$session" window-size manual
+    tmux set-option -t "$session" remain-on-exit on
+    tmux resize-window -t "$session" -x 100 -y 36
+
+    printf -v launch 'exec env GRIP_TMUX_SYNC=%q GRIP_EXPECT_COLUMNS=%q %q --cmd %q -u %q -c %q' \
+      "$sync" "$expected_columns" "$nvim_bin" "set rtp^=." "tests/minimal_init.lua" \
+      "lua vim.schedule(function() dofile('tests/fixtures/workspace_layout_integration.lua') end)"
+    tmux send-keys -t "$session" "$launch" Enter
+
+    wait_for() {
+      if ! timeout 8s tmux wait-for "$sync-$1"; then
+        echo "e2e-visual timed out waiting for $1" >&2
+        tmux capture-pane -p -t "$session" >&2 || true
+        exit 1
+      fi
+    }
+    snapshot() {
+      printf '\n=== Neovim attached UI: %s columns ===\n' "$1"
+      tmux capture-pane -p -t "$session"
+    }
+
+    wait_for ready
+    snapshot 100
+    tmux resize-window -t "$session" -x 80 -y 30
+    wait_for 80
+    snapshot 80
+    tmux resize-window -t "$session" -x 160 -y 40
+    wait_for 160
+    snapshot 160
+    tmux resize-window -t "$session" -x 100 -y 36
+    wait_for 100
+
+    for _ in {1..100}; do
+      [[ "$(tmux display-message -p -t "$session" '#{pane_dead}')" == 1 ]] && break
+      sleep 0.05
+    done
+    if [[ "$(tmux display-message -p -t "$session" '#{pane_dead}')" != 1 ]]; then
+      echo "e2e-visual Neovim process did not exit" >&2
+      tmux capture-pane -p -t "$session" >&2
+      exit 1
+    fi
+
+    status="$(tmux display-message -p -t "$session" '#{pane_dead_status}')"
+    if [[ "$status" != 0 ]]; then
+      echo "e2e-visual failed with status $status" >&2
+      tmux capture-pane -p -t "$session" >&2
+      exit "$status"
+    fi
+    echo "e2e-visual: attached UI passed at 100, 80, and 160 columns"
+
 # Open Neovim connected to DuckDB for httpfs testing
 dev-httpfs: seed-httpfs
     nvim --cmd "set rtp^=." -c "let g:db='duckdb::memory:'"

@@ -15,7 +15,6 @@ Shipped work belongs in `CHANGELOG.md`. Review this file after each release and 
 
 ## Deferred
 
-- Add one Python-standard-library PTY layout scenario at 80, 100, and 160 columns with semantic assertions instead of pixel snapshots.
 - Add `SECURITY.md` after the privacy release.
 - Add `CONTRIBUTING.md` when the contributor workflow has settled.
 - Revisit required checks and branch protection only after the workflows prove stable.

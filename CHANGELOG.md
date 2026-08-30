@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Attached-UI layout regressions are reproducible locally.** `just e2e-visual` opens the seeded
+  workspace in a real tmux-backed Neovim UI, renders the grid at 100, 80, and 160 columns, and
+  fails when the sidebar or main workspace violates its layout contract.
 - **PostgreSQL stdin execution preserves failure semantics.** `ON_ERROR_STOP` makes a rejected
   statement exit nonzero as it did under `psql -c`, so server errors cannot be parsed as successful
   empty results.
