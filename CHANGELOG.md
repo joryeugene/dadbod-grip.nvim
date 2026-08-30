@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.10.0] - 2026-08-29
+
 ### Fixed
 
 - **Scheduled callback failures can no longer produce a green test run.** The
@@ -546,6 +548,7 @@ older tags are left in place so anyone pinned to them keeps working.
 - **joryeugene** — SQL Server adapter, PostgreSQL routines in the schema sidebar, focused ER diagram
   ([PR #17](https://github.com/joryeugene/dadbod-grip.nvim/pull/17)).
 
-[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.9.0...HEAD
+[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.10.0...HEAD
+[3.10.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.10.0
 [3.9.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.9.0
 [3.8.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.8.0
