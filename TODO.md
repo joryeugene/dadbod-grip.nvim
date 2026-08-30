@@ -2,13 +2,8 @@
 
 Shipped work belongs in `CHANGELOG.md`. Review this file after each release and remove completed work instead of keeping checked boxes.
 
-## Now
-
-- Reduce README onboarding to installation, a first connection, a first editable table, the safety model, and links to `:help` and the website for exhaustive reference.
-
 ## Deferred
 
-- Add `CONTRIBUTING.md` when the contributor workflow has settled.
 - Revisit required checks and branch protection only after the workflows prove stable.
 
 ## Product ideas

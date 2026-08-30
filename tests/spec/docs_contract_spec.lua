@@ -40,8 +40,10 @@ local help = read("doc/dadbod-grip.txt")
 local todo = read("TODO.md")
 local changelog = read("CHANGELOG.md")
 local grid_help = read("lua/dadbod-grip/view.lua")
+local contributing = read("CONTRIBUTING.md")
+local security = read("SECURITY.md")
 
-test("public commands match lazy triggers and both manuals", function()
+test("public commands match lazy triggers and the help manual", function()
   grip.setup({})
   local actual = {}
   for name in pairs(vim.api.nvim_get_commands({ builtin = false })) do
@@ -54,9 +56,11 @@ test("public commands match lazy triggers and both manuals", function()
   local help_commands = {}
   for name in help:gmatch("\n:(Grip[%a]*)[^%a]") do help_commands[name] = true end
   eq(sorted_keys(actual), sorted_keys(help_commands), "help command sections")
+end)
 
-  for name in pairs(actual) do
-    assert(readme:find("`:" .. name, 1, true), "README command table missing :" .. name)
+test("README keeps the onboarding command path", function()
+  for _, name in ipairs({ "GripConnect", "GripStart", "Grip", "GripQuery" }) do
+    assert(readme:find("`:" .. name, 1, true), "README onboarding missing :" .. name)
   end
 end)
 
@@ -73,11 +77,10 @@ test("documented default keymap registry exactly matches code", function()
   eq(documented.qpad_ai, "gA", "query-pad gA is SQL generation")
 end)
 
-test("primary keymap surface claims and grid help match the catalog", function()
-  assert(readme:find("Notebook picker** via `gn` from the query pad or schema sidebar", 1, true))
-  assert(not readme:find("from the grid, query pad, or schema sidebar", 1, true))
-  assert(readme:find("| `ai` | `A` | grid |", 1, true))
-  assert(readme:find("| `open_notebook` | `gn` | query pad + sidebar |", 1, true))
+test("keymap documentation points to the catalog and runtime help stays complete", function()
+  assert(readme:find("[`keymaps.json`](keymaps.json)", 1, true))
+  assert(readme:find("AI keys remain registered", 1, true))
+  assert(help:find("Pressing A or gA while AI is disabled shows an informational message", 1, true))
   assert(help:find("Press `gm` on any row", 1, true))
   assert(grid_help:find('"  gU        Set current column across all visible rows"', 1, true))
   assert(grid_help:find('"  gm        Open rows that reference the current row"', 1, true))
@@ -112,8 +115,7 @@ test("README uses the repository's canonical documentation URL", function()
 end)
 
 test("onboarding and process-privacy claims match current behavior", function()
-  assert(readme:find("**AI SQL generation** via `gA` or `:GripAsk`", 1, true))
-  assert(readme:find("`gA` in the query pad generates SQL", 1, true))
+  assert(readme:find("`gA` generates SQL", 1, true))
   assert(not readme:find("`A` in the query pad generates SQL", 1, true))
 
   for name, text in pairs({ README = readme, help = help }) do
@@ -131,14 +133,25 @@ test("onboarding and process-privacy claims match current behavior", function()
 end)
 
 test("TODO contains only active or unshipped work", function()
-  assert(todo:find("## Now", 1, true)
-    and todo:find("## Deferred", 1, true) and todo:find("## Product ideas", 1, true))
+  assert(todo:find("## Deferred", 1, true) and todo:find("## Product ideas", 1, true))
   assert(not todo:find("- [x]", 1, true), "completed checkbox retained")
   assert(not todo:find("v3.10.1", 1, true), "released version retained")
   assert(not todo:find("Docker assign", 1, true), "completed dynamic-port work retained")
+  assert(not todo:find("README onboarding", 1, true), "completed README work retained")
+  assert(not todo:find("SECURITY.md", 1, true), "completed security policy retained")
+  assert(not todo:find("CONTRIBUTING.md", 1, true), "completed contributor guide retained")
   assert(not todo:find("TOP N pagination", 1, true), "stale SQL Server pagination claim retained")
   assert(todo:find("`##temp`", 1, true), "unresolved SQL Server temp-table limitation missing")
   assert(not todo:find("GripFill", 1, true), "shipped GripFill work retained")
+end)
+
+test("contributor and vulnerability paths remain actionable", function()
+  for _, command in ipairs({ "mise install", "just test", "just lint", "just e2e-visual",
+      "git config core.hooksPath .githooks", "gitleaks git --redact --verbose" }) do
+    assert(contributing:find(command, 1, true), "CONTRIBUTING missing: " .. command)
+  end
+  assert(security:find("security/advisories/new", 1, true), "private report link missing")
+  assert(security:find("Do not open a public issue", 1, true), "public disclosure warning missing")
 end)
 
 test("release version has matching changelog notes", function()
