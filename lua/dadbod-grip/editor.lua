@@ -116,11 +116,15 @@ function M.open(prompt, initial_value, on_save, opts)
   local pre_fill = initial_value or ""
   -- Split on newlines so nvim_buf_set_lines receives clean per-line strings
   local fill_lines = vim.split(pre_fill, "\n", { plain = true })
-  local height = math.min(opts.max_h or 20, math.max(3, #fill_lines))
+  -- Fitted here rather than left to the float: `float_row` below is derived
+  -- from the height, so the two have to agree on what the height is.
+  local height = ui.fit(math.min(opts.max_h or 20, math.max(3, #fill_lines)),
+                        vim.o.lines)
   -- Width from longest line
   local max_line_len = 0
   for _, l in ipairs(fill_lines) do max_line_len = math.max(max_line_len, #l) end
-  local width = math.min(opts.max_w or 100, math.max(40, max_line_len + 6))
+  local width = ui.fit(math.min(opts.max_w or 100, math.max(40, max_line_len + 6)),
+                       vim.o.columns)
 
   -- Create a scratch buffer for the editor
   local edit_buf = vim.api.nvim_create_buf(false, true)

@@ -27,6 +27,7 @@ end
 
 local _orig_systemlist = vim.fn.systemlist
 local _orig_executable = vim.fn.executable
+local _orig_v = vim.v
 local _orig_shell_error = vim.v.shell_error
 local _orig_hrtime_uv = vim.uv and vim.uv.hrtime or nil
 local _orig_hrtime_loop = vim.loop and vim.loop.hrtime or nil
@@ -57,6 +58,7 @@ end
 local function reset_stubs()
   vim.fn.systemlist = _orig_systemlist
   vim.fn.executable = _orig_executable
+  vim.v = _orig_v
   if _orig_hrtime_uv and vim.uv then vim.uv.hrtime = _orig_hrtime_uv end
   if _orig_hrtime_loop and vim.loop then vim.loop.hrtime = _orig_hrtime_loop end
   discovery._reset_cache()
