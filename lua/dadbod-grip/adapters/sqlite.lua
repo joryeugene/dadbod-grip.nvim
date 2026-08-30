@@ -48,19 +48,18 @@ end
 --- pointing at a not-yet-created file therefore behaves exactly as it does in
 --- rw mode -- there is nothing to protect in a database that does not exist.
 --- @param opts table|nil  { readonly = boolean }
-local function sqlite3_args(db_path, sql_str, opts)
+local function sqlite3_args(db_path, opts)
   local args = { "sqlite3", "-init", "", "-csv", "-header" }
   if opts and opts.readonly and vim.fn.filereadable(db_path) == 1 then
     args[#args + 1] = "-readonly"
   end
   args[#args + 1] = db_path
-  args[#args + 1] = sql_str
   return args
 end
 
 local function sqlite3(db_path, sql_str, timeout_ms)
-  return adapters.run_cmd(sqlite3_args(db_path, sql_str, adapters.session_opts()),
-    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT))
+  return adapters.run_cmd(sqlite3_args(db_path, adapters.session_opts()),
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT), { stdin = sql_str })
 end
 
 function M.query(sql_str, url)
@@ -273,11 +272,11 @@ function M.get_schema_batch_async(url, callback)
   -- be able to tell a bad URL from a spawn failure by that timing difference.
   if not db_path then vim.schedule(function() callback(nil) end); return end
 
-  adapters.run_cmd_async(sqlite3_args(db_path, SCHEMA_BATCH_SQL, adapters.session_opts()),
+  adapters.run_cmd_async(sqlite3_args(db_path, adapters.session_opts()),
     adapters.configured_timeout(DEFAULT_TIMEOUT), function(stdout, _, code)
       if code ~= 0 then callback(nil); return end
       callback(parse_schema_batch(stdout))
-    end)
+    end, { stdin = SCHEMA_BATCH_SQL })
 end
 
 function M.explain(sql_str, url)

@@ -38,24 +38,15 @@ local function normalize_column_type(column_type)
   return name .. (rest ~= "" and (" " .. rest) or "")
 end
 
---- Build mysql CLI args for a statement, query or DML alike.
+--- Build the constant mysql CLI args for a statement, query or DML alike.
 --- Both MySQL and MariaDB use --batch (tab-separated output; --csv is not a
 --- mysql CLI flag). --batch reports no affected-row count for DML, which is why
 --- execute() asks for ROW_COUNT() explicitly.
 --- Split out from mysql_query() so the blocking and non-blocking spawns run
 --- byte-identical command lines.
 ---
---- opts.readonly is merged *into* the existing --init-command rather than
---- added as a second one: the mysql CLI keeps only the last --init-command it
---- is given, so a second flag would silently drop the sql_mode the whole
---- adapter depends on (ANSI_QUOTES) instead of adding to it.
---- @param opts table|nil  { readonly = boolean }
-local function mysql_args(parsed, sql_str, opts)
-  local init = { "SET sql_mode='ANSI_QUOTES,NO_BACKSLASH_ESCAPES'" }
-  if opts and opts.readonly then
-    init[#init + 1] = "SET SESSION TRANSACTION READ ONLY"
-  end
-  local args = { "mysql", "--batch", "--init-command=" .. table.concat(init, "; ") }
+local function mysql_args(parsed)
+  local args = { "mysql", "--batch" }
   if parsed.host then
     args[#args + 1] = "-h"
     args[#args + 1] = parsed.host
@@ -71,9 +62,17 @@ local function mysql_args(parsed, sql_str, opts)
   if parsed.dbname then
     args[#args + 1] = parsed.dbname
   end
-  args[#args + 1] = "-e"
-  args[#args + 1] = sql_str
   return args
+end
+
+--- Session setup and statement delivered together through stdin.
+local function mysql_stdin(sql_str, opts)
+  local statements = { "SET sql_mode='ANSI_QUOTES,NO_BACKSLASH_ESCAPES';" }
+  if opts and opts.readonly then
+    statements[#statements + 1] = "SET SESSION TRANSACTION READ ONLY;"
+  end
+  statements[#statements + 1] = sql_str
+  return table.concat(statements, "\n")
 end
 
 --- opts.env for one mysql invocation: MYSQL_PWD carrying the password so it
@@ -90,14 +89,16 @@ end
 
 --- Run a statement, blocking.
 local function mysql_query(parsed, sql_str, timeout_ms)
-  return adapters.run_cmd(mysql_args(parsed, sql_str, adapters.session_opts()),
-    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT), { env = mysql_env(parsed) })
+  local opts = adapters.session_opts()
+  return adapters.run_cmd(mysql_args(parsed), timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
+    { stdin = mysql_stdin(sql_str, opts), env = mysql_env(parsed) })
 end
 
---- Run a statement without blocking; same argv and same env as mysql_query.
+--- Run a statement without blocking; same argv, stdin and env as mysql_query.
 local function mysql_query_async(parsed, sql_str, timeout_ms, callback)
-  adapters.run_cmd_async(mysql_args(parsed, sql_str, adapters.session_opts()),
-    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT), callback, { env = mysql_env(parsed) })
+  local opts = adapters.session_opts()
+  adapters.run_cmd_async(mysql_args(parsed), timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
+    callback, { stdin = mysql_stdin(sql_str, opts), env = mysql_env(parsed) })
 end
 
 function M.query(sql_str, url)
@@ -578,6 +579,7 @@ end
 M._parse_url = parse_url
 M._mysql_args = mysql_args
 M._mysql_env = mysql_env
+M._mysql_stdin = mysql_stdin
 M._normalize_column_type = normalize_column_type
 
 return M

@@ -48,8 +48,9 @@ end
 local function capture_system_args(stdout, fn)
   local captured
   local orig = vim.system
-  vim.system = function(args, _opts, cb)
+  vim.system = function(args, opts, cb)
     captured = args
+    captured._stdin = opts and opts.stdin
     local r = { stdout = stdout or "", stderr = "", code = 0 }
     if cb then cb(r) else return { wait = function() return r end } end
   end
@@ -267,7 +268,7 @@ test("sqlserver get_column_info: schema-qualified name is split into schema + ta
       sqlserver.get_column_info("sales.invoices", URL)
     end)
   end)
-  local sent = args[#args]
+  local sent = args._stdin
   contains(sent, "TABLE_SCHEMA = 'sales'", "schema from the qualified name")
   contains(sent, "TABLE_NAME = 'invoices'", "bare table name")
 end)
@@ -279,7 +280,7 @@ test("sqlserver get_column_info: unqualified name defaults to dbo", function()
       sqlserver.get_column_info("users", URL)
     end)
   end)
-  contains(args[#args], "TABLE_SCHEMA = 'dbo'", "dbo is the default schema")
+  contains(args._stdin, "TABLE_SCHEMA = 'dbo'", "dbo is the default schema")
 end)
 
 -- MAX types report CHARACTER_MAXIMUM_LENGTH = -1, which the plain `> 0` guard
@@ -293,7 +294,7 @@ test("sqlserver: batch and column_info both handle CHARACTER_MAXIMUM_LENGTH = -1
       sqlserver.get_column_info("users", URL)
     end)
     for _, case in ipairs({ { "get_schema_batch", batch_args }, { "get_column_info", info_args } }) do
-      local sent = case[2][#case[2]]
+      local sent = case[2]._stdin
       contains(sent, "CHARACTER_MAXIMUM_LENGTH = -1", case[1] .. " must special-case MAX types")
       contains(sent, "'(max)'", case[1] .. " must render them as (max)")
     end
@@ -313,8 +314,8 @@ test("sqlserver: batch and column_info share one data_type expression", function
     local info_args = capture_system_args(COLUMN_INFO_OUT, function()
       sqlserver.get_column_info("users", URL)
     end)
-    local a = type_expr(batch_args[#batch_args])
-    local b = type_expr(info_args[#info_args])
+    local a = type_expr(batch_args._stdin)
+    local b = type_expr(info_args._stdin)
     assert(a, "batch statement must contain the data_type expression")
     assert(b, "column_info statement must contain the data_type expression")
     eq(a, b, "the two data_type expressions must be identical")
@@ -394,14 +395,14 @@ test("sqlserver get_referencing_foreign_keys: target schema comes from the name"
     local qualified = capture_system_args("", function()
       sqlserver.get_referencing_foreign_keys("sales.invoices", URL)
     end)
-    contains(qualified[#qualified], "ps.name = 'sales'", "qualified name selects its schema")
-    contains(qualified[#qualified], "pt.name = 'invoices'", "bare table name")
+    contains(qualified._stdin, "ps.name = 'sales'", "qualified name selects its schema")
+    contains(qualified._stdin, "pt.name = 'invoices'", "bare table name")
 
     local bare = capture_system_args("", function()
       sqlserver.get_referencing_foreign_keys("users", URL)
     end)
-    contains(bare[#bare], "ps.name = 'dbo'", "unqualified name defaults to dbo")
-    contains(bare[#bare], "pt.name = 'users'", "table name")
+    contains(bare._stdin, "ps.name = 'dbo'", "unqualified name defaults to dbo")
+    contains(bare._stdin, "pt.name = 'users'", "table name")
   end)
 end)
 

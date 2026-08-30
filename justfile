@@ -33,8 +33,8 @@ seed-mysql:
 
 # Seed SQL Server test database (requires sqlcmd and a local SQL Server instance)
 seed-mssql:
-    sqlcmd -S "${MSSQL_SERVER:-localhost,1433}" -U "${MSSQL_USER:-sa}" -P "${MSSQL_PASSWORD}" -Q "IF DB_ID('grip_test') IS NULL CREATE DATABASE grip_test"
-    sqlcmd -S "${MSSQL_SERVER:-localhost,1433}" -U "${MSSQL_USER:-sa}" -P "${MSSQL_PASSWORD}" -d grip_test -i tests/seed_mssql.sql
+    SQLCMDPASSWORD="${MSSQL_PASSWORD}" sqlcmd -S "${MSSQL_SERVER:-localhost,1433}" -U "${MSSQL_USER:-sa}" -Q "IF DB_ID('grip_test') IS NULL CREATE DATABASE grip_test"
+    SQLCMDPASSWORD="${MSSQL_PASSWORD}" sqlcmd -S "${MSSQL_SERVER:-localhost,1433}" -U "${MSSQL_USER:-sa}" -d grip_test -i tests/seed_mssql.sql
 
 # Seed DuckDB test database
 seed-duckdb:
