@@ -1,10 +1,28 @@
 -- Minimal init for headless testing: loads plugin from repo root
 vim.opt.rtp:prepend(".")
+vim.g.grip_test_progpath = vim.v.progpath
 -- Shared spec assertions live in tests/helpers.lua and are pulled in with
 -- require("helpers"). The directory is resolved from this file's own path, so
 -- the name works no matter which cwd nvim was launched from.
 package.path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h")
   .. "/?.lua;" .. package.path
+
+-- Neovim reports scheduled callback errors without making the headless process
+-- fail. That can turn a real async regression into "ALL TESTS PASSED". Install
+-- this once because a few focused specs source minimal_init.lua themselves.
+if not vim.g.grip_test_schedule_guard then
+  vim.g.grip_test_schedule_guard = true
+  local schedule = vim.schedule
+  vim.schedule = function(callback)
+    schedule(function()
+      local ok, err = xpcall(callback, debug.traceback)
+      if not ok then
+        vim.api.nvim_err_writeln(err)
+        vim.cmd("cquit 1")
+      end
+    end)
+  end
+end
 
 -- An in-memory clipboard, so a test run cannot touch the developer's real one.
 --
