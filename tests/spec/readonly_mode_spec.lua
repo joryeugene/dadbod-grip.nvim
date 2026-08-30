@@ -1200,7 +1200,7 @@ test("the caveat dispatch only answers for adapters that declare one", function(
   assert(adapters.readonly_caveat("postgresql://u:p@h/db?options=-cx"),
     "postgres declares one and it reaches the dispatcher")
   eq(adapters.readonly_caveat("mysql://u:p@h/db?options=-cx"), nil,
-    "mysql sets its mode through --init-command, which no URL parameter displaces")
+    "mysql sets its mode through stdin, which no URL parameter displaces")
   eq(adapters.readonly_caveat("sqlite:/tmp/x.sqlite?options=-cx"), nil,
     "sqlite takes -readonly in argv, likewise undisplaceable")
   eq(adapters.readonly_caveat("nosuchscheme://h/db?options=-cx"), nil,
