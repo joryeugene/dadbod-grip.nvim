@@ -4,13 +4,6 @@ Shipped work belongs in `CHANGELOG.md`. Review this file after each release and 
 
 ## Now
 
-- Release v3.10.1 only after AI requests, API-key commands, database SQL, connection credentials, and database URLs pass the process-privacy regressions and the full live database matrix.
-- Verify LuaCheck, the deterministic suite on Neovim 0.10 and stable, documentation contracts, and a clean-clone run before publishing.
-
-## Next
-
-- Let Docker assign loopback ports for PostgreSQL, MySQL, and MariaDB CI, discover those ports at runtime, and remove SQL Server's unused published port.
-- Pin the repository's existing `just` test tool with `.mise.toml` so `just test` works from a normal local checkout.
 - Reduce README onboarding to installation, a first connection, a first editable table, the safety model, and links to `:help` and the website for exhaustive reference.
 
 ## Deferred
