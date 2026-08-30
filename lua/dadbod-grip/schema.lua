@@ -1107,14 +1107,10 @@ local function setup_keymaps(url)
         if key_end then sadd(ln, "Identifier", 2, key_end - 1) end
       end
     end
-    local win = vim.api.nvim_open_win(popup_buf, true, {
-      relative = "editor",
-      row = math.floor((vim.o.lines - #lines) / 2),
-      col = math.floor((vim.o.columns - max_w) / 2),
+    local win = ui.info_float({
+      buf = popup_buf,
       width = max_w,
       height = #lines,
-      style = "minimal",
-      border = ui.border(),
       title = " Schema Help ",
       title_pos = "center",
       zindex = 50,
