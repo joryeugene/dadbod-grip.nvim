@@ -246,6 +246,7 @@ local function with_real_file(fn)
     is_open = function() return true end,
     refresh = function() end,
     toggle = function() end,
+    prefetch = function() return {} end,
     get_winid = function() return nil end,
   }
   package.loaded["dadbod-grip.query_pad"] = { open = function() end }
