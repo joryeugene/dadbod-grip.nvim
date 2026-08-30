@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Live PostgreSQL, MySQL, and MariaDB CI jobs now use Docker-assigned loopback ports discovered at
+  runtime, which avoids collisions with local services and concurrent jobs. SQL Server no longer
+  publishes an unused host port because its test wrapper executes inside the container.
+- `.mise.toml` pins the repository's existing `just` tool at 1.40.0, so a normal local checkout
+  activates the same task runner and plain `just test` works without a global mise default.
+- `just lint` now finds a LuaCheck installed in LuaRocks' user bin directory when that directory is
+  not already in `PATH`, and reports the exact installation command when LuaCheck is unavailable.
+
 ## [3.10.1] - 2026-08-30
 
 ### Security
