@@ -1,0 +1,14 @@
+#!/bin/sh
+# Enable per clone with: git config core.hooksPath .githooks
+set -eu
+
+if command -v mise >/dev/null 2>&1 && mise which gitleaks >/dev/null 2>&1; then
+  exec mise exec -- gitleaks git --pre-commit --redact --staged --verbose
+fi
+
+if command -v gitleaks >/dev/null 2>&1; then
+  exec gitleaks git --pre-commit --redact --staged --verbose
+fi
+
+printf '%s\n' "Gitleaks is required. Run 'mise install' or install Gitleaks 8.30.1." >&2
+exit 1

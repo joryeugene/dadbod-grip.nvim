@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Gitleaks now scans committed history inside the required lint job, and an optional native Git hook
+  scans staged changes locally. Both paths redact findings, and the repository allowlist covers only
+  the exact synthetic password used by the DuckDB process-boundary regression.
+- `SECURITY.md` directs vulnerability reports to GitHub's private advisory intake instead of the
+  public issue tracker.
+
 ## [3.10.2] - 2026-08-30
 
 ### Changed
