@@ -76,6 +76,18 @@ test("build_sql: page 3 has correct offset", function()
   contains(sql, "OFFSET 100")  -- (3-1) * 50 = 100
 end)
 
+test("build_sql: all-row mode preserves filters and sorting without pagination", function()
+  local spec = query.new_table("users", 50)
+  spec = query.add_filter(spec, '"active" = true')
+  spec = query.toggle_sort(spec, "name")
+  spec = query.set_page(spec, 3)
+  local sql = query.build_sql(spec, { paginate = false })
+  contains(sql, 'WHERE ("active" = true)', "filter preserved")
+  contains(sql, 'ORDER BY "name" ASC', "sort preserved")
+  not_contains(sql, "LIMIT", "limit removed")
+  not_contains(sql, "OFFSET", "offset removed")
+end)
+
 -- ── sort modifiers ──────────────────────────────────────────────────────────
 
 test("toggle_sort: first toggle adds ASC", function()

@@ -2,6 +2,9 @@
 -- The pure formatting function is exported as view._format_export(rows, cols, format, table_name).
 -- Run: just test
 local view = require("dadbod-grip.view")
+local db = require("dadbod-grip.db")
+local query = require("dadbod-grip.query")
+local ui = require("dadbod-grip.ui")
 
 local pass = 0
 local fail = 0
@@ -181,6 +184,111 @@ end)
 test("format_export unknown format returns empty table", function()
   local lines = fmt({ {"x"} }, {"col"}, "nope", "t")
   eq(#lines, 0)
+end)
+
+-- ── file safety / streaming ────────────────────────────────────────────────────────
+
+test("write_export_file streams JSON batches and atomically replaces destination", function()
+  local path = vim.fn.tempname() .. ".json"
+  vim.fn.writefile({ "old content" }, path)
+  local rows = {}
+  for i = 1, 1001 do rows[i] = { tostring(i), "name_" .. i } end
+  local ok, err = view._write_export_file(rows, { "id", "name" }, "json", "users", path)
+  assert(ok, "export failed: " .. tostring(err))
+  local decoded = vim.fn.json_decode(table.concat(vim.fn.readfile(path), "\n"))
+  eq(#decoded, 1001, "all streamed rows present")
+  eq(decoded[1001].name, "name_1001", "last batch present")
+  eq(#vim.fn.glob(path .. ".grip-tmp-*", false, true), 0, "no temp file remains")
+  vim.fn.delete(path)
+end)
+
+test("write_export_file failure preserves destination and removes partial temp", function()
+  local path = vim.fn.tempname() .. ".csv"
+  vim.fn.writefile({ "keep me" }, path)
+  local explosive = setmetatable({}, { __tostring = function() error("formatter exploded") end })
+  local rows = {}
+  for i = 1, 1000 do rows[i] = { tostring(i) } end
+  rows[1001] = { explosive }
+  local ok, err = view._write_export_file(rows, { "id" }, "csv", "users", path)
+  eq(ok, nil, "failure reported")
+  contains(err, "formatter exploded", "original failure returned")
+  eq(table.concat(vim.fn.readfile(path), "\n"), "keep me", "destination untouched")
+  eq(#vim.fn.glob(path .. ".grip-tmp-*", false, true), 0, "partial temp removed")
+  vim.fn.delete(path)
+end)
+
+test("clipboard export prompts scope before format and removes only pagination", function()
+  local bufnr = 99123
+  local spec = query.new_table("users", 100)
+  spec = query.add_filter(spec, '"active" = true')
+  spec = query.toggle_sort(spec, "name")
+  spec = query.set_page(spec, 2)
+  view._sessions[bufnr] = {
+    state = { columns = { "id", "name" }, rows = { { "page", "row" } }, table_name = "users" },
+    query_spec = spec,
+    total_rows = 2,
+    url = "sqlite:test.db",
+  }
+
+  local prompts, sent_sql = {}, nil
+  local orig_select, orig_query = vim.ui.select, db.query
+  vim.ui.select = function(_, opts, callback)
+    prompts[#prompts + 1] = opts.prompt
+    callback(opts.prompt == "Export scope:" and "All matching rows" or "CSV")
+  end
+  db.query = function(sql)
+    sent_sql = sql
+    return { columns = { "id", "name" }, rows = { { "1", "Alice" }, { "2", "Bob" } } }
+  end
+  local ok, err = pcall(view.export_to_clipboard, bufnr)
+  vim.ui.select, db.query = orig_select, orig_query
+  view._sessions[bufnr] = nil
+  if not ok then error(err) end
+
+  eq(prompts[1], "Export scope:", "scope is first")
+  eq(prompts[2], "Export format:", "format is second")
+  contains(sent_sql, 'WHERE ("active" = true)', "filter kept")
+  contains(sent_sql, 'ORDER BY "name" ASC', "sort kept")
+  not_contains(sent_sql, "LIMIT", "pagination removed")
+  not_contains(sent_sql, "OFFSET", "page offset removed")
+end)
+
+test("clipboard all-row export refuses more than 100000 rows before querying", function()
+  local bufnr = 99124
+  view._sessions[bufnr] = {
+    state = { columns = { "id" }, rows = { { "1" } }, table_name = "users" },
+    query_spec = query.new_table("users", 100), total_rows = 100001, url = "sqlite:test.db",
+  }
+  local queried, notified = false, nil
+  local orig_select, orig_query, orig_notify = vim.ui.select, db.query, vim.notify
+  vim.ui.select = function(_, opts, callback)
+    callback(opts.prompt == "Export scope:" and "All matching rows" or "CSV")
+  end
+  db.query = function() queried = true; return nil, "must not run" end
+  vim.notify = function(msg) notified = msg end
+  local ok, err = pcall(view.export_to_clipboard, bufnr)
+  vim.ui.select, db.query, vim.notify = orig_select, orig_query, orig_notify
+  view._sessions[bufnr] = nil
+  if not ok then error(err) end
+  eq(queried, false, "oversized clipboard query not run")
+  contains(notified, "100,000", "cap explained")
+end)
+
+test("all-row export above 10000 requires confirmation before querying", function()
+  local session = {
+    state = { columns = { "id" }, rows = { { "1" } } },
+    query_spec = query.new_table("users", 100), total_rows = 10001, url = "sqlite:test.db",
+  }
+  local queried, delivered = false, false
+  local orig_select, orig_query, orig_confirm = vim.ui.select, db.query, ui.confirm
+  vim.ui.select = function(_, _, callback) callback("All matching rows") end
+  db.query = function() queried = true; return { columns = {}, rows = {} } end
+  ui.confirm = function() return false end
+  local ok, err = pcall(view._request_export_rows, session, "file", function() delivered = true end)
+  vim.ui.select, db.query, ui.confirm = orig_select, orig_query, orig_confirm
+  if not ok then error(err) end
+  eq(queried, false, "query waits for confirmation")
+  eq(delivered, false, "cancel returns no export")
 end)
 
 -- ── summary ─────────────────────────────────────────────────────────────────

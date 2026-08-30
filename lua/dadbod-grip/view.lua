@@ -1652,47 +1652,200 @@ end
 -- Expose for testing
 M._format_export = format_export
 
---- Export current result set to a file.
---- Called by gX keymap and :GripExport command.
-function M.do_export(bufnr)
-  local s = M._sessions[bufnr]
-  if not s or not s.state then
+local function current_export_rows(session)
+  local rows = {}
+  local cols = session.state.columns or {}
+  local ordered = session._render and session._render.ordered
+  if not ordered then return session.state.rows or {}, cols end
+  for _, row_idx in ipairs(ordered) do
+    local row = {}
+    for ci, col in ipairs(cols) do
+      row[ci] = data.effective_value(session.state, row_idx, col)
+    end
+    rows[#rows + 1] = row
+  end
+  return rows, cols
+end
+
+local function matching_count(session)
+  if session.total_rows ~= nil then return session.total_rows end
+  if not session.query_spec then return nil, "All-row export requires a query-backed result" end
+  local result, err = db.query(qmod.build_count_sql(session.query_spec), session.url)
+  if not result then return nil, err or "Count query failed" end
+  return tonumber(result.rows and result.rows[1] and result.rows[1][1]) or 0
+end
+
+--- Prompt for page/all scope before any format prompt, then provide the rows.
+local function request_export_rows(session, destination, callback)
+  vim.ui.select({ "Current page", "All matching rows" }, { prompt = "Export scope:" }, function(scope)
+    if not scope then return end
+
+    local rows, cols, count
+    if scope == "All matching rows" then
+      local count_err
+      count, count_err = matching_count(session)
+      if count == nil then
+        vim.notify("Export failed: " .. tostring(count_err or "all-row count unavailable"),
+          vim.log.levels.ERROR)
+        return
+      end
+      if destination == "clipboard" and count > 100000 then
+        vim.notify("Clipboard export is limited to 100,000 rows; export to a file instead",
+          vim.log.levels.WARN)
+        return
+      end
+      if count > 10000 and not ui.confirm(string.format(
+          "Export %d matching rows? (y/N): ", count)) then return end
+
+      if not session.query_spec then
+        vim.notify("Export failed: all-row export requires a query-backed result", vim.log.levels.ERROR)
+        return
+      end
+      local result, err = db.query(
+        qmod.build_sql(session.query_spec, { paginate = false }), session.url)
+      if not result then
+        vim.notify("Export failed: " .. tostring(err or "query failed"), vim.log.levels.ERROR)
+        return
+      end
+      rows, cols = result.rows or {}, result.columns or session.state.columns or {}
+      local fetched_count = #rows
+      if destination == "clipboard" and fetched_count > 100000 then
+        vim.notify("Clipboard export is limited to 100,000 rows; export to a file instead",
+          vim.log.levels.WARN)
+        return
+      end
+      if count <= 10000 and fetched_count > 10000 and not ui.confirm(string.format(
+          "Export %d matching rows? (y/N): ", fetched_count)) then return end
+      count = fetched_count
+    else
+      rows, cols = current_export_rows(session)
+      count = #rows
+      if destination == "clipboard" and count > 100000 then
+        vim.notify("Clipboard export is limited to 100,000 rows; export to a file instead",
+          vim.log.levels.WARN)
+        return
+      end
+      if count > 10000 and not ui.confirm(string.format(
+          "Export %d rows from the current page? (y/N): ", count)) then return end
+    end
+
+    if count == 0 then
+      vim.notify("No rows to export", vim.log.levels.WARN)
+      return
+    end
+    callback(rows, cols, scope)
+  end)
+end
+
+--- Stream an export to a same-directory temporary file, then atomically rename
+--- it into place. Any formatter/write/rename failure removes only the temp file.
+local function write_export_file(rows, cols, format, table_name, path)
+  local temp = string.format("%s.grip-tmp-%d-%d", path, vim.fn.getpid(), vim.uv.hrtime())
+  local file, open_err = io.open(temp, "wb")
+  if not file then return nil, open_err end
+
+  local ok, write_err = xpcall(function()
+    local function write_lines(lines)
+      if #lines == 0 then return end
+      local wrote, err = file:write(table.concat(lines, "\n"), "\n")
+      if not wrote then error(err or "write failed", 0) end
+    end
+
+    local batch_size = 1000
+    if format == "json" then write_lines({ "[" }) end
+    local first_batch = true
+    for start = 1, #rows, batch_size do
+      local batch = {}
+      for i = start, math.min(start + batch_size - 1, #rows) do batch[#batch + 1] = rows[i] end
+      local lines = format_export(batch, cols, format, table_name)
+      if format == "csv" and not first_batch then table.remove(lines, 1) end
+      if format == "json" then
+        table.remove(lines, 1)
+        table.remove(lines, #lines)
+        if not first_batch and #lines > 0 then lines[1] = "," .. lines[1] end
+      end
+      write_lines(lines)
+      first_batch = false
+    end
+    if format == "json" then write_lines({ "]" }) end
+    local closed, close_err = file:close()
+    if not closed then error(close_err or "close failed", 0) end
+  end, debug.traceback)
+
+  if not ok then
+    pcall(function() file:close() end)
+    vim.fn.delete(temp)
+    return nil, write_err
+  end
+  local renamed, rename_err = vim.uv.fs_rename(temp, path)
+  if not renamed then
+    vim.fn.delete(temp)
+    return nil, rename_err or "atomic rename failed"
+  end
+  return true
+end
+
+M._request_export_rows = request_export_rows
+M._write_export_file = write_export_file
+
+function M.export_to_clipboard(bufnr)
+  local session = M._sessions[bufnr]
+  if not session or not session.state then
     vim.notify("No grip result to export", vim.log.levels.WARN)
     return
   end
-  local rows = s.state.rows
-  local cols = s.state.columns
-  if not rows or #rows == 0 then
-    vim.notify("No rows to export", vim.log.levels.WARN)
+  request_export_rows(session, "clipboard", function(rows, cols)
+    local formats = { "CSV", "TSV", "JSON", "SQL INSERT", "Markdown", "Grip Table" }
+    vim.ui.select(formats, { prompt = "Export format:" }, function(choice)
+      if not choice then return end
+      local ids = {
+        ["CSV"] = "csv", ["TSV"] = "tsv", ["JSON"] = "json",
+        ["SQL INSERT"] = "sql", ["Markdown"] = "markdown", ["Grip Table"] = "grip",
+      }
+      local output = table.concat(format_export(
+        rows, cols, ids[choice], session.state.table_name or "table_name"), "\n")
+      vim.fn.setreg("+", output)
+      vim.notify(string.format("Exported %d rows as %s to clipboard", #rows, choice),
+        vim.log.levels.INFO)
+    end)
+  end)
+end
+
+--- Export a page or all matching rows to a file.
+--- Called by gX keymap and :GripExport command.
+function M.do_export(bufnr)
+  local session = M._sessions[bufnr]
+  if not session or not session.state then
+    vim.notify("No grip result to export", vim.log.levels.WARN)
     return
   end
 
-  -- Prompt format
-  local fmt = ui.input({ prompt = "Export format [csv/json/sql]: " })
-  if not fmt then return end
-  fmt = fmt:lower()
-  if fmt ~= "csv" and fmt ~= "json" and fmt ~= "sql" then
-    vim.notify("Unknown format: " .. fmt .. " (use csv, json, or sql)", vim.log.levels.ERROR)
-    return
-  end
+  request_export_rows(session, "file", function(rows, cols)
+    -- Scope is intentionally chosen before format.
+    local fmt = ui.input({ prompt = "Export format [csv/json/sql]: " })
+    if not fmt then return end
+    fmt = fmt:lower()
+    if fmt ~= "csv" and fmt ~= "json" and fmt ~= "sql" then
+      vim.notify("Unknown format: " .. fmt .. " (use csv, json, or sql)", vim.log.levels.ERROR)
+      return
+    end
 
-  local ext = fmt == "sql" and "sql" or fmt
-  local default_path = vim.fn.getcwd() .. "/grip_export." .. ext
-  local path = ui.input({
-    prompt = "Save to: ",
-    default = default_path,
-    completion = "file",
-  })
-  if not path then return end
+    local ext = fmt == "sql" and "sql" or fmt
+    local path = ui.input({
+      prompt = "Save to: ",
+      default = vim.fn.getcwd() .. "/grip_export." .. ext,
+      completion = "file",
+    })
+    if not path then return end
 
-  local table_name = s.query_spec and s.query_spec.table_name
-  local lines = format_export(rows, cols, fmt, table_name)
-  local write_ok, err = pcall(vim.fn.writefile, lines, path)
-  if write_ok then
-    vim.notify(string.format("Exported %d rows → %s", #rows, path), vim.log.levels.INFO)
-  else
-    vim.notify("Export failed: " .. tostring(err), vim.log.levels.ERROR)
-  end
+    local ok, err = write_export_file(
+      rows, cols, fmt, session.query_spec and session.query_spec.table_name, path)
+    if ok then
+      vim.notify(string.format("Exported %d rows → %s", #rows, path), vim.log.levels.INFO)
+    else
+      vim.notify("Export failed: " .. tostring(err), vim.log.levels.ERROR)
+    end
+  end)
 end
 
 -- ── focused info float helper ────────────────────────────────────────────
