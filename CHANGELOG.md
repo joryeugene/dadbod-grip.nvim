@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SECURITY.md` directs vulnerability reports to GitHub's private advisory intake instead of the
   public issue tracker.
 
+### Changed
+
+- The README now teaches installation, the first connection, the first staged edit, and the safety
+  model, while the in-editor help and documentation website remain the exhaustive references.
+- `CONTRIBUTING.md` now records the pinned tool setup, local gates, visual-test boundary, changelog
+  policy, purpose-based branch naming, and optional secret-scanning hook.
+
 ## [3.10.2] - 2026-08-30
 
 ### Changed
