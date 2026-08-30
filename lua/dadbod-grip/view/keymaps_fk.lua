@@ -7,6 +7,7 @@ local data   = require("dadbod-grip.data")
 local sql    = require("dadbod-grip.sql")
 local db     = require("dadbod-grip.db")
 local qmod   = require("dadbod-grip.query")
+local ui     = require("dadbod-grip.ui")
 
 local M = {}
 
@@ -76,32 +77,41 @@ function M.setup(bufnr, ctx)
       { pinned = true })
     local ref_sql = qmod.build_sql(ref_spec)
 
-    local result, err = db.query(ref_sql, session_fk.state.url)
-    if err then
-      table.remove(session_fk.nav_stack) -- pop on failure
-      vim.notify("FK query failed: " .. err, vim.log.levels.WARN)
-      return
-    end
+    -- Three round-trips (rows, columns, PKs) behind one spinner: without it the
+    -- jump is a dead editor for as long as the connection takes to answer.
+    -- One table out, never a bare `nil, err`: ui.blocking() forwards through
+    -- table.unpack, which drops everything after a leading nil.
+    local fetched = ui.blocking("  querying " .. fk_info.ref_table .. "...", function()
+      local res, qerr = db.query(ref_sql, session_fk.state.url)
+      if qerr then return { err = qerr } end
 
-    -- Empty result: fetch columns from schema (same guard as do_refresh in init.lua)
-    if #result.columns == 0 then
-      local col_info = db.get_column_info(fk_info.ref_table, session_fk.state.url)
-      if col_info then
-        for _, ci in ipairs(col_info) do
-          table.insert(result.columns, ci.column_name)
+      -- Empty result: fetch columns from schema (same guard as do_refresh in init.lua)
+      if #res.columns == 0 then
+        local col_info = db.get_column_info(fk_info.ref_table, session_fk.state.url)
+        if col_info then
+          for _, ci in ipairs(col_info) do
+            table.insert(res.columns, ci.column_name)
+          end
         end
       end
-    end
 
-    -- Fetch PKs for referenced table
-    local pks = db.get_primary_keys(fk_info.ref_table, session_fk.state.url) or {}
-    result.primary_keys = pks
-    -- Same connection as the grid we jumped from: a read-only one stays
-    -- read-only on the referenced table too.
-    result.readonly = db.is_readonly(session_fk.state.url)
-    result.table_name = fk_info.ref_table
-    result.url = session_fk.state.url
-    result.sql = ref_sql
+      -- Fetch PKs for referenced table
+      res.primary_keys = db.get_primary_keys(fk_info.ref_table, session_fk.state.url) or {}
+      -- Same connection as the grid we jumped from: a read-only one stays
+      -- read-only on the referenced table too.
+      res.readonly = db.is_readonly(session_fk.state.url)
+      res.table_name = fk_info.ref_table
+      res.url = session_fk.state.url
+      res.sql = ref_sql
+      return { result = res }
+    end)
+    if not fetched or not fetched.result then
+      table.remove(session_fk.nav_stack) -- pop on failure
+      vim.notify("FK query failed: " .. tostring((fetched and fetched.err) or "unknown error"),
+        vim.log.levels.WARN)
+      return
+    end
+    local result = fetched.result
 
     local new_state = data.new(result)
     session_fk.query_spec = ref_spec

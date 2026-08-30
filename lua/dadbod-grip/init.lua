@@ -475,14 +475,26 @@ local function do_apply(bufnr, url)
 end
 
 -- ── refresh ───────────────────────────────────────────────────────────────
-local function do_refresh(bufnr, url, query_sql, table_name)
+
+--- Spinner label for a grid reload: the bare table name (no schema prefix),
+--- one line, capped so a long name cannot outgrow the float.
+local function spinner_label(table_name)
+  local label = table_name and (table_name:match("[^.]+$") or table_name) or "result"
+  return ((label:match("^([^\n]+)") or "query"):sub(1, 50))
+end
+
+--- Every db round-trip one refresh needs. Split out of do_refresh so a caller
+--- that has its own db work to do first (on_requery runs a COUNT) can put the
+--- whole batch inside one ui.blocking float instead of flashing two.
+---
+--- Returns ONE table, never a bare `nil, err`: ui.blocking() forwards its fn's
+--- returns through table.unpack, which drops everything after a leading nil.
+--- @return table { result: table|nil, err: string|nil, elapsed_ms: number }
+local function fetch_refresh(url, query_sql, table_name)
   local t0 = vim.uv.hrtime()
   local result, err = db.query(query_sql, url)
   local elapsed_ms = math.floor((vim.uv.hrtime() - t0) / 1e6)
-  if err then
-    vim.notify("Grip: query failed: " .. err, vim.log.levels.ERROR)
-    return
-  end
+  if err then return { err = err, elapsed_ms = elapsed_ms } end
 
   -- Empty result: fetch columns from schema (adapter returns none for 0 rows)
   if (#result.columns == 0) and table_name then
@@ -506,14 +518,31 @@ local function do_refresh(bufnr, url, query_sql, table_name)
   result.table_name = table_name
   result.url = url
   result.sql = query_sql
+  return { result = result, elapsed_ms = elapsed_ms }
+end
 
-  local new_state = data.new(result)
+--- Render what fetch_refresh returned. Kept outside the spinner float so the
+--- grid repaints after it is torn down, the same order init.open() uses.
+local function apply_refresh(bufnr, fetched)
+  if not fetched or not fetched.result then
+    vim.notify("Grip: query failed: " .. tostring((fetched and fetched.err) or "unknown error"),
+      vim.log.levels.ERROR)
+    return
+  end
+  local new_state = data.new(fetched.result)
   local session = view._sessions[bufnr]
   if session then
-    session.elapsed_ms = elapsed_ms
+    session.elapsed_ms = fetched.elapsed_ms
     session.last_action = "query"
   end
   view.render(bufnr, new_state)
+end
+
+local function do_refresh(bufnr, url, query_sql, table_name)
+  local fetched = ui.blocking("  querying " .. spinner_label(table_name) .. "...", function()
+    return fetch_refresh(url, query_sql, table_name)
+  end)
+  apply_refresh(bufnr, fetched)
 end
 
 -- ── edit cell ─────────────────────────────────────────────────────────────
@@ -962,39 +991,26 @@ function M.open(arg, url, opts)
       or table_name_arg and (table_name_arg:match("[^.]+$") or table_name_arg)
       or "result"
   short_label = (short_label:match("^([^\n]+)") or "query"):sub(1, 50)
-  local result, qerr
-  local elapsed_ms = ui.blocking("  querying " .. short_label .. "...", function()
-    local t_start = vim.uv.hrtime()
-    result, qerr = db.query(query_sql, conn)
-    return math.floor((vim.uv.hrtime() - t_start) / 1e6)
+  -- Opening a table is three round-trips: the SELECT, the primary keys, and the
+  -- pagination COUNT. All three run under one spinner. With only the SELECT
+  -- covered, the float vanished and the editor then froze through the other two
+  -- before the grid ever appeared -- which reads as the plugin hanging.
+  local fetched, total_rows
+  ui.blocking("  querying " .. short_label .. "...", function()
+    fetched = fetch_refresh(conn, query_sql, table_name_arg)
+    if not fetched.result then return end
+    local count_result = db.query(query.build_count_sql(spec), conn)
+    if count_result and count_result.rows[1] then
+      total_rows = tonumber(count_result.rows[1][1]) or 0
+    end
   end)
+
+  local result = fetched.result
   if not result then
-    vim.notify("Grip: " .. (qerr or "query failed"), vim.log.levels.ERROR)
+    vim.notify("Grip: " .. (fetched.err or "query failed"), vim.log.levels.ERROR)
     return
   end
-
-  -- Empty result: adapter may not return columns. Fetch from table schema.
-  if (#result.columns == 0) and table_name_arg then
-    local col_info = db.get_column_info(table_name_arg, conn)
-    if col_info then
-      for _, ci in ipairs(col_info) do
-        table.insert(result.columns, ci.column_name)
-      end
-    end
-  end
-
-  -- Fetch primary keys if we have a table name
-  result.readonly = db.is_readonly(conn)
-  if table_name_arg and not result.readonly then
-    local pks, _ = db.get_primary_keys(table_name_arg, conn)
-    result.primary_keys = pks or {}
-  else
-    result.primary_keys = {}
-  end
-
-  result.table_name = table_name_arg
-  result.url = conn
-  result.sql = query_sql
+  local elapsed_ms = fetched.elapsed_ms
   result.elapsed_ms = elapsed_ms
 
   local history = require("dadbod-grip.history")
@@ -1003,7 +1019,14 @@ function M.open(arg, url, opts)
   local state = data.new(result)
 
   -- Open the view
-  local view_opts = vim.tbl_extend("force", { max_col_width = OPTS.max_col_width, elapsed_ms = elapsed_ms }, opts or {})
+  -- query_spec/total_rows go in up front so the first render already draws the
+  -- page counter; without them the grid had to be rendered a second time.
+  local view_opts = vim.tbl_extend("force", {
+    max_col_width = OPTS.max_col_width,
+    elapsed_ms    = elapsed_ms,
+    query_spec    = spec,
+    total_rows    = total_rows,
+  }, opts or {})
   local bufnr = view.open(state, conn, query_sql, view_opts)
 
   -- Auto-sync query pad with the current grid query (passive background update).
@@ -1021,16 +1044,10 @@ function M.open(arg, url, opts)
   if session then
     -- For file-as-table, store the file path so the schema sidebar can show columns
     if file_path then session.file_path = file_path end
+    -- Both were handed to view.open() above and are already on the session; the
+    -- assignments stay so a caller that reuses an existing buffer still gets them.
     session.query_spec = spec
-    -- Run count query for pagination
-    local count_sql = query.build_count_sql(spec)
-    local count_result = db.query(count_sql, conn)
-    if count_result and count_result.rows[1] then
-      session.total_rows = tonumber(count_result.rows[1][1]) or 0
-      -- Re-render: view.open() rendered before total_rows was set, so the status bar
-      -- showed "N rows" instead of "Page X/Y (N rows)". Render again now that we have it.
-      M._render_if_visible(bufnr)
-    end
+    session.total_rows = total_rows
     -- Auto-fetch column info for conditional formatting
     if table_name_arg and not session._column_info then
       vim.schedule(function()
@@ -1060,25 +1077,33 @@ function M.open(arg, url, opts)
       local s = view._sessions[bid]
       if not s then return end
 
-      -- Run count query for pagination
-      local count_sql = query.build_count_sql(new_spec)
-      local count_result = db.query(count_sql, conn)
-      if count_result and count_result.rows[1] then
-        s.total_rows = tonumber(count_result.rows[1][1]) or 0
-      end
-
-      -- Clamp page to valid range
-      if s.total_rows then
-        local total_pages = math.max(1, math.ceil(s.total_rows / new_spec.page_size))
-        if new_spec.page > total_pages then
-          new_spec = query.set_page(new_spec, total_pages)
+      -- Sort / filter / page changes are two round-trips (COUNT then the page
+      -- itself). Both run inside one spinner: do_refresh's own float would
+      -- otherwise only cover the second, leaving the COUNT looking like a hang.
+      local new_sql, page_fetch
+      ui.blocking("  querying " .. spinner_label(table_name_arg) .. "...", function()
+        -- Run count query for pagination
+        local count_sql = query.build_count_sql(new_spec)
+        local count_result = db.query(count_sql, conn)
+        if count_result and count_result.rows[1] then
+          s.total_rows = tonumber(count_result.rows[1][1]) or 0
         end
-      end
+
+        -- Clamp page to valid range
+        if s.total_rows then
+          local total_pages = math.max(1, math.ceil(s.total_rows / new_spec.page_size))
+          if new_spec.page > total_pages then
+            new_spec = query.set_page(new_spec, total_pages)
+          end
+        end
+
+        new_sql = query.build_sql(new_spec)
+        page_fetch = fetch_refresh(conn, new_sql, table_name_arg)
+      end)
 
       s.query_spec = new_spec
-      local new_sql = query.build_sql(new_spec)
       s.query_sql = new_sql
-      do_refresh(bid, conn, new_sql, table_name_arg)
+      apply_refresh(bid, page_fetch)
     end,
     on_apply = function(bid)
       do_apply(bid, conn)
