@@ -54,6 +54,55 @@ test("resolve_api_key: ollama returns empty string (no key needed)", function()
   eq(key, "", "ollama needs no key")
 end)
 
+test("resolve_api_key: cmd script is delivered through stdin", function()
+  local orig_system = vim.system
+  local captured_args, captured_opts
+  vim.system = function(args, opts)
+    captured_args, captured_opts = args, opts
+    return { wait = function() return { code = 0, stdout = "from-command\n" } end }
+  end
+  ai.setup({ api_key = "cmd:printf from-command" })
+  local ok, key = pcall(ai.resolve_api_key, "openai")
+  ai.setup({})
+  vim.system = orig_system
+
+  assert(ok, key)
+  eq(key, "from-command", "command output")
+  eq(vim.inspect(captured_args), vim.inspect({ "sh", "-s" }), "constant shell argv")
+  eq(captured_opts.stdin, "printf from-command\n", "script on stdin")
+end)
+
+test("resolve_api_key: failed cmd does not reproduce the command", function()
+  local orig_system = vim.system
+  vim.system = function()
+    return { wait = function() return { code = 1, stdout = "", stderr = "failed" } end }
+  end
+  local secret_command = "printf command_secret_7f3c"
+  ai.setup({ api_key = "cmd:" .. secret_command })
+  local key, err = ai.resolve_api_key("openai")
+  ai.setup({})
+  vim.system = orig_system
+
+  eq(key, nil, "no key")
+  contains(err, "API key command failed", "actionable error")
+  assert(not err:find(secret_command, 1, true), "failed key command leaked into its error")
+end)
+
+test("resolve_api_key: cmd spawn failure is returned without reproducing the command", function()
+  local orig_system = vim.system
+  local secret_command = "printf spawn_secret_7f3c"
+  vim.system = function() error("ENOENT " .. secret_command) end
+  ai.setup({ api_key = "cmd:" .. secret_command })
+  local ok, key, err = pcall(ai.resolve_api_key, "openai")
+  ai.setup({})
+  vim.system = orig_system
+
+  assert(ok, key)
+  eq(key, nil, "no key")
+  eq(err, "API key command failed", "safe spawn failure")
+  assert(not err:find(secret_command, 1, true), "spawn failure leaked the key command")
+end)
+
 -- ── resolve_provider ─────────────────────────────────────────────────────────
 
 test("resolve_provider: explicit config wins", function()
@@ -99,9 +148,13 @@ test("_format_ddl_line: basic columns", function()
     { column_name = "name", data_type = "text", is_nullable = "YES" },
   }
   local result = ai._format_ddl_line("users", cols, {"id"}, {})
-  contains(result, "CREATE TABLE users", "table name")
-  contains(result, "id integer PK", "PK marker")
-  contains(result, "name text", "column type")
+  eq(result, "CREATE TABLE users (id integer PK, name text);",
+    "complete DDL has one PK marker")
+end)
+
+test("curl config quoting: escapes only curl's documented quoted-string controls", function()
+  eq(ai._curl_config_quote('a\\b"c\t\n\r\v'), '"a\\\\b\\"c\\t\\n\\r\\v"',
+    "curl config quoted string")
 end)
 
 test("_format_ddl_line: FK markers (test-style field names)", function()
@@ -276,7 +329,7 @@ end)
 -- refactoring around it, so any edit to its wording -- a doubled space, a
 -- reordered rule, a lost blank line -- could ship silently and quietly change
 -- every generated query. generate_sql is driven all the way down to the curl
--- argv here and the prompt is read back out of the JSON body that would have
+-- stdin here and the prompt is read back out of the JSON body that would have
 -- been POSTed: those are the exact bytes the provider receives.
 --
 -- Fixture notes: the provider is pinned to anthropic (its build_request puts
@@ -295,10 +348,13 @@ local function captured_prompt(question, url, existing_sql)
   })
   local orig_system = vim.system
   local orig_notify = vim.notify
-  local captured
+  local captured_args, captured_opts
   -- post_json passes its own completion callback, which is simply never
   -- invoked: the request is inspected, not answered.
-  vim.system = function(args) captured = args; return { wait = function() return {} end } end
+  vim.system = function(args, opts)
+    captured_args, captured_opts = args, opts
+    return { wait = function() return {} end }
+  end
   vim.notify = function() end
   ai.setup({ provider = "anthropic", api_key = "test-key", model = "pinned-model" })
 
@@ -312,12 +368,15 @@ local function captured_prompt(question, url, existing_sql)
 
   if not ok then error(err, 0) end
   assert(cb_err == nil, "generate_sql failed before building a request: " .. tostring(cb_err))
-  assert(captured, "curl was invoked")
-  local payload
-  for i, a in ipairs(captured) do
-    if a == "-d" then payload = captured[i + 1] end
-  end
-  assert(payload, "request body found in the curl argv")
+  assert(captured_args, "curl was invoked")
+  eq(vim.inspect(captured_args),
+    vim.inspect({ "curl", "--disable", "--silent", "--show-error", "--config", "-" }),
+    "curl argv")
+  local config = assert(captured_opts and captured_opts.stdin, "curl config delivered on stdin")
+  local quoted = assert(config:match("data%-binary%s*=%s*([^\n]+)"), "request body in curl config")
+  local payload = quoted:sub(2, -2):gsub("\\(.)", {
+    ['\\'] = '\\', ['"'] = '"', t = "\t", n = "\n", r = "\r", v = "\v",
+  })
   local body = vim.fn.json_decode(payload)
   return body.system, body.messages[1].content
 end
@@ -358,6 +417,99 @@ end)
 test("generate_sql: an empty editor query adds nothing to the prompt", function()
   local prompt = captured_prompt("oldest user", "test://prompt-snapshot-empty", "")
   eq(prompt, EXPECTED_PROMPT, "empty existing_sql must not open the existing-query block")
+end)
+
+test("generate_sql: transport errors never reproduce request secrets", function()
+  local restore = mock_ai_db({ { name = "users" } }, {
+    users = { { column_name = "private_schema_value", data_type = "text", is_nullable = "NO" } },
+  })
+  local orig_system = vim.system
+  local orig_notify = vim.notify
+  local key = "transport_key_secret_7f3c"
+  local question = "transport_prompt_secret_7f3c"
+  vim.notify = function() end
+  vim.system = function(_, _, callback)
+    callback({
+      code = 7,
+      stdout = "",
+      stderr = table.concat({ key, question, "private_schema_value" }, " "),
+    })
+    return {}
+  end
+  ai.setup({ provider = "anthropic", api_key = key })
+  local callback_done, callback_err = false, nil
+  ai.generate_sql(question, "test://safe-transport-error", function(_, err)
+    callback_done, callback_err = true, err
+  end)
+  assert(vim.wait(1000, function() return callback_done end, 1), "transport callback never fired")
+
+  ai.setup({})
+  vim.system = orig_system
+  vim.notify = orig_notify
+  restore()
+
+  contains(callback_err, "curl failed", "transport category retained")
+  for _, secret in ipairs({ key, question, "private_schema_value" }) do
+    assert(not callback_err:find(secret, 1, true), "transport error leaked " .. secret)
+  end
+end)
+
+test("generate_sql: curl spawn failures are delivered safely through the callback", function()
+  local restore = mock_ai_db({}, nil)
+  local orig_system = vim.system
+  local orig_notify = vim.notify
+  local spawn_secret = "spawn_error_request_secret_7f3c"
+  vim.notify = function() end
+  vim.system = function()
+    error("ENOENT " .. spawn_secret)
+  end
+  ai.setup({ provider = "anthropic", api_key = "test-key" })
+  local callback_done, callback_err = false, nil
+  local ok, thrown = pcall(ai.generate_sql, "question", "test://safe-spawn-error", function(_, err)
+    callback_done, callback_err = true, err
+  end)
+  assert(vim.wait(1000, function() return callback_done end, 1), "spawn-failure callback never fired")
+
+  ai.setup({})
+  vim.system = orig_system
+  vim.notify = orig_notify
+  restore()
+
+  assert(ok, thrown)
+  eq(callback_err, "Could not start curl", "safe spawn failure")
+  assert(not callback_err:find(spawn_secret, 1, true), "spawn failure leaked process error")
+end)
+
+test("generate_sql: API errors retain a safe type without reproducing the remote message", function()
+  local restore = mock_ai_db({}, nil)
+  local orig_system = vim.system
+  local orig_notify = vim.notify
+  local remote_secret = "remote_error_echoed_request_secret_7f3c"
+  vim.notify = function() end
+  vim.system = function(_, _, callback)
+    callback({
+      code = 0,
+      stdout = vim.fn.json_encode({
+        error = { type = "invalid_request_error", message = remote_secret },
+      }),
+      stderr = "",
+    })
+    return {}
+  end
+  ai.setup({ provider = "anthropic", api_key = "test-key" })
+  local callback_done, callback_err = false, nil
+  ai.generate_sql("question", "test://safe-api-error", function(_, err)
+    callback_done, callback_err = true, err
+  end)
+  assert(vim.wait(1000, function() return callback_done end, 1), "API error callback never fired")
+
+  ai.setup({})
+  vim.system = orig_system
+  vim.notify = orig_notify
+  restore()
+
+  eq(callback_err, "API error: invalid_request_error", "safe error type")
+  assert(not callback_err:find(remote_secret, 1, true), "remote error message leaked request content")
 end)
 
 -- ── _strip_fences ────────────────────────────────────────────────────────────
