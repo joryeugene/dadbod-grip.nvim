@@ -53,7 +53,7 @@ local function stub_blocking(msg, fn)
   depth = depth - 1
   local ok = table.remove(rets, 1)
   if not ok then error(rets[1], 0) end
-  return (table.unpack or unpack)(rets)
+  return unpack(rets)
 end
 ui.blocking = stub_blocking
 
@@ -93,9 +93,8 @@ local function open_grid(tbl)
   cleanup_grids()
   spins = {}
   grip.open(tbl, url, {})
-  for bufnr, session in pairs(view._sessions) do
-    return bufnr, session
-  end
+  local bufnr, session = next(view._sessions)
+  if bufnr then return bufnr, session end
   error("no grid session created for " .. tbl)
 end
 

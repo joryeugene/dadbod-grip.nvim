@@ -1080,7 +1080,7 @@ function M.open(arg, url, opts)
       -- Sort / filter / page changes are two round-trips (COUNT then the page
       -- itself). Both run inside one spinner: do_refresh's own float would
       -- otherwise only cover the second, leaving the COUNT looking like a hang.
-      local new_sql, fetched
+      local new_sql, page_fetch
       ui.blocking("  querying " .. spinner_label(table_name_arg) .. "...", function()
         -- Run count query for pagination
         local count_sql = query.build_count_sql(new_spec)
@@ -1098,12 +1098,12 @@ function M.open(arg, url, opts)
         end
 
         new_sql = query.build_sql(new_spec)
-        fetched = fetch_refresh(conn, new_sql, table_name_arg)
+        page_fetch = fetch_refresh(conn, new_sql, table_name_arg)
       end)
 
       s.query_spec = new_spec
       s.query_sql = new_sql
-      apply_refresh(bid, fetched)
+      apply_refresh(bid, page_fetch)
     end,
     on_apply = function(bid)
       do_apply(bid, conn)
