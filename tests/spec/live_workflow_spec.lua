@@ -103,5 +103,24 @@ test("all-row export is complete and atomically written", function()
   vim.fn.delete(path)
 end)
 
+if URL:match("^sqlserver://") or URL:match("^mssql://") then
+  test("SQL Server temporary tables share one submission but not the next", function()
+    local name = "##grip_live_temp_scope"
+    local result, err = db.query(table.concat({
+      "CREATE TABLE " .. name .. " (id INT NOT NULL);",
+      "GO",
+      "INSERT INTO " .. name .. " VALUES (7);",
+      "GO",
+      "SELECT id FROM " .. name .. ";",
+    }, "\n"), URL)
+    assert(result, err)
+    eq(tonumber(result.rows[1][1]), 7, "GO batches share one sqlcmd session")
+
+    local next_result, next_err = db.query("SELECT id FROM " .. name, URL)
+    assert(not next_result, "temporary table survived a new sqlcmd invocation")
+    assert(next_err and next_err ~= "", "missing-object error was not reported")
+  end)
+end
+
 print(string.format("\nlive_workflow_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

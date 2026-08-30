@@ -377,8 +377,9 @@ All commands are global and available after the plugin loads.
 
                                                                 *:GripQuery*
 :GripQuery [sql]
-  Open a SQL query pad. Optionally pre-fill with a SQL string. Press
-  <C-CR> to execute the buffer contents into a grip grid.
+  Open a SQL query pad. Optionally pre-fill with a SQL string. In normal or
+  insert mode, press <C-CR> to execute the blank-line-delimited SQL block
+  under the cursor into a grip grid.
 
                                                                  *:GripSave*
 :GripSave [name]
@@ -910,8 +911,8 @@ below existing SQL with a blank separator. The pad is only pre-filled when
 it is empty (or contains only the hint comment). Your work is never lost.
 
 `<C-CR>` in visual mode runs only the selected lines. In normal or insert
-mode it runs the full buffer. `gA` reads existing pad content and modifies
-it rather than generating from scratch.
+mode it runs the blank-line-delimited SQL block under the cursor. `gA` reads
+existing pad content and modifies it rather than generating from scratch.
 
 SQL completion is built in: table names, column names, aliases, and SQL
 keywords complete automatically as you type. In DuckDB federated sessions,
@@ -920,7 +921,7 @@ columns from all attached databases appear with schema-qualified names
 Works with nvim-cmp, blink.cmp, or standalone via `<C-Space>`.
 
 Query pad keymaps:
-  <C-CR>          Execute buffer contents into a grip grid (normal/insert)
+  <C-CR>          Execute the SQL block under the cursor (normal/insert)
   <C-CR>          Execute visual selection into a grip grid (visual mode)
   <S-CR>      Execute and always open result in a new split (never reuses
                   an existing grid, even an unpinned one)
@@ -1292,6 +1293,11 @@ and mssql:// accept these URL query parameters:
 
 server_certificate cannot be combined with trust_server_certificate=true
 and requires mandatory or strict encryption.
+
+Each SQL Server submission starts a new sqlcmd session. Create and use #temp
+or ##temp tables in the same submitted block or visual selection. GO-separated
+batches in one submission share that session, but temporary tables do not
+persist into the next submission.
 
 DuckDB federation: attach external databases via :GripAttach. Supports
 PostgreSQL (postgres_scanner), MySQL/MariaDB (mysql_scanner), SQLite

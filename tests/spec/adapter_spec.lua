@@ -70,9 +70,10 @@ end
 --- called with, so a test can inspect opts.env (e.g. a password delivered
 --- via the environment instead of argv).
 local function capture_system_call(stdout, fn)
-  local captured_args, captured_opts
+  local captured_args, captured_opts, call_count = nil, nil, 0
   local orig = vim.system
   vim.system = function(args, opts, cb)
+    call_count = call_count + 1
     captured_args = args
     captured_opts = opts
     local r = { stdout = stdout or "", stderr = "", code = 0 }
@@ -81,7 +82,7 @@ local function capture_system_call(stdout, fn)
   local ok, err = pcall(fn)
   vim.system = orig
   if not ok then error(err) end
-  return captured_args, captured_opts
+  return captured_args, captured_opts, call_count
 end
 
 local function with_executable(fn)
@@ -500,6 +501,24 @@ test("sqlserver query: builds sqlcmd args for non-interactive use", function()
     end
     eq(opts.env.SQLCMDPASSWORD, "pw", "password delivered via env instead")
     contains(opts.stdin, "SELECT 1", "query delivered via stdin")
+  end)
+end)
+
+test("sqlserver query: sends one complete multi-batch block in one invocation", function()
+  with_executable(function()
+    local block = table.concat({
+      "CREATE TABLE #grip_scope (id INT NOT NULL);",
+      "GO",
+      "INSERT INTO #grip_scope VALUES (7);",
+      "GO",
+      "SELECT id FROM #grip_scope;",
+    }, "\n")
+    local _, opts, calls = capture_system_call("id\n--\n7\n", function()
+      local result, err = sqlserver.query(block, "sqlserver://sa:pw@localhost/grip_test")
+      assert(result, err)
+    end)
+    eq(calls, 1, "one sqlcmd process")
+    contains(opts.stdin, block, "complete block delivered through one stdin")
   end)
 end)
 

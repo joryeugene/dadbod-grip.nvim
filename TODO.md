@@ -15,6 +15,5 @@ Shipped work belongs in `CHANGELOG.md`. Review this file after each release and 
 - Explain result sets and inherited queries with AI, and flag anomalies in profiling output.
 - Add pgvector rendering, similarity-query helpers, and vector index details.
 - Add Snowflake, BigQuery, Turso/libSQL, CockroachDB, ClickHouse, and Oracle adapters when a maintainer can test each against a real service.
-- Support SQL Server `##temp` tables across CLI invocations.
 - Add column reordering, bookmarked rows, saved grid views, and row pinning.
 - Explore Neon branches, cross-connection schema diff, data-lineage views, user scripting hooks, credential-free query bundles, and schema-change detection.
