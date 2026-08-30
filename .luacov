@@ -1,0 +1,4 @@
+return {
+  include = { "lua/dadbod%-grip/" },
+  exclude = { "tests/" },
+}

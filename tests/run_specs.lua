@@ -38,6 +38,10 @@ end
 os.exit = real_exit
 -- luacheck: pop
 
+-- Neovim's :qall does not run LuaCov's ordinary Lua-process finalizer, so CI
+-- must flush explicitly before either success or failure exits the editor.
+if vim.env.GRIP_COVERAGE == "1" then require("luacov.runner").shutdown() end
+
 print("═══════════════════════════════════")
 if any_failure then
   print("RESULT: SOME TESTS FAILED")

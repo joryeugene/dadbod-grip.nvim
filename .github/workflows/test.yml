@@ -1,37 +1,42 @@
 name: Tests
-on: [push, pull_request]
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      # Settings live in .luacheckrc. Catches missing requires read as globals,
-      # typo'd locals and shadowing — see tests/spec/globals_spec.lua for the
-      # bytecode-side check of the same class. tests/ is linted too: an unused
-      # local in a spec is often a result nothing asserted on.
-      - uses: lunarmodules/luacheck@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: lunarmodules/luacheck@cc089e3f65acdd1ef8716cc73a3eca24a6b845e4 # v1
         with:
           args: lua/ plugin/ lazy.lua tests/
 
-  test:
+  unit:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        neovim: ['v0.10.0', 'stable']
+        neovim: [v0.10.0, stable]
     steps:
-      - uses: actions/checkout@v4
-      - uses: extractions/setup-just@v3
-      - uses: rhysd/action-setup-vim@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1
         with:
           neovim: true
           version: ${{ matrix.neovim }}
-      # duckdb_federation, duckdb_native_schema and duckdb_federated_schema gate on
-      # this binary — 66 assertions that print SKIPPED without it while the runner
-      # still reports ALL TESTS PASSED. Pinned rather than floating: those specs
-      # assert on catalog and cross-database semantics that have changed across
-      # DuckDB minors, so a bump belongs in a commit of its own. To bump, change the
-      # version and replace the checksum with the new asset's sha256.
-      - name: Install DuckDB CLI
+      - name: Install test tools
+        run: sudo apt-get update && sudo apt-get install -y sqlite3 unzip
+      - name: Install pinned DuckDB CLI
         run: |
           curl -fsSL -o duckdb.zip \
             https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip
@@ -39,24 +44,11 @@ jobs:
             | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/duckdb"
           unzip -q duckdb.zip -d "$RUNNER_TEMP/duckdb"
-          rm duckdb.zip
           echo "$RUNNER_TEMP/duckdb" >> "$GITHUB_PATH"
-      # GITHUB_PATH only applies to later steps, so the check is its own step. It
-      # is not redundant with GRIP_REQUIRE_DUCKDB below: this one names the cause.
-      - name: Verify DuckDB is on PATH
-        run: duckdb --version
-      # The ATTACH prefix the adapter prepends to a query carries "INSTALL
-      # sqlite_scanner" with it, so on a runner with an empty ~/.duckdb the fetch
-      # from extensions.duckdb.org has to fit inside the 10s query timeout. When it
-      # doesn't, duckdb dies with code 124 and duckdb_federation_spec reports 11
-      # failures that have nothing to do with the commit under test. Installing it
-      # here leaves that in-query INSTALL a local no-op; the retries stop one slow
-      # fetch from failing the run, and a genuinely unreachable extension repo fails
-      # in this step, where the message says so.
-      - name: Pre-install the DuckDB sqlite scanner
+      - name: Pre-install DuckDB SQLite scanner
         run: |
           for attempt in 1 2 3; do
-            if duckdb -c "INSTALL sqlite_scanner; LOAD sqlite_scanner;"; then
+            if "$RUNNER_TEMP/duckdb/duckdb" -c "INSTALL sqlite_scanner; LOAD sqlite_scanner;"; then
               exit 0
             fi
             echo "sqlite_scanner install failed (attempt $attempt of 3)"
@@ -64,8 +56,112 @@ jobs:
           done
           exit 1
       - name: Run deterministic suite through the documented entry point
-        # Turns a missing duckdb/sqlite3 into a failure instead of a silent skip,
-        # so removing the step above can't quietly take those 66 assertions with it.
         env:
-          GRIP_REQUIRE_DUCKDB: '1'
+          GRIP_REQUIRE_DUCKDB: "1"
         run: just test
+
+  live:
+    name: live (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [postgresql-16, mysql-8.4, mariadb-11.8]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1
+        with:
+          neovim: true
+          version: stable
+      - name: Install database clients
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3 unzip postgresql-client default-mysql-client
+          curl -fsSL -o duckdb.zip \
+            https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip
+          echo "08c0ca117111fcede14239d0093792352befdc174218c344d232c13279643d05  duckdb.zip" \
+            | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/duckdb"
+          unzip -q duckdb.zip -d "$RUNNER_TEMP/duckdb"
+          echo "$RUNNER_TEMP/duckdb" >> "$GITHUB_PATH"
+      - name: Start and seed assigned database
+        run: |
+          case "${{ matrix.database }}" in
+            postgresql-16)
+              scanner=postgres_scanner
+              docker run -d --name grip-live-db -e POSTGRES_PASSWORD=grip \
+                -e POSTGRES_DB=grip_test -p 54329:5432 postgres:16-alpine
+              until PGPASSWORD=grip psql -h 127.0.0.1 -p 54329 -U postgres \
+                -d grip_test -c "SELECT 1" >/dev/null 2>&1; do sleep 2; done
+              PGPASSWORD=grip psql -h 127.0.0.1 -p 54329 -U postgres \
+                -d grip_test -f tests/seed_pg.sql
+              echo "GRIP_TEST_PG_URL=postgresql://postgres:grip@127.0.0.1:54329/grip_test" >> "$GITHUB_ENV"
+              echo "GRIP_REQUIRE_POSTGRES=1" >> "$GITHUB_ENV"
+              echo "GRIP_TEST_LIVE_URL=postgresql://postgres:grip@127.0.0.1:54329/grip_test" >> "$GITHUB_ENV"
+              echo "GRIP_TEST_DUCKDB_FEDERATION_URL=postgresql://postgres:grip@127.0.0.1:54329/grip_test" >> "$GITHUB_ENV"
+              ;;
+            mysql-8.4)
+              scanner=mysql_scanner
+              docker run -d --name grip-live-db -e MYSQL_ROOT_PASSWORD=grip \
+                -e MYSQL_DATABASE=grip_test -p 33306:3306 mysql:8.4
+              until mysql -h 127.0.0.1 -P 33306 -u root -pgrip \
+                -e "SELECT 1" >/dev/null 2>&1; do sleep 2; done
+              mysql -h 127.0.0.1 -P 33306 -u root -pgrip grip_test < tests/seed_mysql.sql
+              echo "GRIP_TEST_MYSQL_URL=mysql://root:grip@127.0.0.1:33306/grip_test" >> "$GITHUB_ENV"
+              echo "GRIP_EXPECT_MYSQL_FLAVOR=mysql-8.4" >> "$GITHUB_ENV"
+              echo "GRIP_REQUIRE_MYSQL=1" >> "$GITHUB_ENV"
+              echo "GRIP_TEST_LIVE_URL=mysql://root:grip@127.0.0.1:33306/grip_test" >> "$GITHUB_ENV"
+              echo "GRIP_TEST_DUCKDB_FEDERATION_URL=mysql://root:grip@127.0.0.1:33306/grip_test" >> "$GITHUB_ENV"
+              ;;
+            mariadb-11.8)
+              scanner=mysql_scanner
+              docker run -d --name grip-live-db -e MARIADB_ROOT_PASSWORD=grip \
+                -e MARIADB_DATABASE=grip_test -p 33306:3306 mariadb:11.8
+              until mysql -h 127.0.0.1 -P 33306 -u root -pgrip \
+                -e "SELECT 1" >/dev/null 2>&1; do sleep 2; done
+              mysql -h 127.0.0.1 -P 33306 -u root -pgrip grip_test < tests/seed_mysql.sql
+              echo "GRIP_TEST_MYSQL_URL=mariadb://root:grip@127.0.0.1:33306/grip_test" >> "$GITHUB_ENV"
+              echo "GRIP_EXPECT_MYSQL_FLAVOR=mariadb-11.8" >> "$GITHUB_ENV"
+              echo "GRIP_REQUIRE_MYSQL=1" >> "$GITHUB_ENV"
+              echo "GRIP_TEST_LIVE_URL=mariadb://root:grip@127.0.0.1:33306/grip_test" >> "$GITHUB_ENV"
+              echo "GRIP_TEST_DUCKDB_FEDERATION_URL=mysql://root:grip@127.0.0.1:33306/grip_test" >> "$GITHUB_ENV"
+              ;;
+          esac
+          duckdb -c "INSTALL sqlite_scanner; INSTALL $scanner;"
+          echo "GRIP_REQUIRE_LIVE=1" >> "$GITHUB_ENV"
+          echo "GRIP_REQUIRE_DUCKDB=1" >> "$GITHUB_ENV"
+          echo "GRIP_REQUIRE_DUCKDB_FEDERATION=1" >> "$GITHUB_ENV"
+      - name: Run full suite with assigned live database required
+        run: just test
+      - name: Show database logs on failure
+        if: failure()
+        run: docker logs grip-live-db
+      - name: Stop assigned database
+        if: always()
+        run: docker rm -f grip-live-db >/dev/null 2>&1 || true
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1
+        with:
+          neovim: true
+          version: stable
+      - name: Generate LuaCov report without a percentage gate
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3 luarocks
+          luarocks --tree "$RUNNER_TEMP/luarocks" --lua-version 5.1 install luacov 0.17.0-1
+          eval "$(luarocks --tree "$RUNNER_TEMP/luarocks" --lua-version 5.1 path)"
+          GRIP_COVERAGE=1 just test
+          "$RUNNER_TEMP/luarocks/bin/luacov"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: luacov-report
+          path: |
+            luacov.report.out
+            luacov.stats.out
+          if-no-files-found: error

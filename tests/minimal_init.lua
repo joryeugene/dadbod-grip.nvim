@@ -7,6 +7,12 @@ vim.g.grip_test_progpath = vim.v.progpath
 package.path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h")
   .. "/?.lua;" .. package.path
 
+if vim.env.GRIP_COVERAGE == "1" and not vim.g.grip_test_coverage_started then
+  vim.g.grip_test_coverage_started = true
+  local ok, err = pcall(require, "luacov")
+  if not ok then error("GRIP_COVERAGE=1 but LuaCov could not start: " .. tostring(err)) end
+end
+
 -- Neovim reports scheduled callback errors without making the headless process
 -- fail. That can turn a real async regression into "ALL TESTS PASSED". Install
 -- this once because a few focused specs source minimal_init.lua themselves.

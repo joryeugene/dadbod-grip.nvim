@@ -1,0 +1,60 @@
+name: SQL Server integration
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  sqlserver-2025:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1
+        with:
+          neovim: true
+          version: stable
+      - name: Start SQL Server 2025
+        env:
+          MSSQL_SA_PASSWORD: "Grip-ci-2025!"
+        run: |
+          docker run -d --name grip-sqlserver --hostname grip-sqlserver \
+            -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD="$MSSQL_SA_PASSWORD" \
+            -p 14339:1433 mcr.microsoft.com/mssql/server:2025-latest
+          until docker exec -e SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" grip-sqlserver \
+            /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -Q "SELECT 1" >/dev/null 2>&1; do
+            sleep 3
+          done
+      - name: Install host sqlcmd wrapper and seed
+        env:
+          MSSQL_SA_PASSWORD: "Grip-ci-2025!"
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          cp tests/fixtures/sqlcmd-docker-wrapper "$RUNNER_TEMP/bin/sqlcmd"
+          chmod +x "$RUNNER_TEMP/bin/sqlcmd"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" "$RUNNER_TEMP/bin/sqlcmd" \
+            -S localhost -U sa -C -Q "IF DB_ID('grip_test') IS NULL CREATE DATABASE grip_test"
+          SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" "$RUNNER_TEMP/bin/sqlcmd" \
+            -S localhost -U sa -C -d grip_test -i tests/seed_mssql.sql
+      - name: Run required SQL Server release scenarios
+        env:
+          GRIP_TEST_LIVE_URL: "sqlserver://sa:Grip-ci-2025!@localhost/grip_test?encrypt=optional&trust_server_certificate=true"
+          GRIP_REQUIRE_LIVE: "1"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3
+          just test
+      - name: Show SQL Server logs on failure
+        if: failure()
+        run: docker logs grip-sqlserver
+      - name: Stop SQL Server
+        if: always()
+        run: docker rm -f grip-sqlserver >/dev/null 2>&1 || true
