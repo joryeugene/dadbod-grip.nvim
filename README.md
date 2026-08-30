@@ -1,28 +1,28 @@
 # dadbod-grip.nvim
 
-<table><tr>
-<td valign="middle">
-<pre>
-D   ███████╗███████╗██╗███████╗
-A  ██╔═════╝██╔══██║██║██╔══██║
-D  ██║  ███╗██████╔╝██║███████║
-b  ██║   ██║██╔══██╗██║██╔════╝
-o  ╚██████╔╝██║  ██║██║██║
-d   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝
-</pre>
-<p>
+<p align="center">
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="docs/brand/dadbod-grip-wordmark-dark.svg">
+<source media="(prefers-color-scheme: light)" srcset="docs/brand/dadbod-grip-wordmark-light.svg">
+<img src="docs/brand/dadbod-grip-wordmark-light.svg" width="620" alt="Dadbod Grip">
+</picture>
+</p>
+
+<p align="center">
 <a href="https://jorypestorious.com/dadbod-grip-web/"><img src="https://img.shields.io/badge/docs-website-4ade80.svg" alt="Documentation"></a>&nbsp;
 <a href="https://github.com/joryeugene/dadbod-grip.nvim/blob/main/LICENSE"><img src="https://img.shields.io/github/license/joryeugene/dadbod-grip.nvim.svg" alt="MIT License"></a>&nbsp;
 <img src="https://img.shields.io/badge/Neovim-0.10%2B-green.svg" alt="Neovim 0.10+">&nbsp;
 <a href="https://github.com/joryeugene/dadbod-grip.nvim/actions/workflows/test.yml"><img src="https://github.com/joryeugene/dadbod-grip.nvim/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
 </p>
+
+<p align="center">
 <b>Dadbod Grip turns database tables into editable Vim buffers, with schema browsing, staged mutations, generated SQL, relationship navigation, and cross-database federation inside Neovim.</b>
-</td>
-<td align="center" valign="middle" width="180">
+</p>
+
+<p align="center">
 <img src="https://jorypestorious.com/dadbod-grip-web/mascot.gif" width="160" alt="Chonk, the Dadbod Grip mascot"><br>
 <sub><b>Chonk</b></sub>
-</td>
-</tr></table>
+</p>
 
 **Workflow.** Browse a schema, edit rows with Vim motions, follow foreign keys, and run saved SQL without leaving the editor.
 
@@ -214,6 +214,10 @@ Lazy should show the local directory instead of a cached release. The developmen
 
 Dadbod Grip works by itself and can also read vim-dadbod and vim-dadbod-ui connection variables. It is listed in [awesome-neovim](https://github.com/rockerBOO/awesome-neovim).
 
-## License and credit
+## Contributors
 
-Dadbod Grip is available under the [MIT License](LICENSE). Jory Pestorious maintains the project, and external contributors receive credit through their commits and pull requests.
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and open a focused pull request when you see something Dadbod Grip can do better.
+
+A special thank-you to [Gleb Yavorski (@GlebYavorski)](https://github.com/GlebYavorski).
+
+Dadbod Grip is available under the [MIT License](LICENSE), and I maintain the project.

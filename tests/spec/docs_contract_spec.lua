@@ -42,6 +42,27 @@ local changelog = read("CHANGELOG.md")
 local grid_help = read("lua/dadbod-grip/view.lua")
 local contributing = read("CONTRIBUTING.md")
 local security = read("SECURITY.md")
+local wordmark_light = read("docs/brand/dadbod-grip-wordmark-light.svg")
+local wordmark_dark = read("docs/brand/dadbod-grip-wordmark-dark.svg")
+
+local wordmark = table.concat({
+  "████▄  ▄████▄ ████▄  █████▄ ▄████▄ ████▄",
+  "██  ██ ██▄▄██ ██  ██ ██▄▄██ ██  ██ ██  ██",
+  "████▀  ██  ██ ████▀  ██▄▄█▀ ▀████▀ ████▀",
+  "         ▄████  █████▄  ██ █████▄",
+  "        ██  ▄▄▄ ██▄▄██▄ ██ ██▄▄█▀",
+  "         ▀███▀  ██   ██ ██ ██",
+}, "\n")
+
+local contributors = table.concat({
+  "## Contributors",
+  "",
+  "Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and open a focused pull request when you see something Dadbod Grip can do better.",
+  "",
+  "A special thank-you to [Gleb Yavorski (@GlebYavorski)](https://github.com/GlebYavorski).",
+  "",
+  "Dadbod Grip is available under the [MIT License](LICENSE), and I maintain the project.",
+}, "\n")
 
 test("public commands match lazy triggers and the help manual", function()
   grip.setup({})
@@ -59,8 +80,16 @@ test("public commands match lazy triggers and the help manual", function()
 end)
 
 test("README keeps the onboarding command path", function()
-  assert(readme:find("D   ███████╗███████╗██╗███████╗", 1, true),
-    "README Dadbod Grip wordmark missing")
+  assert(readme:find("docs/brand/dadbod-grip-wordmark-light.svg", 1, true),
+    "README light wordmark missing")
+  assert(readme:find("docs/brand/dadbod-grip-wordmark-dark.svg", 1, true),
+    "README dark wordmark missing")
+  assert(wordmark_light:find(wordmark, 1, true), "light wordmark changed")
+  assert(wordmark_dark:find(wordmark, 1, true), "dark wordmark changed")
+  local hero = assert(readme:match("^(.-)\n%*%*Workflow%.%*%*"))
+  assert(not hero:find("<table", 1, true), "README hero must remain table-free")
+  assert(hero:find("mascot.gif", 1, true), "README hero lost Chonk")
+  assert(readme:find(contributors, 1, true), "README contributor block changed")
   for _, name in ipairs({ "GripConnect", "GripStart", "Grip", "GripQuery" }) do
     assert(readme:find("`:" .. name, 1, true), "README onboarding missing :" .. name)
   end
