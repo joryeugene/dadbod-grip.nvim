@@ -1,7 +1,7 @@
 -- seed_mssql.sql: core SQL Server fixtures for dadbod-grip.
 -- Usage:
---   sqlcmd -S localhost,1433 -U sa -P '<password>' -Q "CREATE DATABASE grip_test"
---   sqlcmd -S localhost,1433 -U sa -P '<password>' -d grip_test -i tests/seed_mssql.sql
+--   SQLCMDPASSWORD='<password>' sqlcmd -S localhost,1433 -U sa -Q "CREATE DATABASE grip_test"
+--   SQLCMDPASSWORD='<password>' sqlcmd -S localhost,1433 -U sa -d grip_test -i tests/seed_mssql.sql
 --
 -- Covers read-only adapter smoke tests: tables, views, composite PKs,
 -- foreign keys, unicode, empty result sets, pagination-scale rows.

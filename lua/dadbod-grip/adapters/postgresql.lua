@@ -53,16 +53,13 @@ local function strip_password(url)
   return scheme .. user .. "@" .. host .. tail, pass
 end
 
---- argv for one psql invocation. Split out from psql() so the blocking and
---- non-blocking spawns run byte-identical command lines. The password never
---- appears here: strip_password removes it from the URL, and psql_env below
---- delivers it via PGPASSWORD instead, so it never shows up in a `ps` listing.
-local function psql_args(url, sql_str)
-  local stripped_url = strip_password(url)
-  return { "psql", stripped_url, "-X", "--no-password", "--csv", "-c", sql_str }
+--- Constant argv for one psql invocation. The connection URI and statement
+--- are delivered through PGDATABASE and stdin so neither appears in `ps`.
+local function psql_args()
+  return { "psql", "-X", "--no-password", "--csv" }
 end
 
---- opts.env for one psql invocation.
+--- opts.env for one psql invocation. PGDATABASE carries the password-free URI.
 ---
 --- PGPASSWORD carries whatever strip_password pulled out of the URL, decoded
 --- exactly once (see percent_decode above). It is omitted -- an empty table,
@@ -80,8 +77,8 @@ end
 --- @param url string
 --- @param opts table|nil  { readonly = boolean }
 local function psql_env(url, opts)
-  local env = {}
-  local _, pass = strip_password(url)
+  local stripped_url, pass = strip_password(url)
+  local env = { PGDATABASE = stripped_url }
   if pass then env.PGPASSWORD = percent_decode(pass) end
   if opts and opts.readonly then
     env.PGOPTIONS = "-c default_transaction_read_only=on"
@@ -116,9 +113,9 @@ function M.readonly_caveat(url)
 end
 
 local function psql(url, sql_str, timeout_ms)
-  return adapters.run_cmd(psql_args(url, sql_str),
+  return adapters.run_cmd(psql_args(),
     timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
-    { env = psql_env(url, adapters.session_opts()) })
+    { stdin = sql_str, env = psql_env(url, adapters.session_opts()) })
 end
 
 local function split_routine_name(routine_name)
@@ -371,11 +368,11 @@ end
 --- Calls callback(tables), or callback(nil) when psql fails.
 --- Used to pre-warm the completion cache on connection switch / GripAttach.
 function M.get_schema_batch_async(url, callback)
-  adapters.run_cmd_async(psql_args(url, SCHEMA_BATCH_SQL),
+  adapters.run_cmd_async(psql_args(),
     adapters.configured_timeout(DEFAULT_TIMEOUT), function(stdout, _, code)
       if code ~= 0 then callback(nil); return end
       callback(parse_schema_batch(stdout))
-    end, { env = psql_env(url, adapters.session_opts()) })
+    end, { stdin = SCHEMA_BATCH_SQL, env = psql_env(url, adapters.session_opts()) })
 end
 
 function M.explain(sql_str, url)
@@ -651,8 +648,8 @@ end
 --- Ping the server by running SELECT 1. Returns true on success, false on any error.
 function M.ping(url)
   if vim.fn.executable("psql") == 0 then return false end
-  local _, _, code = adapters.run_cmd(psql_args(url, "SELECT 1"), 5000,
-    { env = psql_env(url, adapters.session_opts()) })
+  local _, _, code = adapters.run_cmd(psql_args(), 5000,
+    { stdin = "SELECT 1", env = psql_env(url, adapters.session_opts()) })
   return code == 0
 end
 

@@ -65,18 +65,8 @@ local function split_table_name(table_name, default_schema)
   return sql_util.split_table_name(table_name, default_schema or "dbo")
 end
 
---- Build the sqlcmd argv. A nil `sql_str` builds a connection-only argv whose
---- statements come from stdin (see sqlcmd_batch).
---- `opts.nocount` (default true) controls whether `SET NOCOUNT ON` is prefixed:
---- `query` wants it (so "(N rows affected)" doesn't pollute the result grid),
---- `execute` needs it off (so that same message is present for row-count parsing).
---- Split out from sqlcmd() so the blocking and non-blocking spawns run
---- byte-identical command lines.
-local function sqlcmd_args(parsed, sql_str, opts)
-  opts = opts or {}
-  local nocount = opts.nocount
-  if nocount == nil then nocount = true end
-
+--- Build connection-only argv. Statements always arrive through stdin.
+local function sqlcmd_args(parsed)
   local server = parsed.host or "127.0.0.1"
   if parsed.port and parsed.port ~= "" then
     server = server .. "," .. parsed.port
@@ -102,15 +92,6 @@ local function sqlcmd_args(parsed, sql_str, opts)
     args[#args + 1] = parsed.server_certificate
   end
 
-  -- No sql_str means the statements arrive on stdin (GO-separated batches), so
-  -- there is no -Q at all.
-  if sql_str then
-    args[#args + 1] = "-Q"
-    local session = "SET QUOTED_IDENTIFIER ON;\n"
-    if nocount then session = session .. "SET NOCOUNT ON;\n" end
-    args[#args + 1] = session .. sql_str
-  end
-
   if parsed.dbname and parsed.dbname ~= "" then
     table.insert(args, 4, parsed.dbname)
     table.insert(args, 4, "-d")
@@ -126,6 +107,14 @@ local function sqlcmd_args(parsed, sql_str, opts)
   return args
 end
 
+--- Prefix the session settings required by ordinary query execution.
+local function sqlcmd_stdin(sql_str, opts)
+  opts = opts or {}
+  local session = "SET QUOTED_IDENTIFIER ON;\n"
+  if opts.nocount ~= false then session = session .. "SET NOCOUNT ON;\n" end
+  return session .. sql_str
+end
+
 --- opts.env for one sqlcmd invocation: SQLCMDPASSWORD carrying the password so
 --- it never appears in argv (visible via `ps`) -- the env-var equivalent of the
 --- -P flag this replaces. No percent-decoding, same verbatim contract as
@@ -139,16 +128,16 @@ end
 
 --- Build and run the sqlcmd command, blocking.
 local function sqlcmd(parsed, sql_str, timeout_ms, opts)
-  return adapters.run_cmd(sqlcmd_args(parsed, sql_str, opts),
+  return adapters.run_cmd(sqlcmd_args(parsed),
     timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
-    { env = sqlcmd_env(parsed) })
+    { stdin = sqlcmd_stdin(sql_str, opts), env = sqlcmd_env(parsed) })
 end
 
 --- Run GO-separated batches by feeding them to sqlcmd on stdin. `-Q` can only
 --- carry one batch, and SET SHOWPLAN_TEXT has to be alone in its own.
 local function sqlcmd_batch(parsed, batches, timeout_ms)
   local script = table.concat(batches, "\nGO\n") .. "\nGO\n"
-  return adapters.run_cmd(sqlcmd_args(parsed, nil),
+  return adapters.run_cmd(sqlcmd_args(parsed),
     timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
     { stdin = script, env = sqlcmd_env(parsed) })
 end
@@ -270,7 +259,7 @@ local function run_query_async(sql_str, url, timeout_ms, callback)
     return
   end
 
-  adapters.run_cmd_async(sqlcmd_args(parsed, normalize_query_sql(sql_str)),
+  adapters.run_cmd_async(sqlcmd_args(parsed),
     timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
     function(stdout, stderr, code)
       if code ~= 0 then
@@ -278,7 +267,7 @@ local function run_query_async(sql_str, url, timeout_ms, callback)
         return
       end
       callback(parse_sqlcmd_table(stdout), nil)
-    end, { env = sqlcmd_env(parsed) })
+    end, { stdin = sqlcmd_stdin(normalize_query_sql(sql_str)), env = sqlcmd_env(parsed) })
 end
 
 function M.query(sql_str, url)
@@ -612,7 +601,7 @@ function M.get_table_stats(table_name, url)
 end
 
 --- SHOWPLAN_TEXT has to be the only statement in its batch, so the plan cannot
---- go through run_query's single -Q string (which also prefixes SET NOCOUNT ON):
+--- go through run_query's single stdin script (which also prefixes SET NOCOUNT ON):
 --- the server answers every such attempt with "The SET SHOWPLAN statements must
 --- be the only statements in the batch". Two GO-separated batches on stdin.
 function M.explain(sql_str, url)
@@ -644,6 +633,7 @@ M._parse_url = parse_url
 M._parse_sqlcmd_table = parse_sqlcmd_table
 M._sqlcmd_args = sqlcmd_args
 M._sqlcmd_env = sqlcmd_env
+M._sqlcmd_stdin = sqlcmd_stdin
 M._normalize_query_sql = normalize_query_sql
 
 return M

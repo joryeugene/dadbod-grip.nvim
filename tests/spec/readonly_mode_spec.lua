@@ -48,31 +48,19 @@ test("postgres ro still delivers the password out of band", function()
   eq(env.PGPASSWORD, "s3cr3t", "PGPASSWORD survives alongside PGOPTIONS")
 end)
 
-test("mysql merges rather than duplicates --init-command", function()
+test("mysql read-only session setup shares stdin with sql_mode", function()
   local my = require("dadbod-grip.adapters.mysql")
-  local args = my._mysql_args({ host = "h" }, "select 1", { readonly = true })
-  local n = 0
-  for _, a in ipairs(args) do
-    if tostring(a):match("^%-%-init%-command=") then n = n + 1 end
-  end
-  eq(n, 1, "exactly one --init-command (a second one would overwrite the first)")
-  local found = false
-  for _, a in ipairs(args) do
-    if tostring(a):find("TRANSACTION READ ONLY", 1, true)
-       and tostring(a):find("ANSI_QUOTES", 1, true) then found = true end
-  end
-  assert(found, "both the sql_mode and the read-only statement survive the merge")
+  local stdin = my._mysql_stdin("select 1", { readonly = true })
+  assert(stdin:find("TRANSACTION READ ONLY", 1, true), "read-only session statement")
+  assert(stdin:find("ANSI_QUOTES", 1, true), "sql_mode session statement")
+  assert(stdin:find("select 1", 1, true), "query follows session setup")
 end)
 
-test("mysql rw leaves the init-command alone", function()
+test("mysql rw stdin omits the read-only statement", function()
   local my = require("dadbod-grip.adapters.mysql")
-  local args = my._mysql_args({ host = "h" }, "select 1", {})
-  for _, a in ipairs(args) do
-    assert(not tostring(a):find("TRANSACTION READ ONLY", 1, true),
-      "no read-only statement in rw, got: " .. tostring(a))
-  end
-  eq(args[3], "--init-command=SET sql_mode='ANSI_QUOTES,NO_BACKSLASH_ESCAPES'",
-    "rw argv is byte-identical to what it was before read-only mode existed")
+  local stdin = my._mysql_stdin("select 1", {})
+  assert(not stdin:find("TRANSACTION READ ONLY", 1, true), "no read-only statement in rw")
+  assert(stdin:find("ANSI_QUOTES", 1, true), "rw still sets sql_mode")
 end)
 
 test("duckdb never passes -readonly for :memory:", function()
@@ -116,7 +104,7 @@ end)
 
 test("sqlite never passes -readonly for a missing file", function()
   local sq = require("dadbod-grip.adapters.sqlite")
-  local args = sq._sqlite3_args("/nonexistent/db.sqlite", "select 1", { readonly = true })
+  local args = sq._sqlite3_args("/nonexistent/db.sqlite", { readonly = true })
   for _, a in ipairs(args) do
     assert(a ~= "-readonly", "-readonly would turn create-on-open into an error")
   end
@@ -126,18 +114,17 @@ test("sqlite passes -readonly for an existing file", function()
   local sq = require("dadbod-grip.adapters.sqlite")
   local f = vim.fn.tempname() .. ".sqlite"
   vim.fn.writefile({ "" }, f)
-  local args = sq._sqlite3_args(f, "select 1", { readonly = true })
+  local args = sq._sqlite3_args(f, { readonly = true })
   local found = false
   for i, a in ipairs(args) do
     if a == "-readonly" then
       found = true
       -- sqlite3 takes its options before the database file.
-      assert(i < #args - 1, "-readonly must precede the db path and the statement")
+      assert(i < #args, "-readonly must precede the db path")
     end
   end
   assert(found, "-readonly applied to an existing file")
-  eq(args[#args - 1], f, "db path still second-to-last")
-  eq(args[#args], "select 1", "statement still last")
+  eq(args[#args], f, "db path remains the final argv element")
   vim.fn.delete(f)
 end)
 
@@ -145,9 +132,9 @@ test("sqlite rw argv is unchanged", function()
   local sq = require("dadbod-grip.adapters.sqlite")
   local f = vim.fn.tempname() .. ".sqlite"
   vim.fn.writefile({ "" }, f)
-  eq(table.concat(sq._sqlite3_args(f, "select 1", {}), "|"),
-    table.concat({ "sqlite3", "-init", "", "-csv", "-header", f, "select 1" }, "|"),
-    "rw argv is byte-identical to what it was before read-only mode existed")
+  eq(table.concat(sq._sqlite3_args(f, {}), "|"),
+    table.concat({ "sqlite3", "-init", "", "-csv", "-header", f }, "|"),
+    "rw argv contains only client flags and the database path")
   vim.fn.delete(f)
 end)
 
@@ -409,7 +396,7 @@ test("a db.* call landing inside a blocking spawn leaves the outer call's mode a
       for _, a in ipairs(args) do
         if a == "-readonly" then ro = true end
       end
-      table.insert(spawns, { ro = ro, file = (args[#args - 1] or ""):match("([^/]+)$") or "?" })
+      table.insert(spawns, { ro = ro, file = (args[#args] or ""):match("([^/]+)$") or "?" })
       return orig(args, timeout_ms, opts)
     end
 

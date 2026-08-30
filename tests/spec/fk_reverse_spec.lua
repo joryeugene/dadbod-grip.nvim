@@ -148,8 +148,9 @@ end)
 local function capture_system(stdout, fn)
   local captured
   local orig = vim.system
-  vim.system = function(args, _opts, cb)
+  vim.system = function(args, opts, cb)
     captured = args
+    captured._stdin = opts and opts.stdin
     local r = { stdout = stdout or "", stderr = "", code = 0 }
     if cb then cb(r) else return { wait = function() return r end } end
   end
@@ -172,7 +173,7 @@ test("postgres: reverse FK SQL filters on referenced table in one query", functi
     eq(refs[1].ref_column, "id", "referenced column")
   end)
   truthy(args, "psql invoked")
-  local sql_arg = args[#args]
+  local sql_arg = args._stdin
   contains(sql_arg, "FOREIGN KEY", "constraint type filter")
   contains(sql_arg, "ccu.table_name = 'users'", "filters on referenced table")
   contains(sql_arg, "ccu.table_schema = 'public'", "filters on referenced schema")
@@ -210,7 +211,7 @@ test("mysql: reverse FK SQL filters on REFERENCED_TABLE_NAME", function()
     eq(refs[1].column, "user_id", "child column")
   end)
   truthy(args, "mysql invoked")
-  local sql_arg = args[#args]
+  local sql_arg = args._stdin
   contains(sql_arg, "REFERENCED_TABLE_NAME = 'users'", "filters on referenced table")
 end)
 

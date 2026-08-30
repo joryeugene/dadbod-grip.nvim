@@ -35,7 +35,7 @@ local function has_arg(args, flag, msg)
 end
 
 local function last_arg(args)
-  return args[#args]
+  return args._stdin or args[#args]
 end
 
 -- ── mock helpers ──────────────────────────────────────────────────────────────
@@ -54,8 +54,9 @@ end
 local function capture_system_args(stdout, fn)
   local captured
   local orig = vim.system
-  vim.system = function(args, _opts, cb)
+  vim.system = function(args, opts, cb)
     captured = args
+    captured._stdin = opts and opts.stdin
     local r = { stdout = stdout or "", stderr = "", code = 0 }
     if cb then cb(r) else return { wait = function() return r end } end
   end
@@ -484,11 +485,12 @@ test("sqlserver query: builds sqlcmd args for non-interactive use", function()
     has_arg(args, "-S", "sets server")
     has_arg(args, "-d", "sets database")
     has_arg(args, "-U", "sets user")
-    has_arg(args, "-Q", "sets query")
+    assert(not vim.tbl_contains(args, "-Q"), "query must not use -Q")
     for _, a in ipairs(args) do
       assert(not tostring(a):find("pw", 1, true), "password in argv: " .. tostring(a))
     end
     eq(opts.env.SQLCMDPASSWORD, "pw", "password delivered via env instead")
+    contains(opts.stdin, "SELECT 1", "query delivered via stdin")
   end)
 end)
 
@@ -581,14 +583,15 @@ test("mysql execute: DEFAULT VALUES is rewritten", function()
   with_executable(function()
     local captured_args
     local orig = vim.system
-    vim.system = function(a, _o, cb)
+    vim.system = function(a, o, cb)
       captured_args = a
+      captured_args._stdin = o and o.stdin
       local r = { stdout = "", stderr = "1 row affected", code = 0 }
       if cb then cb(r) else return { wait = function() return r end } end
     end
     mysql.execute("INSERT INTO t DEFAULT VALUES", "mysql://root@localhost/test")
     vim.system = orig
-    local sql_arg = captured_args[#captured_args]
+    local sql_arg = last_arg(captured_args)
     contains(sql_arg, "() VALUES ()", "DEFAULT VALUES rewrite")
     assert(not sql_arg:find("DEFAULT VALUES", 1, true), "DEFAULT VALUES should be gone")
   end)
@@ -598,14 +601,15 @@ test("mysql execute: non-DEFAULT-VALUES SQL unchanged", function()
   with_executable(function()
     local captured_args
     local orig = vim.system
-    vim.system = function(a, _o, cb)
+    vim.system = function(a, o, cb)
       captured_args = a
+      captured_args._stdin = o and o.stdin
       local r = { stdout = "", stderr = "1 row affected", code = 0 }
       if cb then cb(r) else return { wait = function() return r end } end
     end
     mysql.execute("INSERT INTO t (name) VALUES ('x')", "mysql://root@localhost/test")
     vim.system = orig
-    local sql_arg = captured_args[#captured_args]
+    local sql_arg = last_arg(captured_args)
     contains(sql_arg, "VALUES ('x')", "SQL unchanged")
   end)
 end)
@@ -614,14 +618,15 @@ test("mysql execute: appends SELECT ROW_COUNT() after stripping trailing semicol
   with_executable(function()
     local captured_args
     local orig = vim.system
-    vim.system = function(a, _o, cb)
+    vim.system = function(a, o, cb)
       captured_args = a
+      captured_args._stdin = o and o.stdin
       local r = { stdout = "ROW_COUNT()\n1\n", stderr = "", code = 0 }
       if cb then cb(r) else return { wait = function() return r end } end
     end
     mysql.execute("UPDATE t SET x=1;\n", "mysql://root@localhost/test")
     vim.system = orig
-    eq(captured_args[#captured_args], "UPDATE t SET x=1\n; SELECT ROW_COUNT();",
+    contains(last_arg(captured_args), "UPDATE t SET x=1\n; SELECT ROW_COUNT();",
       "one statement separator, comment-safe newline")
   end)
 end)
@@ -671,8 +676,9 @@ test("sqlite get_primary_keys: table name is quoted in PRAGMA", function()
   with_executable(function()
     local captured_args
     local orig = vim.system
-    vim.system = function(a, _o, cb)
+    vim.system = function(a, o, cb)
       captured_args = a
+      captured_args._stdin = o and o.stdin
       local r = { stdout = "", stderr = "", code = 0 }
       if cb then cb(r) else return { wait = function() return r end } end
     end
@@ -687,8 +693,9 @@ test("sqlite get_primary_keys: embedded quote is escaped", function()
   with_executable(function()
     local captured_args
     local orig = vim.system
-    vim.system = function(a, _o, cb)
+    vim.system = function(a, o, cb)
       captured_args = a
+      captured_args._stdin = o and o.stdin
       local r = { stdout = "", stderr = "", code = 0 }
       if cb then cb(r) else return { wait = function() return r end } end
     end
@@ -868,8 +875,9 @@ end)
 test("sqlite get_constraints: queries sqlite_master with table name", function()
   local captured_args
   local orig = vim.system
-  vim.system = function(a, _o, cb)
+  vim.system = function(a, o, cb)
     captured_args = a
+    captured_args._stdin = o and o.stdin
     local r = { stdout = "", stderr = "", code = 0 }
     if cb then cb(r) else return { wait = function() return r end } end
   end
@@ -985,41 +993,32 @@ end)
 
 -- ── MySQL sql_mode: NO_BACKSLASH_ESCAPES ─────────────────────────────────────
 
-test("mysql query: --init-command includes NO_BACKSLASH_ESCAPES", function()
+test("mysql query: stdin session setup includes NO_BACKSLASH_ESCAPES", function()
   with_executable(function()
-    local args = capture_system_args("id\n1\n", function()
+    local args, opts = capture_system_call("id\n1\n", function()
       mysql.query("SELECT 1", "mysql://root@localhost/test")
     end)
-    local init_cmd = nil
-    for _, v in ipairs(args) do
-      if type(v) == "string" and v:find("--init-command", 1, true) then
-        init_cmd = v; break
-      end
-    end
-    assert(init_cmd ~= nil, "must have --init-command arg")
-    contains(init_cmd, "NO_BACKSLASH_ESCAPES", "query sql_mode must include NO_BACKSLASH_ESCAPES")
+    assert(not table.concat(args, " "):find("--init-command", 1, true), "no init command in argv")
+    contains(opts.stdin, "NO_BACKSLASH_ESCAPES", "query sql_mode setup")
+    contains(opts.stdin, "SELECT 1", "query delivered via stdin")
   end)
 end)
 
-test("mysql execute: --init-command includes NO_BACKSLASH_ESCAPES", function()
+test("mysql execute: stdin session setup includes NO_BACKSLASH_ESCAPES", function()
   with_executable(function()
-    local captured_args
+    local captured_args, captured_opts
     local orig = vim.system
-    vim.system = function(a, _o, cb)
+    vim.system = function(a, o, cb)
       captured_args = a
+      captured_opts = o
       local r = { stdout = "", stderr = "1 row affected", code = 0 }
       if cb then cb(r) else return { wait = function() return r end } end
     end
     mysql.execute("UPDATE t SET x=1 WHERE id=1", "mysql://root@localhost/test")
     vim.system = orig
-    local init_cmd = nil
-    for _, v in ipairs(captured_args) do
-      if type(v) == "string" and v:find("--init-command", 1, true) then
-        init_cmd = v; break
-      end
-    end
-    assert(init_cmd ~= nil, "must have --init-command arg")
-    contains(init_cmd, "NO_BACKSLASH_ESCAPES", "execute sql_mode must include NO_BACKSLASH_ESCAPES")
+    assert(not table.concat(captured_args, " "):find("--init-command", 1, true), "no init command in argv")
+    contains(captured_opts.stdin, "NO_BACKSLASH_ESCAPES", "execute sql_mode setup")
+    contains(captured_opts.stdin, "UPDATE t SET x=1", "statement delivered via stdin")
   end)
 end)
 
@@ -1303,19 +1302,21 @@ local BATCH_ARGV_CASES = {
 }
 
 for _, case in ipairs(BATCH_ARGV_CASES) do
-  test(case.name .. " get_schema_batch_async: identical argv to the blocking path", function()
-    local sync_argv, async_argv
+  test(case.name .. " get_schema_batch_async: identical process input to the blocking path", function()
+    local sync_argv, sync_opts, async_argv, async_opts
     with_executable(function()
-      sync_argv = capture_system_args("", function()
+      sync_argv, sync_opts = capture_system_call("", function()
         case.mod.get_schema_batch(case.url)
       end)
-      async_argv = capture_system_args("", function()
+      async_argv, async_opts = capture_system_call("", function()
         await_batch(function(cb) case.mod.get_schema_batch_async(case.url, cb) end)
       end)
     end)
     assert(sync_argv ~= nil, case.name .. ": blocking path must spawn a process")
     assert(async_argv ~= nil, case.name .. ": async path must spawn a process")
     eq_argv(async_argv, sync_argv, case.name .. " async argv must match sync argv")
+    eq(async_opts.stdin, sync_opts.stdin, case.name .. " async stdin must match sync stdin")
+    assert(vim.deep_equal(async_opts.env, sync_opts.env), case.name .. " async env must match sync env")
   end)
 end
 

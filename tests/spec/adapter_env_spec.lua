@@ -66,12 +66,12 @@ test("run_cmd_async without opts still works", function()
   eq(out, "ok", "no-opts call unchanged")
 end)
 
-test("psql argv carries no password", function()
+test("psql argv carries no URI or SQL", function()
   local pg = require("dadbod-grip.adapters.postgresql")
   local args = pg._psql_args("postgresql://u:hunter2@h:5432/db", "select 1")
   for _, a in ipairs(args) do
-    assert(not tostring(a):find("hunter2", 1, true),
-      "password found in argv element: " .. tostring(a))
+    assert(not tostring(a):find("postgresql://", 1, true), "URI in argv: " .. tostring(a))
+    assert(not tostring(a):find("select 1", 1, true), "SQL in argv: " .. tostring(a))
   end
 end)
 
@@ -79,6 +79,7 @@ test("psql password goes to PGPASSWORD, percent-decoded", function()
   local pg = require("dadbod-grip.adapters.postgresql")
   local env = pg._psql_env("postgresql://u:pa%25ss%40word@h:5432/db")
   eq(env.PGPASSWORD, "pa%ss@word", "decoded exactly once")
+  eq(env.PGDATABASE, "postgresql://u@h:5432/db", "password-free URI carried through env")
 end)
 
 test("no password means no PGPASSWORD", function()
