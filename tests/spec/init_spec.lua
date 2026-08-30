@@ -71,6 +71,12 @@ test("is_queryable_file: .jsonl", function()
   eq(grip._is_queryable_file("/x.jsonl"), true)
 end)
 
+test("is_queryable_file: shared ORC, Arrow, and IPC extensions", function()
+  eq(grip._is_queryable_file("/x.orc"), true)
+  eq(grip._is_queryable_file("/x.arrow"), true)
+  eq(grip._is_queryable_file("/x.ipc"), true)
+end)
+
 test("is_queryable_file: .txt not supported", function()
   eq(grip._is_queryable_file("/x.txt"), false)
 end)

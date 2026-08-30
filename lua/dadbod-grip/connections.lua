@@ -74,22 +74,14 @@ local function new_connection_id(url)
   return "conn_" .. vim.fn.sha256(seed):sub(1, 24)
 end
 
--- Extensions that DuckDB can query directly (file-as-table).
-local LOCAL_FILE_EXTS = {
-  ".parquet", ".csv", ".tsv", ".json", ".ndjson", ".jsonl",
-  ".xlsx", ".orc", ".arrow", ".ipc",
-}
+local filetypes = require("dadbod-grip.filetypes")
 
 --- Detect if a URL or path points to a file DuckDB can query directly.
 local function is_file_url(url)
   if not url or url == "" then return false end
-  if url:match("^https?://") then return true end
-  if url:match("^s3://") then return true end
-  local lower = url:lower():gsub("[?#].*$", "")
-  for _, ext in ipairs(LOCAL_FILE_EXTS) do
-    if lower:sub(-#ext) == ext then return true end
-  end
-  return false
+  -- A bare S3 prefix is a supported GripOpen target and expands to a glob.
+  if url:match("^s3://") and not filetypes.has_supported_extension(url) then return true end
+  return filetypes.has_supported_extension(url)
 end
 
 --- Returns true when a connection maps to a local file that filereadable() can test.
@@ -135,7 +127,7 @@ local function scan_local_files()
   local cwd = vim.fn.getcwd()
   local result = {}
   local seen = {}
-  for _, ext in ipairs(LOCAL_FILE_EXTS) do
+  for _, ext in ipairs(filetypes.extensions) do
     -- Root-level files: display as bare filename
     local root_files = vim.fn.glob(cwd .. "/*" .. ext, false, true)
     for _, path in ipairs(root_files) do
@@ -893,21 +885,22 @@ function M.switch(url, name, conn_type, opts)
       if opts and opts.write    then open_opts.write    = true       end
       if opts and opts.watch_ms then open_opts.watch_ms = opts.watch_ms end
       local schema = require("dadbod-grip.schema")
+      local auto_sidebar = require("dadbod-grip").get_opts().open_sidebar
       -- Both round-trips under one preloader. open() runs a blocking() of its
       -- own for the grid query; nested, that relabels this float instead of
       -- closing it, so the screen stays covered until there is a grid to show.
       -- prefetch() goes first so the sidebar opened in the next tick is
       -- already populated rather than empty for a second beside a live grid.
       ui.blocking("opening " .. label .. "...", function()
-        schema.prefetch(url)
+        if auto_sidebar or schema.is_open() then schema.prefetch(url) end
         require("dadbod-grip").open(url, nil, open_opts)
       end)
       -- Open sidebar and query pad after the grid is placed. Nothing here
       -- blocks any more, so both land in a single repaint.
       vim.schedule(function()
-        if not schema.is_open() then
+        if not schema.is_open() and auto_sidebar then
           schema.toggle(url)
-        else
+        elseif schema.is_open() then
           schema.refresh(url)
         end
         require("dadbod-grip.query_pad").open(db_url)
@@ -969,6 +962,7 @@ function M.switch(url, name, conn_type, opts)
 
   vim.schedule(function()
     local schema = require("dadbod-grip.schema")
+    local auto_sidebar = require("dadbod-grip").get_opts().open_sidebar
 
     -- One preloader over the whole workspace. The table list is fetched here,
     -- before any of these windows exist, and the three panes are then built
@@ -976,11 +970,11 @@ function M.switch(url, name, conn_type, opts)
     -- layout. Built the other way round, each pane appeared empty and filled
     -- in a second later, which read as the plugin assembling itself on screen.
     ui.blocking("connecting to " .. label .. "...", function()
-      schema.prefetch(url)
+      if auto_sidebar or schema.is_open() then schema.prefetch(url) end
 
-      if not schema.is_open() then
+      if not schema.is_open() and auto_sidebar then
         schema.toggle(url)
-      else
+      elseif schema.is_open() then
         schema.refresh(url)
       end
 
@@ -991,7 +985,7 @@ function M.switch(url, name, conn_type, opts)
       query_pad.open(url)
 
       -- Focus sidebar so user can immediately browse tables
-      if schema.is_open() and schema.get_winid() then
+      if auto_sidebar and schema.is_open() and schema.get_winid() then
         vim.api.nvim_set_current_win(schema.get_winid())
       end
     end)

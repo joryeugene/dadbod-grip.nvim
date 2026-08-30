@@ -64,6 +64,15 @@ test("get_opts returns timeout", function()
   eq(grip.get_opts().timeout, 5000, "timeout")
 end)
 
+test("open_sidebar defaults true and can be disabled", function()
+  grip.setup({})
+  eq(grip.get_opts().open_sidebar, true, "default")
+  grip.setup({ open_sidebar = false })
+  eq(grip.get_opts().open_sidebar, false, "disabled")
+  grip.setup({})
+  eq(grip.get_opts().open_sidebar, true, "empty setup restores default")
+end)
+
 -- connections_path config
 
 test("connections_path defaults to nil", function()

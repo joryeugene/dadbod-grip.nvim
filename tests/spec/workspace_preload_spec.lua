@@ -103,5 +103,15 @@ test("switch: a real connection opens the complete prefetched workspace", functi
   assert(result.code == 0, (result.stdout or "") .. (result.stderr or ""))
 end)
 
+test("switch: open_sidebar=false opens the main workspace without a sidebar", function()
+  local result = vim.system({
+    vim.g.grip_test_progpath,
+    "--headless",
+    "-u", "tests/minimal_init.lua",
+    "-l", "tests/fixtures/workspace_no_sidebar_integration.lua",
+  }, { text = true }):wait()
+  assert(result.code == 0, (result.stdout or "") .. (result.stderr or ""))
+end)
+
 print(string.format("workspace_preload_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

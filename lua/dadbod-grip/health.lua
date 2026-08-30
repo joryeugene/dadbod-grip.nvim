@@ -15,7 +15,7 @@ function M.check()
   end
 
   -- Adapter CLIs (warn = feature degraded, not broken)
-  for _, cli in ipairs({ "psql", "sqlite3", "mysql", "duckdb" }) do
+  for _, cli in ipairs({ "psql", "sqlite3", "mysql", "duckdb", "sqlcmd" }) do
     if vim.fn.executable(cli) == 1 then
       vim.health.ok(cli .. " found")
     else
@@ -36,13 +36,13 @@ function M.check()
       found_ai = true
     end
   end
-  if not found_ai then
-    vim.health.warn("No AI provider key set (GripAsk SQL generation disabled)")
-  end
-
   -- Ollama (local AI, fully optional)
   if vim.fn.executable("ollama") == 1 then
     vim.health.ok("ollama found (local AI available)")
+    found_ai = true
+  end
+  if not found_ai then
+    vim.health.warn("No AI provider found (set an API key or install Ollama for GripAsk)")
   end
 end
 
