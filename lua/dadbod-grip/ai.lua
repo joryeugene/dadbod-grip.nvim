@@ -160,11 +160,13 @@ function M.resolve_api_key(provider_name)
       return nil, "Environment variable " .. var .. " is not set"
     elseif key:match("^cmd:") then
       local cmd = key:sub(5)
-      local result = vim.system({"sh", "-c", cmd}, { text = true }):wait()
+      local ok, process = pcall(vim.system, { "sh", "-s" }, { text = true, stdin = cmd .. "\n" })
+      if not ok then return nil, "API key command failed" end
+      local result = process:wait()
       if result.code == 0 and result.stdout ~= "" then
         return vim.trim(result.stdout)
       end
-      return nil, "Command failed: " .. cmd
+      return nil, "API key command failed"
     else
       return key
     end
@@ -383,6 +385,33 @@ end
 
 -- ── generation ────────────────────────────────────────────────────────────────
 
+--- Quote one value for curl's double-quoted config-file syntax.
+--- @param value any
+--- @return string
+local function curl_config_quote(value)
+  local escaped = tostring(value)
+  escaped = escaped:gsub("\\", "\\\\")
+  escaped = escaped:gsub('"', '\\"')
+  escaped = escaped:gsub("\t", "\\t")
+  escaped = escaped:gsub("\n", "\\n")
+  escaped = escaped:gsub("\r", "\\r")
+  escaped = escaped:gsub("\v", "\\v")
+  return '"' .. escaped .. '"'
+end
+M._curl_config_quote = curl_config_quote
+
+local function curl_config(req)
+  local lines = {
+    "request = \"POST\"",
+    "url = " .. curl_config_quote(req.url),
+  }
+  for _, header in ipairs(req.headers) do
+    lines[#lines + 1] = "header = " .. curl_config_quote(header)
+  end
+  lines[#lines + 1] = "data-binary = " .. curl_config_quote(vim.fn.json_encode(req.body))
+  return table.concat(lines, "\n") .. "\n"
+end
+
 --- POST a provider request with curl and hand the extracted text back.
 --- Every failure mode (transport, malformed JSON, API error payload, empty
 --- extraction) arrives as callback(nil, err); success as callback(text).
@@ -392,19 +421,11 @@ end
 --- @param empty_err string  message when the provider extracts nothing
 --- @param callback fun(text: string|nil, err: string|nil)
 local function post_json(req, provider, empty_err, callback)
-  local curl_args = { "curl", "-s", "-X", "POST" }
-  for _, h in ipairs(req.headers) do
-    table.insert(curl_args, "-H")
-    table.insert(curl_args, h)
-  end
-  table.insert(curl_args, "-d")
-  table.insert(curl_args, vim.fn.json_encode(req.body))
-  table.insert(curl_args, req.url)
-
-  vim.system(curl_args, { text = true }, function(result)
+  local curl_args = { "curl", "--disable", "--silent", "--show-error", "--config", "-" }
+  local ok = pcall(vim.system, curl_args, { text = true, stdin = curl_config(req) }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
-        callback(nil, "curl failed: " .. (result.stderr or "unknown error"))
+        callback(nil, "curl failed (exit " .. tostring(result.code or "unknown") .. ")")
         return
       end
 
@@ -416,8 +437,12 @@ local function post_json(req, provider, empty_err, callback)
 
       -- Check for API error
       if body.error then
-        local err_msg = type(body.error) == "table" and (body.error.message or "API error") or tostring(body.error)
-        callback(nil, err_msg)
+        local kind = type(body.error) == "table" and (body.error.type or body.error.code) or nil
+        if type(kind) == "string" and kind:match("^[%w_.-]+$") then
+          callback(nil, "API error: " .. kind)
+        else
+          callback(nil, "API error")
+        end
         return
       end
 
@@ -430,6 +455,9 @@ local function post_json(req, provider, empty_err, callback)
       callback(text)
     end)
   end)
+  if not ok then
+    vim.schedule(function() callback(nil, "Could not start curl") end)
+  end
 end
 
 --- Generate SQL from natural language. Async via curl.
