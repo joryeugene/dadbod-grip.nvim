@@ -20,12 +20,11 @@ jobs:
         neovim: ['v0.10.0', 'stable']
     steps:
       - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v3
       - uses: rhysd/action-setup-vim@v1
         with:
           neovim: true
           version: ${{ matrix.neovim }}
-      - name: Seed SQLite test database
-        run: sqlite3 tests/seed_sqlite.db < tests/seed_sqlite.sql
       # duckdb_federation, duckdb_native_schema and duckdb_federated_schema gate on
       # this binary — 66 assertions that print SKIPPED without it while the runner
       # still reports ALL TESTS PASSED. Pinned rather than floating: those specs
@@ -64,10 +63,9 @@ jobs:
             sleep 5
           done
           exit 1
-      - name: Run unit tests
+      - name: Run deterministic suite through the documented entry point
         # Turns a missing duckdb/sqlite3 into a failure instead of a silent skip,
         # so removing the step above can't quietly take those 66 assertions with it.
         env:
           GRIP_REQUIRE_DUCKDB: '1'
-        run: |
-          nvim --headless -u tests/minimal_init.lua -l tests/run_specs.lua
+        run: just test
