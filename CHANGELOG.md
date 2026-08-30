@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.10.2] - 2026-08-30
+
 ### Changed
 
 - Live PostgreSQL, MySQL, and MariaDB CI jobs now use Docker-assigned loopback ports discovered at
@@ -606,7 +608,8 @@ older tags are left in place so anyone pinned to them keeps working.
 - **joryeugene** — SQL Server adapter, PostgreSQL routines in the schema sidebar, focused ER diagram
   ([PR #17](https://github.com/joryeugene/dadbod-grip.nvim/pull/17)).
 
-[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.10.1...HEAD
+[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.10.2...HEAD
+[3.10.2]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.10.2
 [3.10.1]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.10.1
 [3.10.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.10.0
 [3.9.0]: https://github.com/joryeugene/dadbod-grip.nvim/releases/tag/v3.9.0
