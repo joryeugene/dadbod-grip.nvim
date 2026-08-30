@@ -10,24 +10,30 @@
 --     nvim --headless -u tests/minimal_init.lua -l tests/run_specs.lua
 
 local URL = vim.env.GRIP_TEST_PG_URL
+local REQUIRED = vim.env.GRIP_REQUIRE_POSTGRES == "1"
+
+local function unavailable(reason)
+  if REQUIRED then
+    error("pg_integration_spec: " .. reason .. " while GRIP_REQUIRE_POSTGRES=1")
+  end
+  print("SKIP: pg_integration_spec (" .. reason .. ")")
+  print("\npg_integration_spec: 0 passed, 0 failed (skipped)")
+end
 
 if not URL or URL == "" then
-  print("SKIP: pg_integration_spec (GRIP_TEST_PG_URL not set)")
-  print("\npg_integration_spec: 0 passed, 0 failed (skipped)")
+  unavailable("GRIP_TEST_PG_URL not set")
   return
 end
 
 local pg = require("dadbod-grip.adapters.postgresql")
 
 if vim.fn.executable("psql") == 0 then
-  print("SKIP: pg_integration_spec (psql CLI not found)")
-  print("\npg_integration_spec: 0 passed, 0 failed (skipped)")
+  unavailable("psql CLI not found")
   return
 end
 
 if not pg.ping(URL) then
-  print("SKIP: pg_integration_spec (cannot reach " .. URL .. ")")
-  print("\npg_integration_spec: 0 passed, 0 failed (skipped)")
+  unavailable("database is unreachable")
   return
 end
 
