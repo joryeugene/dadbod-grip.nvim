@@ -83,6 +83,7 @@ local function with_real_file(fn)
     is_open = function() return true end,
     refresh = function() end,
     toggle = function() end,
+    prefetch = function() return {} end,
     get_winid = function() return nil end,
     -- view.lua asks the sidebar where to place the grid.
     get_right_win = function() return nil end,
@@ -464,6 +465,31 @@ local function with_duckdb(label, fn)
   fn()
 end
 
+--- Drive the real process boundary without contacting a database service.
+--- The fake executable emits controlled stderr so redaction is tested after
+--- spawn, not against a string passed straight to the redactor.
+local function with_fake_duckdb(stderr, fn)
+  local dir = vim.fn.tempname() .. "_fake_duckdb"
+  local executable = dir .. "/duckdb"
+  vim.fn.mkdir(dir, "p")
+  vim.fn.writefile({
+    "#!/bin/sh",
+    "printf '%s\\n' \"$GRIP_FAKE_DUCKDB_STDERR\" >&2",
+    "exit 1",
+  }, executable)
+  assert(vim.fn.setfperm(executable, "rwx------") == 1, "could not create fake duckdb")
+
+  local path = vim.env.PATH
+  local fake_stderr = vim.env.GRIP_FAKE_DUCKDB_STDERR
+  vim.env.PATH = dir .. ":" .. (path or "")
+  vim.env.GRIP_FAKE_DUCKDB_STDERR = stderr
+  local ok, err = pcall(fn)
+  vim.env.PATH = path
+  vim.env.GRIP_FAKE_DUCKDB_STDERR = fake_stderr
+  vim.fn.delete(dir, "rf")
+  if not ok then error(err, 0) end
+end
+
 test("attach error: a password containing @ survives url_to_dsn and is fully masked", function()
   with_duckdb("@-in-password leak test", function()
     local duckdb = require("dadbod-grip.adapters.duckdb")
@@ -529,16 +555,11 @@ test("query error: an attachment that dies after attach cannot leak on the next 
 end)
 
 test("attach error: a motherduck token never reaches the message", function()
-  with_duckdb("motherduck token test", function()
-    local duckdb = require("dadbod-grip.adapters.duckdb")
-    -- Honest scope: DuckDB v1.5.5 rejects this before it echoes the DSN, so
-    -- this asserts the property (no token on screen) rather than proving the
-    -- mask fired. It is a forward guard against a binary that does echo -- and
-    -- unlike the composed-message test it replaces, it cannot pass by
-    -- construction.
-    local dsn = "md:analytics?motherduck_token=eyJhbGciOi_fake_token"
+  local duckdb = require("dadbod-grip.adapters.duckdb")
+  local dsn = "md:analytics?motherduck_token=eyJhbGciOi_fake_token"
+  with_fake_duckdb("Connection failed for " .. dsn, function()
     local err = duckdb.attach("duckdb::memory:", dsn, "mdtok")
-    duckdb.detach("duckdb::memory:", "mdtok")
+    assert(err, "the fake CLI failure must be returned")
     assert(not (err or ""):find("eyJhbGciOi_fake_token", 1, true),
       "no token in the message: " .. tostring(err))
   end)

@@ -370,6 +370,10 @@ function M.dismiss_float(opts)
   return close
 end
 
+--- The float owned by the outermost blocking() call, or nil when none is up.
+--- @type table|nil  { msg = string }
+local _spinner = nil
+
 --- Show an animated spinner float, run fn(), then clear the float.
 ---
 --- IMPORTANT: fn() must be synchronous OR use vim.wait() for async work.
@@ -385,10 +389,35 @@ end
 --- eventignore="all" suppresses plugin autocmds (WinNew/BufNew) that add
 --- 200-400ms overhead from noice/treesitter/nvim-cmp handlers.
 ---
+--- Calls nest: only the outermost one owns the float, and an inner call just
+--- relabels it for the duration of its own work. Closing the inner float would
+--- flush whatever the outer call has built so far to the terminal -- for the
+--- workspace that means a half-open sidebar over an empty content area, the
+--- exact flicker the spinner is there to cover.
+---
 --- @param msg string
 --- @param fn  function  must be synchronous or use vim.wait() internally
 --- @return    any       all return values from fn() forwarded
 function M.blocking(msg, fn)
+  -- table.pack/table.unpack are Lua 5.2+; LuaJIT is 5.1.
+  -- { pcall(fn) } => { ok, r1, r2, ... } or { false, errmsg }
+  -- table.unpack is nil on the LuaJIT Neovim embeds; probed so this keeps
+  -- working if Neovim ever moves to a 5.2+ VM, where bare `unpack` is gone.
+  -- luacheck: ignore 143
+  local unpack_ = table.unpack or unpack
+
+  -- Nested: borrow the float that is already up, restoring its message so the
+  -- outer call goes back to describing its own work when this one returns.
+  if _spinner then
+    local outer_msg = _spinner.msg
+    _spinner.msg = msg
+    local rets = { pcall(fn) }
+    local ok   = table.remove(rets, 1)
+    _spinner.msg = outer_msg
+    if not ok then error(rets[1], 2) end
+    return unpack_(rets)
+  end
+
   local frames = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
   local fi = 1
 
@@ -408,6 +437,10 @@ function M.blocking(msg, fn)
   })
   vim.o.eventignore = ei
 
+  -- Claimed only now: a nested call reaching this far would have had no float
+  -- to borrow, and every one after it must find a live window to relabel.
+  _spinner = { msg = msg }
+
   -- Flush to terminal NOW, before fn() runs. nvim__redraw is private API on
   -- purpose: there is no public equivalent that flushes from inside a blocking
   -- call (:redraw is a no-op while we hold the loop).
@@ -416,23 +449,26 @@ function M.blocking(msg, fn)
   -- Animate: timer fires during vim.system():wait() and vim.wait() event loop pumps.
   -- libuv timer callbacks are "fast events" - nvim API calls are forbidden there.
   -- vim.schedule_wrap defers the API work into the main loop, which pumps during wait().
+  -- Reads _spinner.msg, not the upvalue, so a nested call's label shows while
+  -- it runs.
   local timer = vim.uv.new_timer()
   timer:start(80, 80, vim.schedule_wrap(function()
     fi = (fi % #frames) + 1
     if vim.api.nvim_buf_is_valid(buf) then
       pcall(vim.api.nvim_buf_set_lines, buf, 0, -1, false,
-        { "", "  " .. frames[fi] .. " " .. msg, "" })
+        { "", "  " .. frames[fi] .. " " .. ((_spinner and _spinner.msg) or msg), "" })
       vim.api.nvim__redraw({ flush = true })
     end
   end))
 
-  -- table.pack/table.unpack are Lua 5.2+; LuaJIT is 5.1.
-  -- { pcall(fn) } => { ok, r1, r2, ... } or { false, errmsg }
   local rets = { pcall(fn) }
   local ok   = table.remove(rets, 1)
 
   timer:stop()
   timer:close()
+  -- Released before the close below: anything the cleanup triggers must see
+  -- no spinner rather than one that is about to vanish.
+  _spinner = nil
 
   -- Close float, suppressing autocmds again.
   ei = vim.o.eventignore
@@ -445,10 +481,7 @@ function M.blocking(msg, fn)
   vim.api.nvim__redraw({ flush = true })
 
   if not ok then error(rets[1], 2) end
-  -- table.unpack is nil on the LuaJIT Neovim embeds; probed so this keeps working
-  -- if Neovim ever moves to a 5.2+ VM, where the bare `unpack` global is gone.
-  -- luacheck: ignore 143
-  return (table.unpack or unpack)(rets)
+  return unpack_(rets)
 end
 
 return M

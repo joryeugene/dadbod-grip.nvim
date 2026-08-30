@@ -28,6 +28,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which drops everything after a leading `nil`, so work run inside it returns a single table
   (`{ result = ..., err = ... }`) rather than `nil, err` — otherwise the real db error is lost and
   the user is told "unknown error".
+- **Connecting assembled the workspace on screen, one empty pane at a time.** `schema.toggle()`
+  opened the sidebar split *before* `list_tables()`/`list_routines()`, and those block on a DB
+  round-trip that pumps the event loop — so the terminal repainted with an empty sidebar next to
+  an empty content area, held it for as long as the query took, then dropped the query pad in as
+  a third paint before anything had content. The "connected to …" toast fired first of all,
+  hanging alone over the blank layout. The schema is now fetched by the new `schema.prefetch(url)`
+  while no sidebar exists yet, and `connections.switch()` builds sidebar, welcome screen and query
+  pad inside a single `ui.blocking()` preloader with nothing blocking between them: the spinner
+  covers the old screen until the whole workspace is ready, and lifts on a finished layout. The
+  toast now follows it. `ui.blocking()` calls nest — an inner call relabels the float instead of
+  closing it, so the file-open path (which runs its own spinner for the grid query) no longer
+  flashes a half-built layout between the two.
+
 - **`F` and `X` dropped you out of an FK context without saying so.** An FK jump (`gf`, `gm`)
   scopes the grid with a WHERE clause of its own — `"categoryId" = 15` for "the CategoryVersion
   rows referencing Category 15". That clause lived in `query_spec.filters` indistinguishable from

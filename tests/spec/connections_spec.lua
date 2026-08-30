@@ -83,6 +83,9 @@ local function with_real_file(fn)
     refresh = function() end,
     toggle = function() end,
     get_winid = function() return nil end,
+    -- switch() prefetches the schema under the preloader, before it opens
+    -- any window; the double has to answer that call too.
+    prefetch = function() return {} end,
   }
   package.loaded["dadbod-grip.query_pad"] = { open = function() end }
   package.loaded["dadbod-grip.completion"] = { invalidate = function() end, warm_schema = function() end }
@@ -112,6 +115,13 @@ local function with_real_file(fn)
   vim.fn.delete(project_dir, "rf")
   vim.fn.delete(fake_home, "rf")
   if not ok then error(err) end
+end
+
+--- switch() reports which branch it took from inside a scheduled callback --
+--- it notifies after the workspace is on screen, not before it is built -- so
+--- the queue has to be flushed before the message can be read.
+local function flush_schedules()
+  vim.wait(100)
 end
 
 local function read_connections_json(dir)
@@ -210,6 +220,7 @@ test("switch: global file is consulted when no local match and no configured pat
 
     connections.switch("customscheme://host/db", nil, nil, {})
 
+    flush_schedules()
     assert(#notified > 0 and notified[1]:find("opening", 1, true),
       "type resolved from global file, file-open branch should have run: " .. vim.inspect(notified))
   end)
@@ -229,6 +240,7 @@ test("switch: global file is not consulted when connections_path is configured",
 
     connections.switch("customscheme://host/db", nil, nil, {})
 
+    flush_schedules()
     assert(#notified > 0 and notified[1]:find("connected to", 1, true),
       "global type must be ignored when connections_path is configured: " .. vim.inspect(notified))
   end)
@@ -246,6 +258,7 @@ test("switch: global file is not consulted when conn_type is already given", fun
 
     connections.switch("customscheme://host/db", nil, "postgresql", {})
 
+    flush_schedules()
     assert(#notified > 0 and notified[1]:find("connected to", 1, true),
       "explicit conn_type param must win over global lookup: " .. vim.inspect(notified))
   end)
@@ -267,6 +280,7 @@ test("switch: global file is not consulted when the type is already known locall
 
     connections.switch("customscheme://host/db", nil, nil, {})
 
+    flush_schedules()
     assert(#notified > 0 and notified[1]:find("connected to", 1, true),
       "locally-known type must win over global lookup: " .. vim.inspect(notified))
   end)
