@@ -111,10 +111,7 @@ jobs:
                 -d grip_test -c "SELECT 1" >/dev/null 2>&1; do sleep 2; done
               PGPASSWORD=grip psql -h 127.0.0.1 -p "$host_port" -U postgres \
                 -d grip_test -f tests/seed_pg.sql
-              echo "GRIP_TEST_PG_URL=postgresql://postgres:grip@127.0.0.1:$host_port/grip_test" >> "$GITHUB_ENV"
-              echo "GRIP_REQUIRE_POSTGRES=1" >> "$GITHUB_ENV"
               echo "GRIP_TEST_LIVE_URL=postgresql://postgres:grip@127.0.0.1:$host_port/grip_test" >> "$GITHUB_ENV"
-              echo "GRIP_TEST_DUCKDB_FEDERATION_URL=postgresql://postgres:grip@127.0.0.1:$host_port/grip_test" >> "$GITHUB_ENV"
               ;;
             mysql-8.4)
               scanner=mysql_scanner
@@ -124,11 +121,7 @@ jobs:
               until mysql -h 127.0.0.1 -P "$host_port" -u root -pgrip \
                 -e "SELECT 1" >/dev/null 2>&1; do sleep 2; done
               mysql -h 127.0.0.1 -P "$host_port" -u root -pgrip grip_test < tests/seed_mysql.sql
-              echo "GRIP_TEST_MYSQL_URL=mysql://root:grip@127.0.0.1:$host_port/grip_test" >> "$GITHUB_ENV"
-              echo "GRIP_EXPECT_MYSQL_FLAVOR=mysql-8.4" >> "$GITHUB_ENV"
-              echo "GRIP_REQUIRE_MYSQL=1" >> "$GITHUB_ENV"
               echo "GRIP_TEST_LIVE_URL=mysql://root:grip@127.0.0.1:$host_port/grip_test" >> "$GITHUB_ENV"
-              echo "GRIP_TEST_DUCKDB_FEDERATION_URL=mysql://root:grip@127.0.0.1:$host_port/grip_test" >> "$GITHUB_ENV"
               ;;
             mariadb-11.8)
               scanner=mysql_scanner
@@ -138,19 +131,12 @@ jobs:
               until mysql -h 127.0.0.1 -P "$host_port" -u root -pgrip \
                 -e "SELECT 1" >/dev/null 2>&1; do sleep 2; done
               mysql -h 127.0.0.1 -P "$host_port" -u root -pgrip grip_test < tests/seed_mysql.sql
-              echo "GRIP_TEST_MYSQL_URL=mariadb://root:grip@127.0.0.1:$host_port/grip_test" >> "$GITHUB_ENV"
-              echo "GRIP_EXPECT_MYSQL_FLAVOR=mariadb-11.8" >> "$GITHUB_ENV"
-              echo "GRIP_REQUIRE_MYSQL=1" >> "$GITHUB_ENV"
               echo "GRIP_TEST_LIVE_URL=mariadb://root:grip@127.0.0.1:$host_port/grip_test" >> "$GITHUB_ENV"
-              echo "GRIP_TEST_DUCKDB_FEDERATION_URL=mariadb://root:grip@127.0.0.1:$host_port/grip_test" >> "$GITHUB_ENV"
               ;;
           esac
           duckdb -c "INSTALL sqlite_scanner; INSTALL $scanner;"
-          echo "GRIP_REQUIRE_LIVE=1" >> "$GITHUB_ENV"
-          echo "GRIP_REQUIRE_DUCKDB=1" >> "$GITHUB_ENV"
-          echo "GRIP_REQUIRE_DUCKDB_FEDERATION=1" >> "$GITHUB_ENV"
       - name: Run full suite with assigned live database required
-        run: just test
+        run: just test-live "${{ matrix.database }}"
       - name: Show database logs on failure
         if: failure()
         run: docker logs grip-live-db

@@ -30,6 +30,14 @@ function M.quote_value(v)
   end
 end
 
+--- Wrap statements in the transaction syntax accepted by the target adapter.
+function M.wrap_transaction(statements, adapter_kind)
+  local begin_stmt = adapter_kind == "sqlserver"
+      and "SET XACT_ABORT ON;\nBEGIN TRANSACTION;" or "BEGIN;"
+  local commit_stmt = adapter_kind == "sqlserver" and "COMMIT TRANSACTION;" or "COMMIT;"
+  return begin_stmt .. "\n" .. table.concat(statements, ";\n") .. ";\n" .. commit_stmt
+end
+
 -- Quote a column or table identifier with double-quotes.
 function M.quote_ident(name)
   -- Split on . and quote each part: schema.table → "schema"."table"

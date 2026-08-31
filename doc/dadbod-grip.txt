@@ -515,6 +515,29 @@ All commands are global and available after the plugin loads.
     :GripFill 5      stage 5 rows
     :GripFill 50     maximum
 
+                                                             *:GripImport*
+:GripImport [!command]
+  Preview CSV, TSV, or JSON rows and stage them as pending INSERTs in the
+  current editable table grid. With no argument, reads the system clipboard.
+  With !command, runs the producer through the shell and reads its standard
+  output. The parent shell receives the script through stdin, but child
+  commands retain normal shell argument visibility. Pass credentials through
+  environment variables, stdin, or configuration files instead of command
+  arguments. The first CSV or TSV row supplies column names; JSON accepts one
+  object or an array of objects. Input columns map by exact name to the table.
+  Empty delimited fields and JSON null values stage SQL NULL. Unknown or
+  duplicate columns are rejected before the grid changes.
+
+  The preview shows the detected format, row count, and mapped columns. Answer
+  y to stage the whole batch as one undoable edit, then press a separately to
+  apply it. Cancelling, malformed input, or a failed producer stages nothing.
+
+  Examples: >
+    :GripImport
+    :GripImport !cat /tmp/new-users.csv
+    :GripImport !jq '.users' response.json
+<
+
                                                                *:GripStart*
 :GripStart
   Open the built-in demo database (Softrear Inc. Analyst Portal). Recreates

@@ -42,6 +42,9 @@ local changelog = read("CHANGELOG.md")
 local grid_help = read("lua/dadbod-grip/view.lua")
 local contributing = read("CONTRIBUTING.md")
 local security = read("SECURITY.md")
+local justfile = read("justfile")
+local test_workflow = read(".github/workflows/test.yml")
+local sqlserver_workflow = read(".github/workflows/sqlserver.yml")
 local wordmark_path = "docs/brand/dadbod-grip-wordmark.png"
 
 local contributors = table.concat({
@@ -161,6 +164,21 @@ test("TODO contains only active or unshipped work", function()
   assert(not todo:find("TOP N pagination", 1, true), "stale SQL Server pagination claim retained")
   assert(not todo:find("`##temp`", 1, true), "stateless SQL Server temp-table scope retained as product work")
   assert(not todo:find("GripFill", 1, true), "shipped GripFill work retained")
+  assert(not todo:find("Import CSV", 1, true), "shipped clipboard import retained")
+end)
+
+test("clipboard import documentation keeps its staging boundary", function()
+  assert(readme:find("`:GripImport`", 1, true), "README import entry missing")
+  assert(help:find(":GripImport [!command]", 1, true), "help import command missing")
+  assert(help:find("stage the whole batch as one undoable edit", 1, true),
+    "help import staging boundary missing")
+  assert(help:find("press a separately to\n  apply it", 1, true),
+    "help import apply boundary missing")
+  for _, text in ipairs({ readme, help }) do
+    assert(text:gsub("%s+", " "):find(
+      "child commands retain normal shell argument visibility", 1, true),
+      "import child-process boundary missing")
+  end
 end)
 
 test("query-pad and SQL Server temp-table scope stay accurate", function()
@@ -173,12 +191,36 @@ test("query-pad and SQL Server temp-table scope stay accurate", function()
 end)
 
 test("contributor and vulnerability paths remain actionable", function()
-  for _, command in ipairs({ "mise install", "just test", "just lint", "just e2e-visual",
+  for _, command in ipairs({ "mise install", "just check", "just test-live", "just e2e-visual",
       "git config core.hooksPath .githooks", "gitleaks git --redact --verbose" }) do
     assert(contributing:find(command, 1, true), "CONTRIBUTING missing: " .. command)
   end
   assert(security:find("security/advisories/new", 1, true), "private report link missing")
   assert(security:find("Do not open a public issue", 1, true), "public disclosure warning missing")
+end)
+
+test("live dialect workflows use the shared required Just entry point", function()
+  local live_images = {
+    ["postgresql-16"] = "postgres:16-alpine",
+    ["mysql-8.4"] = "mysql:8.4",
+    ["mariadb-11.8"] = "mariadb:11.8",
+  }
+  for database, image in pairs(live_images) do
+    assert(test_workflow:find(database, 1, true), "CI matrix missing " .. database)
+    assert(justfile:find(database .. ")", 1, true), "test-live missing " .. database)
+    assert(test_workflow:find(image, 1, true), "CI image drifted from " .. database)
+  end
+  assert(test_workflow:find('just test-live "${{ matrix.database }}"', 1, true),
+    "live CI bypasses just test-live")
+  assert(justfile:find("sqlserver-2025", 1, true), "test-live missing sqlserver-2025")
+  assert(sqlserver_workflow:find("just test-live sqlserver-2025", 1, true),
+    "SQL Server gate bypasses just test-live")
+  assert(sqlserver_workflow:find("mcr.microsoft.com/mssql/server:2025-latest", 1, true),
+    "SQL Server gate drifted from SQL Server 2025")
+  assert(not sqlserver_workflow:find("GRIP_REQUIRE_LIVE", 1, true),
+    "SQL Server CI duplicates Justfile required flags")
+  assert(not test_workflow:find('echo "GRIP_REQUIRE_', 1, true),
+    "live CI duplicates Justfile required flags")
 end)
 
 test("release version has matching changelog notes", function()

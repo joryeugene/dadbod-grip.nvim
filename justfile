@@ -6,11 +6,45 @@ default: test
 
 # Run all unit tests from a fresh deterministic SQLite fixture
 test: seed-sqlite
-    nvim --headless -u tests/minimal_init.lua -l tests/run_specs.lua
+    "${NVIM:-nvim}" --headless -u tests/minimal_init.lua -l tests/run_specs.lua
 
 # Run a single spec file by name (e.g., just spec data)
 spec name: seed-sqlite
-    nvim --headless -u tests/minimal_init.lua -l tests/spec/{{name}}_spec.lua
+    "${NVIM:-nvim}" --headless -u tests/minimal_init.lua -l tests/spec/{{ name }}_spec.lua
+
+# Run the local CI gates that do not require external databases
+check:
+    just lint
+    just test
+
+# Run the required live suite for one already-running database
+test-live database:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${GRIP_TEST_LIVE_URL:?Set GRIP_TEST_LIVE_URL to the assigned database URL}"
+    export GRIP_REQUIRE_LIVE=1
+    case "{{ database }}" in
+      postgresql-16)
+        export GRIP_TEST_PG_URL="$GRIP_TEST_LIVE_URL" GRIP_REQUIRE_POSTGRES=1
+        export GRIP_TEST_DUCKDB_FEDERATION_URL="$GRIP_TEST_LIVE_URL"
+        export GRIP_REQUIRE_DUCKDB_FEDERATION=1 GRIP_REQUIRE_DUCKDB=1
+        ;;
+      mysql-8.4)
+        export GRIP_TEST_MYSQL_URL="$GRIP_TEST_LIVE_URL" GRIP_REQUIRE_MYSQL=1
+        export GRIP_EXPECT_MYSQL_FLAVOR=mysql-8.4
+        export GRIP_TEST_DUCKDB_FEDERATION_URL="$GRIP_TEST_LIVE_URL"
+        export GRIP_REQUIRE_DUCKDB_FEDERATION=1 GRIP_REQUIRE_DUCKDB=1
+        ;;
+      mariadb-11.8)
+        export GRIP_TEST_MYSQL_URL="$GRIP_TEST_LIVE_URL" GRIP_REQUIRE_MYSQL=1
+        export GRIP_EXPECT_MYSQL_FLAVOR=mariadb-11.8
+        export GRIP_TEST_DUCKDB_FEDERATION_URL="$GRIP_TEST_LIVE_URL"
+        export GRIP_REQUIRE_DUCKDB_FEDERATION=1 GRIP_REQUIRE_DUCKDB=1
+        ;;
+      sqlite|sqlserver-2025) ;;
+      *) echo "Unknown live database: {{ database }}" >&2; exit 2 ;;
+    esac
+    just test
 
 # Lint with luacheck. Settings live in .luacheckrc; same args as CI.
 # Install: luarocks --lua-version=5.1 --local install luacheck

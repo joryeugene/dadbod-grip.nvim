@@ -6,6 +6,7 @@
 local data   = require("dadbod-grip.data")
 local db     = require("dadbod-grip.db")
 local qmod   = require("dadbod-grip.query")
+local sql    = require("dadbod-grip.sql")
 
 local M = {}
 
@@ -193,7 +194,8 @@ function M.setup(bufnr, ctx)
         "Undo last committed transaction? (" .. count .. " statement(s))",
         "&Yes\n&No", 2)
       if choice ~= 1 then return end
-      local txn = "BEGIN;\n" .. table.concat(reverse, ";\n") .. ";\nCOMMIT;"
+      local txn = sql.wrap_transaction(reverse,
+        require("dadbod-grip.adapters").kind(session.url))
       local _, err = db.execute(txn, session.url)
       if err then
         vim.notify("Undo failed: " .. err, vim.log.levels.ERROR)

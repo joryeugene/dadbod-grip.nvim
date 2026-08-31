@@ -16,7 +16,10 @@ if not URL or URL == "" then
 end
 
 local db = require("dadbod-grip.db")
+local data = require("dadbod-grip.data")
+local importer = require("dadbod-grip.importer")
 local query = require("dadbod-grip.query")
+local sql = require("dadbod-grip.sql")
 local view = require("dadbod-grip.view")
 
 if not db.ping(URL) then
@@ -68,6 +71,70 @@ test("CRUD round-trip changes only the probe table", function()
     eq(#assert(db.query("SELECT id FROM grip_live_probe", URL)).rows, 1, "deleted row")
   end)
   db.execute("DROP TABLE IF EXISTS grip_live_probe", URL)
+  if not ok then error(err) end
+end)
+
+test("imported rows use the staged-insert pipeline and commit atomically", function()
+  db.execute("DROP TABLE IF EXISTS grip_import_probe", URL)
+  local ok, err = pcall(function()
+    assert(db.execute(table.concat({
+      "CREATE TABLE grip_import_probe (",
+      "id INTEGER PRIMARY KEY,",
+      "probe_value VARCHAR(40) NOT NULL,",
+      "optional_note VARCHAR(40) NULL)",
+    }, " "), URL))
+
+    local columns = { "id", "probe_value", "optional_note" }
+    local parsed = assert(importer.parse(table.concat({
+      "id,probe_value,optional_note",
+      "901,first import,kept",
+      "902,second import,",
+    }, "\n"), columns))
+    local state = data.new({
+      rows = {}, columns = columns, primary_keys = { "id" },
+      table_name = "grip_import_probe", url = URL,
+    })
+    state = data.insert_rows_with_values(state, #state.rows, parsed.rows)
+
+    local statements = {}
+    for _, insert in ipairs(data.get_inserts(state)) do
+      statements[#statements + 1] = sql.build_insert(
+        state.table_name, insert.values, insert.columns)
+    end
+    assert(db.execute(sql.wrap_transaction(statements,
+      require("dadbod-grip.adapters").kind(URL)), URL))
+
+    local result = assert(db.query(
+      "SELECT id, probe_value, optional_note FROM grip_import_probe ORDER BY id", URL))
+    eq(#result.rows, 2, "imported row count")
+    eq(result.rows[1][2], "first import", "first imported value")
+    eq(result.rows[2][2], "second import", "second imported value")
+    local null_count = assert(db.query(
+      "SELECT COUNT(*) FROM grip_import_probe WHERE optional_note IS NULL", URL))
+    eq(tonumber(null_count.rows[1][1]), 1, "empty import field committed as NULL")
+  end)
+  db.execute("DROP TABLE IF EXISTS grip_import_probe", URL)
+  if not ok then error(err) end
+end)
+
+test("a failed staged-insert transaction commits no partial import", function()
+  db.execute("DROP TABLE IF EXISTS grip_import_rollback_probe", URL)
+  local ok, err = pcall(function()
+    assert(db.execute(
+      "CREATE TABLE grip_import_rollback_probe (id INTEGER PRIMARY KEY, probe_value VARCHAR(40))", URL))
+    local statements = {
+      sql.build_insert("grip_import_rollback_probe", { id = "903", probe_value = "first" },
+        { "id", "probe_value" }),
+      sql.build_insert("grip_import_rollback_probe", { id = "903", probe_value = "duplicate" },
+        { "id", "probe_value" }),
+    }
+    local result, apply_err = db.execute(sql.wrap_transaction(statements,
+      require("dadbod-grip.adapters").kind(URL)), URL)
+    assert(not result and apply_err, "duplicate primary key unexpectedly succeeded")
+    local count = assert(db.query("SELECT COUNT(*) FROM grip_import_rollback_probe", URL))
+    eq(tonumber(count.rows[1][1]), 0, "failed import left a partial row")
+  end)
+  db.execute("DROP TABLE IF EXISTS grip_import_rollback_probe", URL)
   if not ok then error(err) end
 end)
 

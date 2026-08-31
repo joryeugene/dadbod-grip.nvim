@@ -131,6 +131,7 @@ These commands cover the normal path:
 | `:GripQuery` | Opens the query pad. |
 | `:GripAsk` | Generates SQL from a natural-language request. |
 | `:GripExport` | Exports the current page or every matching row. |
+| `:GripImport` | Previews and stages CSV, TSV, or JSON rows from the clipboard or `!command`. |
 | `:GripHome` | Returns to the welcome screen. |
 
 In the query pad, `<C-CR>` runs SQL and `gA` generates SQL. In the grid, `f` filters by the current cell, `s` sorts the current column, `gf` follows a foreign key, and `gE` exports to the clipboard.
@@ -176,6 +177,8 @@ All default values, picker integrations, connection fields, remappable actions, 
 Dadbod Grip stages cell edits, inserted rows, and deletions in memory. Nothing reaches the database until you inspect the generated SQL and confirm the apply action. A connection with `"mode": "ro"` disables editing and asks the database client for a read-only session, but database permissions remain the real security boundary.
 
 Dadbod Grip sends all database SQL and AI request content through stdin. Statements, mutation values, prompts, schema context, existing SQL, and request bodies stay out of process arguments. API-key lookup commands also enter the shell through stdin.
+
+For `:GripImport !command`, the parent shell receives the script through stdin, but child commands retain normal shell argument visibility. Pass credentials through environment variables, stdin, or configuration files instead of command arguments.
 
 Passwords and connection parameters use client environment variables or invocation-scoped files instead of command arguments. Processes running as your user may still read those environment variables, so this prevents casual process-list exposure rather than replacing operating-system isolation.
 

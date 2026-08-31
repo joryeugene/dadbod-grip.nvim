@@ -47,11 +47,10 @@ jobs:
       - name: Run required SQL Server release scenarios
         env:
           GRIP_TEST_LIVE_URL: "sqlserver://sa:Grip-ci-2025!@localhost/grip_test?encrypt=optional&trust_server_certificate=true"
-          GRIP_REQUIRE_LIVE: "1"
         run: |
           sudo apt-get update
           sudo apt-get install -y sqlite3
-          just test
+          just test-live sqlserver-2025
       - name: Show SQL Server logs on failure
         if: failure()
         run: docker logs grip-sqlserver

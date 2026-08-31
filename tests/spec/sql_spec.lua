@@ -48,6 +48,16 @@ test("quote_value: boolean false", function()
   eq(sql.quote_value(false), "FALSE")
 end)
 
+test("wrap_transaction: keeps the shared transaction syntax", function()
+  eq(sql.wrap_transaction({ "INSERT ONE", "INSERT TWO" }, "sqlite"),
+    "BEGIN;\nINSERT ONE;\nINSERT TWO;\nCOMMIT;")
+end)
+
+test("wrap_transaction: uses SQL Server transaction statements", function()
+  eq(sql.wrap_transaction({ "INSERT ONE", "INSERT TWO" }, "sqlserver"),
+    "SET XACT_ABORT ON;\nBEGIN TRANSACTION;\nINSERT ONE;\nINSERT TWO;\nCOMMIT TRANSACTION;")
+end)
+
 -- ── quote_ident() ───────────────────────────────────────────────────────────
 
 test("quote_ident: wraps in double quotes", function()

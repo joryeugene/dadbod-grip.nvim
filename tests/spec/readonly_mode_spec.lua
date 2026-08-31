@@ -128,13 +128,14 @@ test("sqlite passes -readonly for an existing file", function()
   vim.fn.delete(f)
 end)
 
-test("sqlite rw argv is unchanged", function()
+test("sqlite rw argv keeps startup and transaction safety flags", function()
   local sq = require("dadbod-grip.adapters.sqlite")
   local f = vim.fn.tempname() .. ".sqlite"
   vim.fn.writefile({ "" }, f)
   eq(table.concat(sq._sqlite3_args(f, {}), "|"),
-    table.concat({ "sqlite3", "-init", "", "-csv", "-header", f }, "|"),
-    "rw argv contains only client flags and the database path")
+    table.concat({ "sqlite3", "-init", vim.fn.has("win32") == 1 and "NUL" or "/dev/null",
+      "-bail", "-csv", "-header", f }, "|"),
+    "rw argv contains startup safety flags and the database path")
   vim.fn.delete(f)
 end)
 

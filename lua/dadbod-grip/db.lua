@@ -64,15 +64,16 @@ function M.group_referencing_fks(entries)
   return refs
 end
 
---- Parse CSV output into rows + columns.
+--- Parse delimited output into rows + columns.
 --- Handles multiline quoted fields (RFC 4180).
---- Shared by all adapters that use CSV CLI output.
-function M.parse_csv(raw)
+--- Shared by all adapters that use CSV CLI output; imports also pass a tab
+--- delimiter and strict=true for user-supplied TSV.
+function M.parse_csv(raw, delimiter, strict)
   if not raw or raw == "" then
     return { columns = {}, rows = {} }
   end
 
-  local DQUOTE, COMMA, LF, CR = 34, 44, 10, 13
+  local DQUOTE, DELIM, LF, CR = 34, (delimiter or ","):byte(), 10, 13
 
   -- Parse entire raw string respecting quoted fields that span newlines.
   local all_rows = {}
@@ -93,6 +94,7 @@ function M.parse_csv(raw)
       while true do
         local qpos = raw:find('"', i, true)
         if not qpos then
+          if strict then return nil, "unterminated quoted field" end
           -- Unterminated quote: the rest of the input is the field.
           parts[#parts + 1] = raw:sub(start, len)
           i = len + 1
@@ -113,18 +115,26 @@ function M.parse_csv(raw)
       -- After closing quote: expect comma, newline, or end
       if i <= len then
         b = raw:byte(i)
-        if b == COMMA then
+        if b == DELIM then
           i = i + 1
+          if i > len or raw:byte(i) == LF or raw:byte(i) == CR then
+            table.insert(fields, "")
+          end
         elseif b == LF or b == CR then
           if b == CR and raw:byte(i + 1) == LF then i = i + 1 end
           i = i + 1
           table.insert(all_rows, fields)
           fields = {}
+        elseif strict then
+          return nil, "unexpected text after quoted field"
         end
       end
-    elseif b == COMMA then
+    elseif b == DELIM then
       table.insert(fields, "")
       i = i + 1
+      if i > len or raw:byte(i) == LF or raw:byte(i) == CR then
+        table.insert(fields, "")
+      end
     elseif b == LF or b == CR then
       if b == CR and raw:byte(i + 1) == LF then i = i + 1 end
       i = i + 1
@@ -135,14 +145,17 @@ function M.parse_csv(raw)
       local start = i
       while i <= len do
         local ub = raw:byte(i)
-        if ub == COMMA or ub == LF or ub == CR then break end
+        if ub == DELIM or ub == LF or ub == CR then break end
         i = i + 1
       end
       table.insert(fields, raw:sub(start, i - 1))
       if i <= len then
         b = raw:byte(i)
-        if b == COMMA then
+        if b == DELIM then
           i = i + 1
+          if i > len or raw:byte(i) == LF or raw:byte(i) == CR then
+            table.insert(fields, "")
+          end
         elseif b == LF or b == CR then
           if b == CR and raw:byte(i + 1) == LF then i = i + 1 end
           i = i + 1
@@ -173,6 +186,9 @@ function M.parse_csv(raw)
   local rows = {}
   for ri = 2, #filtered do
     local row = filtered[ri]
+    if strict and #row ~= #columns then
+      return nil, string.format("row %d has %d fields; expected %d", ri - 1, #row, #columns)
+    end
     while #row < #columns do table.insert(row, "") end
     table.insert(rows, row)
   end

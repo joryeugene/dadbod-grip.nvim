@@ -11,6 +11,7 @@ local query  = require("dadbod-grip.query")
 local ui     = require("dadbod-grip.ui")
 local explain = require("dadbod-grip.explain")
 local filetypes = require("dadbod-grip.filetypes")
+local importer = require("dadbod-grip.importer")
 
 local M = {}
 M._version = require("dadbod-grip.version")
@@ -346,7 +347,7 @@ local function do_apply(bufnr, url)
   end
 
   -- Wrap in transaction for atomicity (all or nothing)
-  local txn_sql = "BEGIN;\n" .. table.concat(stmts, ";\n") .. ";\nCOMMIT;"
+  local txn_sql = sql.wrap_transaction(stmts, require("dadbod-grip.adapters").kind(url))
   local t_apply = vim.uv.hrtime()
   local _, err = db.execute(txn_sql, url)
   local apply_ms = math.floor((vim.uv.hrtime() - t_apply) / 1e6)
@@ -2271,6 +2272,15 @@ function M.setup(opts)
     view.do_export(bufnr)
   end, { desc = "Export grip result to file (csv/json/sql)" })
 
+  -- :GripImport: parse clipboard rows, or stdout from an explicit !command,
+  -- then stage them as inserts in the current editable grid.
+  vim.api.nvim_create_user_command("GripImport", function(cmd_opts)
+    M.do_import(cmd_opts.args)
+  end, {
+    nargs = "*",
+    desc = "Preview and stage CSV, TSV, or JSON rows from clipboard or !command",
+  })
+
   -- :GripFill [N]: stage N AI-generated realistic rows (default 1, max 50)
   vim.api.nvim_create_user_command("GripFill", function(cmd_opts)
     -- do_fill_rows works on the session's connection, so guard on that one and
@@ -2306,6 +2316,67 @@ function M._next_edit_cursor(r, edited_row_idx, edited_col)
   local col_bp = bp and bp[edited_col]
   if not col_bp then return nil end
   return { line = next_line, col = col_bp.start }
+end
+
+--- Preview and stage CSV, TSV, or JSON rows in the current editable grid.
+--- An empty source reads the + register; !command captures stdout while the
+--- producer script is delivered to a constant parent shell argv over stdin.
+function M.do_import(source)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local session = view._sessions[bufnr]
+  if not session then
+    vim.notify("GripImport: no grip session on this buffer", vim.log.levels.WARN)
+    return
+  end
+  if not session.state.table_name or session.state.readonly then
+    vim.notify("GripImport: requires an editable table grid", vim.log.levels.WARN)
+    return
+  end
+  if deny_if_readonly("GripImport", session.url) then return end
+  if db.is_readonly(session.url) then
+    vim.notify("GripImport: this adapter is read-only", vim.log.levels.WARN)
+    return
+  end
+
+  source = vim.trim(source or "")
+  local raw, source_name
+  if source == "" then
+    raw = vim.fn.getreg("+")
+    source_name = "clipboard"
+  elseif source:sub(1, 1) == "!" then
+    local command = vim.trim(source:sub(2))
+    if command == "" then
+      vim.notify("GripImport: provide a command after !", vim.log.levels.WARN)
+      return
+    end
+    local stdout, _, code = require("dadbod-grip.adapters").run_cmd(
+      { "sh", "-s" }, OPTS.timeout, { stdin = command .. "\n" })
+    if code ~= 0 then
+      vim.notify("GripImport: pipe command failed (exit " .. tostring(code) .. ")", vim.log.levels.ERROR)
+      return
+    end
+    raw = stdout
+    source_name = "pipe"
+  else
+    vim.notify("GripImport: use no argument for the clipboard or !command for a pipe",
+      vim.log.levels.WARN)
+    return
+  end
+
+  local parsed, err = importer.parse(raw, session.state.columns)
+  if not parsed then
+    vim.notify("GripImport: " .. err, vim.log.levels.ERROR)
+    return
+  end
+
+  local prompt = string.format("Import %d %s rows into %s?\nColumns: %s (y/N): ",
+    #parsed.rows, parsed.format, session.state.table_name, table.concat(parsed.columns, ", "))
+  if not ui.confirm(prompt) then return end
+
+  local state = data.insert_rows_with_values(session.state, #session.state.rows, parsed.rows)
+  view.apply_edit(bufnr, state)
+  vim.notify(string.format("GripImport: staged %d rows from %s; press a to apply",
+    #parsed.rows, source_name), vim.log.levels.INFO)
 end
 
 --- Stage N AI-generated realistic rows into the current grip grid.
