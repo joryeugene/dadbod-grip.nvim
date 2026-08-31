@@ -643,20 +643,14 @@ function M.list()
   -- Softrear Inc. Analyst Portal™: built-in demo, shown until dismissed or
   -- until the user switches to it (after which it's persisted as a regular
   -- file connection and `seen[demo_url]` suppresses this entry).
-  local hidden = vim.fn.stdpath("data") .. "/grip/softrear.hidden"
-  local sql_files = vim.api.nvim_get_runtime_file("demo/softrear.sql", false)
-  if #sql_files > 0 and vim.fn.filereadable(hidden) == 0 then
-    local ext      = has_duck and ".duckdb" or ".db"
-    local db_path  = vim.fn.stdpath("data") .. "/grip/softrear" .. ext
-    local demo_url = (has_duck and "duckdb:" or "sqlite:") .. db_path
-    if not seen[demo_url] then  -- suppress once persisted as a real connection
-      local seed = has_duck and sql_files[1]
-        or (vim.api.nvim_get_runtime_file("demo/softrear_sqlite.sql", false)[1] or "")
+  local hidden = data_dir .. "/softrear.hidden"
+  local demo_spec = require("dadbod-grip.demo").spec()
+  if demo_spec and vim.fn.filereadable(hidden) == 0 then
+    if not seen[demo_spec.url] then  -- suppress once persisted as a real connection
       table.insert(all, {
-        name      = "Softrear Inc. Analyst Portal\xe2\x84\xa2",
-        url       = demo_url,
+        name      = require("dadbod-grip.demo").label,
+        url       = demo_spec.url,
         _is_demo  = true,
-        _demo_sql = seed,
       })
     end
   end
@@ -1252,16 +1246,18 @@ function M.pick(opts)
         M.switch(c.url, nil, "file")
       else
         -- Lazy-seed the portal DB on first selection
-        if c._is_demo and c._demo_sql and c._demo_sql ~= "" then
-          local db_path = c.url:gsub("^duckdb:", ""):gsub("^sqlite:", "")
-          if vim.fn.filereadable(db_path) == 0 then
-            vim.fn.mkdir(vim.fn.fnamemodify(db_path, ":h"), "p")
-            local bin = db_path:match("%.duckdb$") and "duckdb" or "sqlite3"
-            vim.fn.system(bin .. " " .. vim.fn.shellescape(db_path)
-              .. " < " .. vim.fn.shellescape(c._demo_sql))
+        if c._is_demo then
+          local demo, err = require("dadbod-grip.demo").prepare(false)
+          if not demo then
+            vim.notify("Grip: " .. err, vim.log.levels.ERROR)
+            return
           end
-          -- Persist with name so MRU tracking works on every future selection
-          M.switch(c.url, c.name)
+          -- Persist with name so MRU tracking works on every future selection.
+          M.switch(demo.url, c.name)
+          local ok
+          ok, err = require("dadbod-grip.demo").attach_supplier(demo)
+          if not ok then vim.notify("Grip: " .. err, vim.log.levels.WARN) end
+          if demo.supplier_error then vim.notify("Grip: " .. demo.supplier_error, vim.log.levels.WARN) end
         else
           M.switch(c.url, c.name, c.type)
         end

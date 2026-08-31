@@ -8,7 +8,6 @@ Shipped work belongs in `CHANGELOG.md`. Review this file after each release and 
 
 ## Product ideas
 
-- Import CSV, TSV, or JSON from the clipboard or a pipe, preview the inferred columns, and stage the rows as inserts.
 - Generate migration SQL that makes one table match another from the existing diff view.
 - Add client-side virtual columns defined by project configuration without writing them to the database.
 - Support DuckDB Iceberg/Delta Lake tables, spatial values, full-text search, and MotherDuck branches.

@@ -22,17 +22,20 @@ Use a short, purpose-based branch name such as `fix/mysql-null-values` or `docs/
 
 ## Run the local gates
 
-Run the focused spec while developing, then run the complete deterministic suite and LuaCheck:
+Run the focused spec while developing, then run the local CI gates:
 
 ```sh
 just spec data
-just test
-just lint
+just check
 ```
+
+Use `NVIM=/path/to/nvim just test` for a specific supported Neovim. For an
+already-running database, set `GRIP_TEST_LIVE_URL` and run `just test-live
+postgresql-16`, `mysql-8.4`, `mariadb-11.8`, `sqlserver-2025`, or `sqlite`.
 
 Run `just e2e-visual` when a change can affect window creation, sidebar sizing, the query pad, grid rendering, or resize behavior. It opens a real tmux-backed Neovim UI at 100, 80, and 160 columns.
 
-Live PostgreSQL, MySQL, MariaDB, and SQL Server jobs run in GitHub Actions. If you run them locally, set the corresponding `GRIP_REQUIRE_*` flag so a missing database fails instead of silently skipping its assigned test.
+Live PostgreSQL, MySQL, MariaDB, and SQL Server jobs run in GitHub Actions.
 
 ## Scan for secrets
 

@@ -482,7 +482,7 @@ end
 --- @param flags string[]|nil  output flags for this call site
 local function duckdb_args(db, opts, flags)
   local db_path = (type(db) == "string" and db:match("^duckdb:")) and extract_path(db) or db
-  local args = { "duckdb" }
+  local args = { "duckdb", "-bail" }
   for _, f in ipairs(flags or {}) do
     args[#args + 1] = f
   end
@@ -1339,7 +1339,7 @@ function M.attach(url, dsn, alias, template)
   -- Validate in-memory: avoids acquiring a write lock on the main db file.
   -- If we opened db_path here, we'd race with list_tables / get_schema_batch_async
   -- (both also open the same file), causing "Failed to lock file" on connection switch.
-  local args = { "duckdb" }
+  local args = duckdb_args(":memory:", nil)
 
   local _, stderr_attach, code_attach = adapters.run_cmd(args, timeout, { stdin = test_sql })
   if code_attach ~= 0 then

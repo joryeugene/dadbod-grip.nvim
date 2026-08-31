@@ -11,6 +11,7 @@ local query  = require("dadbod-grip.query")
 local ui     = require("dadbod-grip.ui")
 local explain = require("dadbod-grip.explain")
 local filetypes = require("dadbod-grip.filetypes")
+local importer = require("dadbod-grip.importer")
 
 local M = {}
 M._version = require("dadbod-grip.version")
@@ -346,7 +347,7 @@ local function do_apply(bufnr, url)
   end
 
   -- Wrap in transaction for atomicity (all or nothing)
-  local txn_sql = "BEGIN;\n" .. table.concat(stmts, ";\n") .. ";\nCOMMIT;"
+  local txn_sql = sql.wrap_transaction(stmts, require("dadbod-grip.adapters").kind(url))
   local t_apply = vim.uv.hrtime()
   local _, err = db.execute(txn_sql, url)
   local apply_ms = math.floor((vim.uv.hrtime() - t_apply) / 1e6)
@@ -2162,50 +2163,18 @@ function M.setup(opts)
 
   -- :GripStart: open the Softrear Analyst Portal directly
   vim.api.nvim_create_user_command("GripStart", function()
-    -- Build the demo URL directly: same logic as connections.list() demo entry.
-    -- Do NOT depend on _is_demo flag — once a user selects softrear it's
-    -- persisted as a regular file connection and _is_demo is no longer set.
-    local sql_files = vim.api.nvim_get_runtime_file("demo/softrear.sql", false)
-    if #sql_files == 0 then
-      vim.notify("Softrear Portal not found. Is the plugin in your runtimepath?", vim.log.levels.WARN)
+    local demo_module = require("dadbod-grip.demo")
+    local demo, err = demo_module.prepare(true)
+    if not demo then
+      vim.notify("Grip: " .. err, vim.log.levels.ERROR)
       return
     end
-    local has_duck = vim.fn.executable("duckdb") == 1
-    local ext      = has_duck and ".duckdb" or ".db"
-    local db_path  = vim.fn.stdpath("data") .. "/grip/softrear" .. ext
-    local demo_url = (has_duck and "duckdb:" or "sqlite:") .. db_path
-    local seed     = has_duck and sql_files[1]
-      or (vim.api.nvim_get_runtime_file("demo/softrear_sqlite.sql", false)[1] or "")
-
-    -- Always reseed: demo db is not user data; fresh state picks up schema updates
-    if seed ~= "" then
-      if vim.fn.filereadable(db_path) == 1 then vim.fn.delete(db_path) end
-      vim.fn.mkdir(vim.fn.fnamemodify(db_path, ":h"), "p")
-      local bin = db_path:match("%.duckdb$") and "duckdb" or "sqlite3"
-      if vim.fn.executable(bin) == 0 then
-        vim.notify(
-          "GripStart requires duckdb or sqlite3 for the demo database.\n"
-            .. "Install one, or use :GripConnect for your own DB.",
-          vim.log.levels.ERROR)
-        return
-      end
-      vim.fn.system(bin .. " " .. vim.fn.shellescape(db_path)
-        .. " < " .. vim.fn.shellescape(seed))
-    end
-
-    -- Seed supplier intel database for federation demo (requires sqlite3)
-    local supplier_sql_files = vim.api.nvim_get_runtime_file("demo/softrear_supplier.sql", false)
-    if #supplier_sql_files > 0 and vim.fn.executable("sqlite3") == 1 then
-      local grip_dir = vim.fn.getcwd() .. "/.grip"
-      vim.fn.mkdir(grip_dir, "p")
-      local supplier_db = grip_dir .. "/supplier_intel.db"
-      if vim.fn.filereadable(supplier_db) == 1 then vim.fn.delete(supplier_db) end
-      vim.fn.system("sqlite3 " .. vim.fn.shellescape(supplier_db)
-        .. " < " .. vim.fn.shellescape(supplier_sql_files[1]))
-    end
-
     local connections = require("dadbod-grip.connections")
-    connections.switch(demo_url, "Softrear Inc. Analyst Portal\xe2\x84\xa2")
+    connections.switch(demo.url, demo_module.label)
+    local attached
+    attached, err = demo_module.attach_supplier(demo)
+    if not attached then vim.notify("Grip: " .. err, vim.log.levels.WARN) end
+    if demo.supplier_error then vim.notify("Grip: " .. demo.supplier_error, vim.log.levels.WARN) end
 
     -- Load the demo notebook into the query pad.
     -- Double-schedule: connections.switch opens the pad in its own vim.schedule;
@@ -2215,7 +2184,7 @@ function M.setup(opts)
         local md_files = vim.api.nvim_get_runtime_file("demo/softrear-internal.md", false)
         if #md_files == 0 then return end
         local qpad = require("dadbod-grip.query_pad")
-        qpad.open(demo_url)  -- idempotent: ensures _pad_bufnr exists regardless of timing
+        qpad.open(demo.url)  -- idempotent: ensures _pad_bufnr exists regardless of timing
         local pad = qpad.get_pad_bufnr()
         if not pad or not vim.api.nvim_buf_is_valid(pad) then return end
         local lines = vim.fn.readfile(md_files[1])
@@ -2271,6 +2240,15 @@ function M.setup(opts)
     view.do_export(bufnr)
   end, { desc = "Export grip result to file (csv/json/sql)" })
 
+  -- :GripImport: parse clipboard rows, or stdout from an explicit !command,
+  -- then stage them as inserts in the current editable grid.
+  vim.api.nvim_create_user_command("GripImport", function(cmd_opts)
+    M.do_import(cmd_opts.args)
+  end, {
+    nargs = "*",
+    desc = "Preview and stage CSV, TSV, or JSON rows from clipboard or !command",
+  })
+
   -- :GripFill [N]: stage N AI-generated realistic rows (default 1, max 50)
   vim.api.nvim_create_user_command("GripFill", function(cmd_opts)
     -- do_fill_rows works on the session's connection, so guard on that one and
@@ -2306,6 +2284,67 @@ function M._next_edit_cursor(r, edited_row_idx, edited_col)
   local col_bp = bp and bp[edited_col]
   if not col_bp then return nil end
   return { line = next_line, col = col_bp.start }
+end
+
+--- Preview and stage CSV, TSV, or JSON rows in the current editable grid.
+--- An empty source reads the + register; !command captures stdout while the
+--- producer script is delivered to a constant parent shell argv over stdin.
+function M.do_import(source)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local session = view._sessions[bufnr]
+  if not session then
+    vim.notify("GripImport: no grip session on this buffer", vim.log.levels.WARN)
+    return
+  end
+  if not session.state.table_name or session.state.readonly then
+    vim.notify("GripImport: requires an editable table grid", vim.log.levels.WARN)
+    return
+  end
+  if deny_if_readonly("GripImport", session.url) then return end
+  if db.is_readonly(session.url) then
+    vim.notify("GripImport: this adapter is read-only", vim.log.levels.WARN)
+    return
+  end
+
+  source = vim.trim(source or "")
+  local raw, source_name
+  if source == "" then
+    raw = vim.fn.getreg("+")
+    source_name = "clipboard"
+  elseif source:sub(1, 1) == "!" then
+    local command = vim.trim(source:sub(2))
+    if command == "" then
+      vim.notify("GripImport: provide a command after !", vim.log.levels.WARN)
+      return
+    end
+    local stdout, _, code = require("dadbod-grip.adapters").run_cmd(
+      { "sh", "-s" }, OPTS.timeout, { stdin = command .. "\n" })
+    if code ~= 0 then
+      vim.notify("GripImport: pipe command failed (exit " .. tostring(code) .. ")", vim.log.levels.ERROR)
+      return
+    end
+    raw = stdout
+    source_name = "pipe"
+  else
+    vim.notify("GripImport: use no argument for the clipboard or !command for a pipe",
+      vim.log.levels.WARN)
+    return
+  end
+
+  local parsed, err = importer.parse(raw, session.state.columns)
+  if not parsed then
+    vim.notify("GripImport: " .. err, vim.log.levels.ERROR)
+    return
+  end
+
+  local prompt = string.format("Import %d %s rows into %s?\nColumns: %s (y/N): ",
+    #parsed.rows, parsed.format, session.state.table_name, table.concat(parsed.columns, ", "))
+  if not ui.confirm(prompt) then return end
+
+  local state = data.insert_rows_with_values(session.state, #session.state.rows, parsed.rows)
+  view.apply_edit(bufnr, state)
+  vim.notify(string.format("GripImport: staged %d rows from %s; press a to apply",
+    #parsed.rows, source_name), vim.log.levels.INFO)
 end
 
 --- Stage N AI-generated realistic rows into the current grip grid.

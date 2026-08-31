@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `:GripImport` previews CSV, TSV, or JSON from the clipboard or an explicit `!command`, maps
+  columns by name, and stages the rows as one undoable insert batch without writing until the
+  existing apply confirmation. The parent shell receives the producer script through stdin and
+  imported content stays out of argv; child commands retain normal shell argument visibility.
+
 ### Security
 
 - Gitleaks now scans committed history inside the required lint job, and an optional native Git hook
@@ -21,6 +28,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   model, while the in-editor help and documentation website remain the exhaustive references.
 - `CONTRIBUTING.md` now records the pinned tool setup, local gates, visual-test boundary, changelog
   policy, purpose-based branch naming, and optional secret-scanning hook.
+- `just test` and `just spec` now honor `NVIM`, while `just check` and `just test-live <database>`
+  provide shared deterministic and required live-dialect entry points for local CI parity.
+
+### Fixed
+
+- Staged apply and committed-transaction undo now use SQL Server's `BEGIN TRANSACTION` and
+  `COMMIT TRANSACTION` syntax instead of sending the unsupported shared `BEGIN` form. SQL Server
+  managed transactions also enable `XACT_ABORT`, so a failed statement cannot commit an earlier
+  batch prefix.
+- SQLite invocations now use `-bail` and a real null-device init file, so startup stays quiet and a
+  failed statement stops before `COMMIT` instead of leaving an earlier staged insert applied.
+- The Softrear walkthrough now seeds fail-closed, keeps every disposable database under Neovim's
+  data directory, attaches supplier data without touching the current project, and exercises the
+  staged import workflow with current keymaps and dataset counts.
+- DuckDB invocations now use `-bail`, so a failed statement stops a multi-statement submission
+  instead of continuing into later statements.
 
 ## [3.10.2] - 2026-08-30
 

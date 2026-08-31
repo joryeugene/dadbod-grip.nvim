@@ -12,7 +12,11 @@ Three questions:
 3. What decisions drove the company here, and how were they made?
 
 This notebook answers all three. Place your cursor inside any SQL block and press
-`C-CR` to run it. Results appear in the grid below. Navigate blocks with `j`/`k`.
+`<C-CR>` to run it. Results appear in the grid below. Move through the notebook
+with `j`/`k`.
+
+DuckDB loads the full 505-roll investigation. The SQLite fallback keeps the same
+named evidence in a compact 35-roll fixture, so exact background-row counts differ.
 
 ---
 
@@ -160,8 +164,10 @@ under embargo.
 
 > **Grid:** this result is wide. Press `K` on any row for a vertical key-value view.
 > Visual-select two rows with `V`, then press `K` to stack both in one float.
-> Press `gE` to inspect the query plan and confirm the join indexes are used.
-> Press `gf` on any FK column to follow it interactively to its referenced table.
+> Press `gQ` to inspect the query plan and confirm the join indexes are used.
+> Press `gf` on any FK column to follow it interactively to its referenced table,
+> or `gm` on a referenced row to open the rows that point back to it. Press `gE`
+> to export the current page or every matching row.
 
 ---
 
@@ -185,8 +191,9 @@ Sample of the unreviewed set:
 - "Has anyone else noticed the sheets are thinner than they used to be?"
 - "Why is this product 15% smaller than it was in 2018?"
 
-190 comments are in the unreviewed queue. The threat landscape is expanding faster
-than the Threat Assessment team can process it.
+The full DuckDB fixture has 193 comments in the unreviewed queue; the compact
+SQLite fallback keeps two representative rows. The threat landscape is expanding
+faster than the Threat Assessment team can process it.
 
 ---
 
@@ -345,18 +352,15 @@ problem internally, build policy to prevent naming it externally.
 
 ---
 
-## 13. Cross-database: attach the supplier intelligence file
+## 13. Cross-database: supplier intelligence
 
 The internal investigation terminates at the embargo on Bamboo Don. A leaked
 supplier logistics database covers what happened on the other side of that
-relationship. Attach it:
-
-```vim
-:GripAttach sqlite:.grip/supplier_intel.db  supplier
-```
-
-The schema sidebar updates. A `supplier` section appears with three tables:
-`shipments`, `ingredient_tests`, `pricing`.
+relationship. When both DuckDB and SQLite are installed, `:GripStart` creates the
+disposable supplier database under Neovim's data directory and attaches it as
+`supplier`. The schema sidebar shows its three tables: `shipments`,
+`ingredient_tests`, and `pricing`. Skip sections 14-16 when the demo is using the
+compact SQLite fallback.
 
 ---
 
@@ -427,6 +431,24 @@ relabeling preserved the margin. Detach when done:
 
 ---
 
+## 17. Stage a new lead from a pipe
+
+The investigation produced one more lead. Open the editable table and import it
+without writing to the database yet:
+
+```vim
+:Grip people_on_to_us
+:GripImport !printf 'id,name,platform,evidence_strength,what_they_know,our_response,investigation_id\n1001,Import Auditor,Forum,6,Knows the import path,ignored,\n1002,Pipe Witness,Chat,7,Saw the staged batch,coupon_sent,\n'
+```
+
+Answer `y` to the preview. Both rows appear with staged markers, but the database
+is unchanged. Press `gs` to inspect both `INSERT` statements, then press `u` once
+to remove the whole imported batch. To try the commit path, run the import again
+and press `a`; the normal transaction confirmation still applies. `:GripStart`
+restores the disposable database on the next run.
+
+---
+
 ## What this found
 
 The three questions from the opening now have answers.
@@ -452,7 +474,7 @@ The data was here the whole time.
 ## Going further
 
 Every result set is a live grid. Press `?` from any surface for the full
-keymap reference. Navigate between SQL blocks with `gn` without leaving
-the notebook.
+keymap reference. Press `gn` from the query pad to open another SQL or Markdown
+notebook.
 
-Full feature reference: https://joryeugene.github.io/dadbod-grip-web/
+Full feature reference: https://jorypestorious.com/dadbod-grip-web/

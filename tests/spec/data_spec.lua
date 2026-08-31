@@ -288,6 +288,17 @@ test("get_inserts: returns inserted rows", function()
   eq(inserts[1].values.name, "carol")
 end)
 
+test("get_inserts: preserves batch insertion order", function()
+  local st = make_state({})
+  st = data.insert_rows_with_values(st, #st.rows, {
+    { name = "first" }, { name = "second" }, { name = "third" },
+  })
+  local inserts = data.get_inserts(st)
+  eq(inserts[1].values.name, "first")
+  eq(inserts[2].values.name, "second")
+  eq(inserts[3].values.name, "third")
+end)
+
 -- ── get_ordered_rows() ──────────────────────────────────────────────────────
 
 test("get_ordered_rows: returns original indices when no inserts", function()
@@ -307,6 +318,17 @@ test("get_ordered_rows: inserts are spliced after their _after idx", function()
   eq(ordered[3], 2)
   -- The inserted row should be between 1 and 2
   assert(ordered[2] >= 1000, "insert idx should be >= 1000")
+end)
+
+test("get_ordered_rows: preserves batch insertion order", function()
+  local st = make_state({})
+  st = data.insert_rows_with_values(st, #st.rows, {
+    { name = "first" }, { name = "second" }, { name = "third" },
+  })
+  local ordered = data.get_ordered_rows(st)
+  eq(data.effective_value(st, ordered[3], "name"), "first")
+  eq(data.effective_value(st, ordered[4], "name"), "second")
+  eq(data.effective_value(st, ordered[5], "name"), "third")
 end)
 
 -- ── clone_row() ─────────────────────────────────────────────────────────────

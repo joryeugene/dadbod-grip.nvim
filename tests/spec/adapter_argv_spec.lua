@@ -127,6 +127,7 @@ local ok, err = xpcall(function()
       assert(stdin:find("ANSI_QUOTES", 1, true), "MySQL sql_mode missing from stdin")
     elseif case.name == "sqlserver" then
       assert(stdin:find("SET QUOTED_IDENTIFIER ON", 1, true), "SQL Server session setup missing from stdin")
+      assert(not stdin:find("SET XACT_ABORT ON", 1, true), "ordinary SQL Server execute forces XACT_ABORT")
       assert(not stdin:find("SET NOCOUNT ON", 1, true), "SQL Server execute must preserve row-count output")
     end
   end

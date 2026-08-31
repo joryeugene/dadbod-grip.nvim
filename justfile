@@ -6,11 +6,45 @@ default: test
 
 # Run all unit tests from a fresh deterministic SQLite fixture
 test: seed-sqlite
-    nvim --headless -u tests/minimal_init.lua -l tests/run_specs.lua
+    "${NVIM:-nvim}" --headless -u tests/minimal_init.lua -l tests/run_specs.lua
 
 # Run a single spec file by name (e.g., just spec data)
 spec name: seed-sqlite
-    nvim --headless -u tests/minimal_init.lua -l tests/spec/{{name}}_spec.lua
+    "${NVIM:-nvim}" --headless -u tests/minimal_init.lua -l tests/spec/{{ name }}_spec.lua
+
+# Run the local CI gates that do not require external databases
+check:
+    just lint
+    just test
+
+# Run the required live suite for one already-running database
+test-live database:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${GRIP_TEST_LIVE_URL:?Set GRIP_TEST_LIVE_URL to the assigned database URL}"
+    export GRIP_REQUIRE_LIVE=1
+    case "{{ database }}" in
+      postgresql-16)
+        export GRIP_TEST_PG_URL="$GRIP_TEST_LIVE_URL" GRIP_REQUIRE_POSTGRES=1
+        export GRIP_TEST_DUCKDB_FEDERATION_URL="$GRIP_TEST_LIVE_URL"
+        export GRIP_REQUIRE_DUCKDB_FEDERATION=1 GRIP_REQUIRE_DUCKDB=1
+        ;;
+      mysql-8.4)
+        export GRIP_TEST_MYSQL_URL="$GRIP_TEST_LIVE_URL" GRIP_REQUIRE_MYSQL=1
+        export GRIP_EXPECT_MYSQL_FLAVOR=mysql-8.4
+        export GRIP_TEST_DUCKDB_FEDERATION_URL="$GRIP_TEST_LIVE_URL"
+        export GRIP_REQUIRE_DUCKDB_FEDERATION=1 GRIP_REQUIRE_DUCKDB=1
+        ;;
+      mariadb-11.8)
+        export GRIP_TEST_MYSQL_URL="$GRIP_TEST_LIVE_URL" GRIP_REQUIRE_MYSQL=1
+        export GRIP_EXPECT_MYSQL_FLAVOR=mariadb-11.8
+        export GRIP_TEST_DUCKDB_FEDERATION_URL="$GRIP_TEST_LIVE_URL"
+        export GRIP_REQUIRE_DUCKDB_FEDERATION=1 GRIP_REQUIRE_DUCKDB=1
+        ;;
+      sqlite|sqlserver-2025) ;;
+      *) echo "Unknown live database: {{ database }}" >&2; exit 2 ;;
+    esac
+    just test
 
 # Lint with luacheck. Settings live in .luacheckrc; same args as CI.
 # Install: luarocks --lua-version=5.1 --local install luacheck
@@ -114,20 +148,77 @@ e2e-visual: seed-sqlite
       fi
     }
     snapshot() {
-      printf '\n=== Neovim attached UI: %s columns ===\n' "$1"
+      printf '\n=== %s ===\n' "$1"
       tmux capture-pane -p -t "$session"
+    }
+    wait_text() {
+      local text="$1"
+      for _ in {1..160}; do
+        tmux capture-pane -p -t "$session" | grep -Fq "$text" && return 0
+        sleep 0.05
+      done
+      echo "e2e-visual timed out waiting for text: $text" >&2
+      tmux capture-pane -p -t "$session" >&2 || true
+      exit 1
+    }
+    send_import() {
+      local command=":GripImport !printf 'name,email,age\\nE2E Import One,e2e-one@example.test,41\\nE2E Import Two,e2e-two@example.test,42\\n'"
+      tmux send-keys -t "$session" -l "$command"
+      tmux send-keys -t "$session" Enter
     }
 
     wait_for ready
-    snapshot 100
+    snapshot "Neovim attached UI: 100 columns"
     tmux resize-window -t "$session" -x 80 -y 30
     wait_for 80
-    snapshot 80
+    snapshot "Neovim attached UI: 80 columns"
     tmux resize-window -t "$session" -x 160 -y 40
     wait_for 160
-    snapshot 160
+    snapshot "Neovim attached UI: 160 columns"
     tmux resize-window -t "$session" -x 100 -y 36
     wait_for 100
+
+    wait_for import-ready
+    tmux resize-window -t "$session" -x 100 -y 50
+    send_import
+    wait_text "Import 2 CSV rows"
+    snapshot "GripImport preview prompt"
+    tmux send-keys -t "$session" y Enter
+    wait_text "Press ENTER or type command to continue"
+    tmux send-keys -t "$session" Enter
+    wait_for import-staged
+    tmux send-keys -t "$session" '$'
+    wait_text "2 staged"
+    snapshot "GripImport staged indicator"
+    tmux send-keys -t "$session" 0
+    tmux send-keys -t "$session" G
+    wait_text "E2E Import One"
+    snapshot "GripImport staged rows"
+
+    tmux send-keys -t "$session" g s
+    wait_for import-sql
+    snapshot "GripImport staged SQL"
+    tmux send-keys -t "$session" q
+    tmux send-keys -t "$session" u
+    wait_for import-undone
+
+    send_import
+    wait_text "Import 2 CSV rows"
+    tmux send-keys -t "$session" y Enter
+    wait_text "Press ENTER or type command to continue"
+    tmux send-keys -t "$session" Enter
+    wait_for import-restaged
+    tmux send-keys -t "$session" a
+    wait_text "Apply 2 staged change"
+    snapshot "GripImport apply confirmation"
+    tmux send-keys -t "$session" a
+    wait_text "Press ENTER or type command to continue"
+    tmux send-keys -t "$session" Enter
+    wait_for import-applied
+    tmux send-keys -t "$session" G
+    wait_text "E2E Import One"
+    snapshot "GripImport committed rows"
+    tmux send-keys -t "$session" :qa! Enter
 
     for _ in {1..100}; do
       [[ "$(tmux display-message -p -t "$session" '#{pane_dead}')" == 1 ]] && break
@@ -145,7 +236,7 @@ e2e-visual: seed-sqlite
       tmux capture-pane -p -t "$session" >&2
       exit "$status"
     fi
-    echo "e2e-visual: attached UI passed at 100, 80, and 160 columns"
+    echo "e2e-visual: layout and staged import passed at 100, 80, and 160 columns"
 
 # Open Neovim connected to DuckDB for httpfs testing
 dev-httpfs: seed-httpfs

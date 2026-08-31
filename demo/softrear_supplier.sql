@@ -1,6 +1,6 @@
 -- softrear_supplier.sql: Leaked supplier logistics database (SQLite)
 -- Seeded by :GripStart alongside the main Softrear database.
--- Attach with: :GripAttach sqlite:.grip/supplier_intel.db  supplier
+-- :GripStart attaches this disposable database automatically when both CLIs are available.
 
 CREATE TABLE shipments (
   id INTEGER PRIMARY KEY,

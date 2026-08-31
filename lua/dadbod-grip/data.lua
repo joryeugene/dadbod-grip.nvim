@@ -62,6 +62,13 @@ local function deep_copy(t)
   return copy
 end
 
+local function sorted_numeric_keys(t)
+  local keys = {}
+  for key in pairs(t) do keys[#keys + 1] = key end
+  table.sort(keys)
+  return keys
+end
+
 --- Shallow-copy a state, deep-copying only the mutable subtrees
 --- (changes, deleted, inserted). Rows, columns, and pks are shared
 --- since they are never mutated after creation.
@@ -135,15 +142,23 @@ function M.toggle_delete(state, row_idx)
   return s
 end
 
+-- M.insert_rows_with_values(state, after_idx, rows) → State
+-- Adds pre-populated rows as one state transform, preserving source order.
+function M.insert_rows_with_values(state, after_idx, rows)
+  local s = edit_copy(state)
+  for _, values in ipairs(rows) do
+    local new_idx = s._next_insert_idx
+    s._next_insert_idx = s._next_insert_idx + 1
+    s.inserted[new_idx] = { _after = after_idx, values = values }
+  end
+  return s
+end
+
 -- M.insert_row_with_values(state, after_idx, values) → State
 -- Adds a row with pre-populated values as a staged insert.
 -- Used by mutation preview to show INSERT VALUES rows highlighted green.
 function M.insert_row_with_values(state, after_idx, values)
-  local s = edit_copy(state)
-  local new_idx = s._next_insert_idx
-  s._next_insert_idx = s._next_insert_idx + 1
-  s.inserted[new_idx] = { _after = after_idx, values = values or {} }
-  return s
+  return M.insert_rows_with_values(state, after_idx, { values or {} })
 end
 
 -- M.insert_row(state, after_idx) → State
@@ -230,7 +245,8 @@ end
 -- M.get_inserts(state) → list of {values, columns}
 function M.get_inserts(state)
   local inserts = {}
-  for _, ins in pairs(state.inserted) do
+  for _, idx in ipairs(sorted_numeric_keys(state.inserted)) do
+    local ins = state.inserted[idx]
     local clean_values = {}
     for col, val in pairs(ins.values) do
       clean_values[col] = val  -- keep NULL_SENTINEL; sql.lua emits NULL for it
@@ -322,17 +338,20 @@ end
 -- Inserts are spliced after their _after idx.
 function M.get_ordered_rows(state)
   local order = {}
+  local inserted = sorted_numeric_keys(state.inserted)
   for i = 1, #state.rows do
     table.insert(order, i)
     -- Splice in any inserted rows that follow this one
-    for ins_idx, ins in pairs(state.inserted) do
+    for _, ins_idx in ipairs(inserted) do
+      local ins = state.inserted[ins_idx]
       if ins._after == i then
         table.insert(order, ins_idx)
       end
     end
   end
   -- Rows inserted after the last row (after_idx = #rows or 0)
-  for ins_idx, ins in pairs(state.inserted) do
+  for _, ins_idx in ipairs(inserted) do
+    local ins = state.inserted[ins_idx]
     if ins._after == 0 or ins._after >= #state.rows then
       -- Only add if not already spliced
       local found = false

@@ -388,12 +388,27 @@ end)
 
 -- ── SQLite .sqliterc bypass ─────────────────────────────────────────────
 
-test("sqlite query: passes -init '' to skip .sqliterc", function()
+test("sqlite query: uses the null device to skip .sqliterc", function()
   with_executable(function()
     local args = capture_system_args("col\nval\n", function()
       sqlite.query("SELECT 1", "sqlite:test.db")
     end)
-    has_arg(args, "-init", "query should pass -init")
+    for i, arg in ipairs(args) do
+      if arg == "-init" then
+        eq(args[i + 1], vim.fn.has("win32") == 1 and "NUL" or "/dev/null", "empty init file")
+        return
+      end
+    end
+    error("query should pass -init")
+  end)
+end)
+
+test("sqlite stops at the first failed statement so transactions roll back", function()
+  with_executable(function()
+    local args = capture_system_args("", function()
+      sqlite.execute("BEGIN; SELECT 1; COMMIT;", "sqlite:test.db")
+    end)
+    has_arg(args, "-bail", "sqlite should stop before COMMIT after an error")
   end)
 end)
 
@@ -583,6 +598,22 @@ test("sqlserver enables double-quoted identifiers for every command", function()
         "sqlserver://sa:pw@localhost/grip_test")
     end)
     contains(last_arg(exec_args), "SET QUOTED_IDENTIFIER ON", "execute session")
+  end)
+end)
+
+test("sqlserver leaves ordinary user transaction semantics unchanged", function()
+  with_executable(function()
+    local query_args = capture_system_args("id\n--\n1\n", function()
+      sqlserver.query("SELECT 1", "sqlserver://sa:pw@localhost/grip_test")
+    end)
+    assert(not last_arg(query_args):find("SET XACT_ABORT ON", 1, true),
+      "query session must not force XACT_ABORT")
+
+    local exec_args = capture_system_args("\n(1 rows affected)\n", function()
+      sqlserver.execute("UPDATE users SET id = id", "sqlserver://sa:pw@localhost/grip_test")
+    end)
+    assert(not last_arg(exec_args):find("SET XACT_ABORT ON", 1, true),
+      "execute session must not force XACT_ABORT")
   end)
 end)
 
@@ -881,6 +912,15 @@ test("duckdb attach: a DSN with no scanner keeps the default validation timeout"
   end)
   eq(opts.timeout, 10000, "no scanner means no fetch to wait for")
   duckdb.detach(url, "plain")
+end)
+
+test("duckdb attach: validation fails fast without opening the main database", function()
+  duckdb._forget_installed_extensions()
+  local args = capture_system_call("42\n", function()
+    duckdb.attach("duckdb:attach_flags.db", "/tmp/plain.duckdb", "plain")
+  end)
+  eq(table.concat(args, " "), "duckdb -bail", "in-memory validation argv")
+  duckdb.detach("duckdb:attach_flags.db", "plain")
 end)
 
 test("duckdb attach: plain validation honors the configured timeout", function()

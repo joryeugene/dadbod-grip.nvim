@@ -37,7 +37,7 @@ test("lazy.lua command triggers include every public Grip command", function()
     "GripTables", "GripQuery", "GripSave", "GripLoad", "GripHistory",
     "GripProfile", "GripExplain", "GripAsk", "GripDiff", "GripCreate",
     "GripDrop", "GripRename", "GripProperties", "GripExport", "GripAttach",
-    "GripDetach", "GripOpen", "GripToggle", "GripFill",
+    "GripDetach", "GripOpen", "GripToggle", "GripFill", "GripImport",
   }) do
     assert(has(cmd, name), "missing lazy command trigger: " .. name)
   end

@@ -49,7 +49,8 @@ end
 --- rw mode -- there is nothing to protect in a database that does not exist.
 --- @param opts table|nil  { readonly = boolean }
 local function sqlite3_args(db_path, opts)
-  local args = { "sqlite3", "-init", "", "-csv", "-header" }
+  local null_device = vim.fn.has("win32") == 1 and "NUL" or "/dev/null"
+  local args = { "sqlite3", "-init", null_device, "-bail", "-csv", "-header" }
   if opts and opts.readonly and vim.fn.filereadable(db_path) == 1 then
     args[#args + 1] = "-readonly"
   end

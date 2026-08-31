@@ -482,7 +482,8 @@ SELECT
        ELSE 'Substack' END,
   100 + ((n * 347) % 50000),
   (n % 7 = 0),
-  CASE WHEN n % 5 = 0 THEN ((n * 3) % 100) + 1 ELSE NULL END
+  CASE WHEN n % 5 = 0 THEN ((n * 3) % 100) + 1 ELSE NULL END,
+  NULL
 FROM range(11, 201) t(n);
 
 

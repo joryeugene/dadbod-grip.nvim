@@ -28,6 +28,7 @@ return {
       "GripRename",
       "GripProperties",
       "GripExport",
+      "GripImport",
       "GripAttach",
       "GripDetach",
       "GripOpen",
