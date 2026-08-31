@@ -35,9 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Staged apply and committed-transaction undo now use SQL Server's `BEGIN TRANSACTION` and
   `COMMIT TRANSACTION` syntax instead of sending the unsupported shared `BEGIN` form. SQL Server
-  sessions also enable `XACT_ABORT`, so a failed statement cannot commit an earlier batch prefix.
+  managed transactions also enable `XACT_ABORT`, so a failed statement cannot commit an earlier
+  batch prefix.
 - SQLite invocations now use `-bail` and a real null-device init file, so startup stays quiet and a
   failed statement stops before `COMMIT` instead of leaving an earlier staged insert applied.
+- The Softrear walkthrough now seeds fail-closed, keeps every disposable database under Neovim's
+  data directory, attaches supplier data without touching the current project, and exercises the
+  staged import workflow with current keymaps and dataset counts.
+- DuckDB invocations now use `-bail`, so a failed statement stops a multi-statement submission
+  instead of continuing into later statements.
 
 ## [3.10.2] - 2026-08-30
 

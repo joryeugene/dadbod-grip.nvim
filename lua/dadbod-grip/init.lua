@@ -2163,50 +2163,18 @@ function M.setup(opts)
 
   -- :GripStart: open the Softrear Analyst Portal directly
   vim.api.nvim_create_user_command("GripStart", function()
-    -- Build the demo URL directly: same logic as connections.list() demo entry.
-    -- Do NOT depend on _is_demo flag — once a user selects softrear it's
-    -- persisted as a regular file connection and _is_demo is no longer set.
-    local sql_files = vim.api.nvim_get_runtime_file("demo/softrear.sql", false)
-    if #sql_files == 0 then
-      vim.notify("Softrear Portal not found. Is the plugin in your runtimepath?", vim.log.levels.WARN)
+    local demo_module = require("dadbod-grip.demo")
+    local demo, err = demo_module.prepare(true)
+    if not demo then
+      vim.notify("Grip: " .. err, vim.log.levels.ERROR)
       return
     end
-    local has_duck = vim.fn.executable("duckdb") == 1
-    local ext      = has_duck and ".duckdb" or ".db"
-    local db_path  = vim.fn.stdpath("data") .. "/grip/softrear" .. ext
-    local demo_url = (has_duck and "duckdb:" or "sqlite:") .. db_path
-    local seed     = has_duck and sql_files[1]
-      or (vim.api.nvim_get_runtime_file("demo/softrear_sqlite.sql", false)[1] or "")
-
-    -- Always reseed: demo db is not user data; fresh state picks up schema updates
-    if seed ~= "" then
-      if vim.fn.filereadable(db_path) == 1 then vim.fn.delete(db_path) end
-      vim.fn.mkdir(vim.fn.fnamemodify(db_path, ":h"), "p")
-      local bin = db_path:match("%.duckdb$") and "duckdb" or "sqlite3"
-      if vim.fn.executable(bin) == 0 then
-        vim.notify(
-          "GripStart requires duckdb or sqlite3 for the demo database.\n"
-            .. "Install one, or use :GripConnect for your own DB.",
-          vim.log.levels.ERROR)
-        return
-      end
-      vim.fn.system(bin .. " " .. vim.fn.shellescape(db_path)
-        .. " < " .. vim.fn.shellescape(seed))
-    end
-
-    -- Seed supplier intel database for federation demo (requires sqlite3)
-    local supplier_sql_files = vim.api.nvim_get_runtime_file("demo/softrear_supplier.sql", false)
-    if #supplier_sql_files > 0 and vim.fn.executable("sqlite3") == 1 then
-      local grip_dir = vim.fn.getcwd() .. "/.grip"
-      vim.fn.mkdir(grip_dir, "p")
-      local supplier_db = grip_dir .. "/supplier_intel.db"
-      if vim.fn.filereadable(supplier_db) == 1 then vim.fn.delete(supplier_db) end
-      vim.fn.system("sqlite3 " .. vim.fn.shellescape(supplier_db)
-        .. " < " .. vim.fn.shellescape(supplier_sql_files[1]))
-    end
-
     local connections = require("dadbod-grip.connections")
-    connections.switch(demo_url, "Softrear Inc. Analyst Portal\xe2\x84\xa2")
+    connections.switch(demo.url, demo_module.label)
+    local attached
+    attached, err = demo_module.attach_supplier(demo)
+    if not attached then vim.notify("Grip: " .. err, vim.log.levels.WARN) end
+    if demo.supplier_error then vim.notify("Grip: " .. demo.supplier_error, vim.log.levels.WARN) end
 
     -- Load the demo notebook into the query pad.
     -- Double-schedule: connections.switch opens the pad in its own vim.schedule;
@@ -2216,7 +2184,7 @@ function M.setup(opts)
         local md_files = vim.api.nvim_get_runtime_file("demo/softrear-internal.md", false)
         if #md_files == 0 then return end
         local qpad = require("dadbod-grip.query_pad")
-        qpad.open(demo_url)  -- idempotent: ensures _pad_bufnr exists regardless of timing
+        qpad.open(demo.url)  -- idempotent: ensures _pad_bufnr exists regardless of timing
         local pad = qpad.get_pad_bufnr()
         if not pad or not vim.api.nvim_buf_is_valid(pad) then return end
         local lines = vim.fn.readfile(md_files[1])

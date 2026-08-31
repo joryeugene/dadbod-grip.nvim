@@ -541,10 +541,13 @@ All commands are global and available after the plugin loads.
                                                                *:GripStart*
 :GripStart
   Open the built-in demo database (Softrear Inc. Analyst Portal). Recreates
-  its SQLite database from the bundled seed on every run, then opens the
-  schema browser. It requires either the duckdb or sqlite3 CLI, but no
-  database server or manual setup. The demo is disposable and is never
-  treated as user data.
+  its database from the bundled seed on every run, then opens the schema
+  browser and investigation notebook. It requires either the duckdb or
+  sqlite3 CLI, but no database server or manual setup. DuckDB loads the full
+  fixture; SQLite provides a compact fallback. When both CLIs are installed,
+  the disposable supplier database is attached automatically as `supplier`.
+  Demo files live under stdpath("data") and never overwrite the current
+  project's .grip directory.
 
                                                                 *:GripHome*
 :GripHome

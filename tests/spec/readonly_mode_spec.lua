@@ -91,14 +91,14 @@ test("duckdb never passes -readonly for a missing file", function()
   end
 end)
 
-test("duckdb rw argv is unchanged", function()
+test("duckdb rw argv keeps fail-fast flags", function()
   local dd = require("dadbod-grip.adapters.duckdb")
   local f = vim.fn.tempname() .. ".duckdb"
   vim.fn.writefile({ "" }, f)
   eq(table.concat(dd._args("duckdb:" .. f, {}, { "-csv", "-header" }), " "),
-    "duckdb -csv -header " .. f, "rw file-backed argv")
+    "duckdb -bail -csv -header " .. f, "rw file-backed argv")
   eq(table.concat(dd._args("duckdb::memory:", {}, { "-csv", "-header" }), " "),
-    "duckdb -csv -header", "rw :memory: argv carries no path")
+    "duckdb -bail -csv -header", "rw :memory: argv carries no path")
   vim.fn.delete(f)
 end)
 

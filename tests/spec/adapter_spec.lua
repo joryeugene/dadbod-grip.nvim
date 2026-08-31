@@ -914,6 +914,15 @@ test("duckdb attach: a DSN with no scanner keeps the default validation timeout"
   duckdb.detach(url, "plain")
 end)
 
+test("duckdb attach: validation fails fast without opening the main database", function()
+  duckdb._forget_installed_extensions()
+  local args = capture_system_call("42\n", function()
+    duckdb.attach("duckdb:attach_flags.db", "/tmp/plain.duckdb", "plain")
+  end)
+  eq(table.concat(args, " "), "duckdb -bail", "in-memory validation argv")
+  duckdb.detach("duckdb:attach_flags.db", "plain")
+end)
+
 test("duckdb attach: plain validation honors the configured timeout", function()
   local grip = require("dadbod-grip")
   grip.setup({ timeout = 4321 })

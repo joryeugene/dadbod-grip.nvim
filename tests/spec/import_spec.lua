@@ -100,12 +100,16 @@ local function with_grid(opts, fn)
     notify = vim.notify,
     run_cmd = adapters.run_cmd,
     execute = db.execute,
+    is_readonly = db.is_readonly,
   }
   local notices, prompt, applied, executed = {}, nil, nil, false
   view.apply_edit = function(got_buf, new_state)
     eq(got_buf, bufnr, "target buffer")
+    local session = view._sessions[bufnr]
+    session._undo_stack = session._undo_stack or {}
+    table.insert(session._undo_stack, session.state)
     applied = new_state
-    view._sessions[bufnr].state = new_state
+    session.state = new_state
   end
   ui.confirm = function(message)
     prompt = message
@@ -122,6 +126,8 @@ local function with_grid(opts, fn)
     applied = function() return applied end,
     executed = function() return executed end,
     set_run_cmd = function(replacement) adapters.run_cmd = replacement end,
+    set_adapter_readonly = function(value) db.is_readonly = function() return value end end,
+    undo_depth = function() return #(view._sessions[bufnr]._undo_stack or {}) end,
   })
 
   view.apply_edit = real.apply_edit
@@ -129,6 +135,7 @@ local function with_grid(opts, fn)
   vim.notify = real.notify
   adapters.run_cmd = real.run_cmd
   db.execute = real.execute
+  db.is_readonly = real.is_readonly
   view._sessions[bufnr] = nil
   vim.api.nvim_set_current_buf(previous)
   vim.api.nvim_buf_delete(bufnr, { force = true })
@@ -147,7 +154,35 @@ test(":GripImport previews clipboard columns and stages rows without writing", f
     assert(ctx.prompt():find("2 CSV rows", 1, true), "row-count preview missing: " .. ctx.prompt())
     assert(ctx.prompt():find("name, email", 1, true), "column preview missing: " .. ctx.prompt())
     eq(ctx.executed(), false, "import must not write to the database")
+    eq(ctx.undo_depth(), 1, "the whole batch must create one undo state")
     assert(ctx.notices[#ctx.notices]:find("staged 2 rows", 1, true), "success notice missing")
+  end)
+end)
+
+test("invalid sources and adapter read-only mode stage nothing", function()
+  with_grid({}, function(ctx)
+    vim.cmd("GripImport rows.csv")
+    vim.cmd("GripImport !")
+    eq(ctx.applied(), nil, "invalid source must not apply")
+    local notices = table.concat(ctx.notices, "\n")
+    assert(notices:find("use no argument", 1, true), "non-pipe source reason missing")
+    assert(notices:find("provide a command", 1, true), "empty pipe reason missing")
+  end)
+
+  with_grid({}, function(ctx)
+    ctx.set_adapter_readonly(true)
+    vim.fn.setreg("+", "name\nBlocked\n")
+    vim.cmd("GripImport")
+    eq(ctx.applied(), nil, "read-only adapter must not apply")
+    assert(ctx.notices[1]:find("adapter is read-only", 1, true), "adapter reason missing")
+  end)
+
+  with_grid({}, function(ctx)
+    ctx.state.table_name = nil
+    vim.fn.setreg("+", "name\nBlocked\n")
+    vim.cmd("GripImport")
+    eq(ctx.applied(), nil, "non-table grid must not apply")
+    assert(ctx.notices[1]:find("editable table grid", 1, true), "non-table reason missing")
   end)
 end)
 

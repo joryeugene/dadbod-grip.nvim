@@ -44,7 +44,7 @@ Dadbod Grip requires Neovim 0.10 or newer and the command-line client for each d
 | DuckDB, local files, HTTP, or S3 | `duckdb` |
 | SQL Server | `sqlcmd` |
 
-The built-in demo requires either `duckdb` or `sqlite3`, but it requires no database server or manual setup. Dadbod Grip has no required Lua dependencies. vim-dadbod-ui, completion plugins, SQL formatters, and AI providers are optional integrations.
+The built-in demo requires either `duckdb` or `sqlite3`, but it requires no database server or manual setup. DuckDB loads the full dataset; SQLite provides a compact fallback. Install both CLIs to include the automatically attached supplier-federation chapter. Dadbod Grip has no required Lua dependencies. vim-dadbod-ui, completion plugins, SQL formatters, and AI providers are optional integrations.
 
 ### Install with lazy.nvim
 
