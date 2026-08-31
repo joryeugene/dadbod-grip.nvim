@@ -42,17 +42,7 @@ local changelog = read("CHANGELOG.md")
 local grid_help = read("lua/dadbod-grip/view.lua")
 local contributing = read("CONTRIBUTING.md")
 local security = read("SECURITY.md")
-local wordmark_light = read("docs/brand/dadbod-grip-wordmark-light.svg")
-local wordmark_dark = read("docs/brand/dadbod-grip-wordmark-dark.svg")
-
-local wordmark = table.concat({
-  "████▄  ▄████▄ ████▄  █████▄ ▄████▄ ████▄",
-  "██  ██ ██▄▄██ ██  ██ ██▄▄██ ██  ██ ██  ██",
-  "████▀  ██  ██ ████▀  ██▄▄█▀ ▀████▀ ████▀",
-  "         ▄████  █████▄  ██ █████▄",
-  "        ██  ▄▄▄ ██▄▄██▄ ██ ██▄▄█▀",
-  "         ▀███▀  ██   ██ ██ ██",
-}, "\n")
+local wordmark_path = "docs/brand/dadbod-grip-wordmark.png"
 
 local contributors = table.concat({
   "## Contributors",
@@ -80,14 +70,16 @@ test("public commands match lazy triggers and the help manual", function()
 end)
 
 test("README keeps the onboarding command path", function()
-  assert(readme:find("docs/brand/dadbod-grip-wordmark-light.svg", 1, true),
-    "README light wordmark missing")
-  assert(readme:find("docs/brand/dadbod-grip-wordmark-dark.svg", 1, true),
-    "README dark wordmark missing")
-  assert(wordmark_light:find(wordmark, 1, true), "light wordmark changed")
-  assert(wordmark_dark:find(wordmark, 1, true), "dark wordmark changed")
+  assert(readme:find(wordmark_path, 1, true), "README fixed wordmark missing")
+  assert(vim.fn.filereadable(wordmark_path) == 1, "README fixed wordmark asset missing")
+  local file = assert(io.open(wordmark_path, "rb"))
+  local wordmark_sha = vim.fn.sha256(file:read("*a"))
+  file:close()
+  assert(wordmark_sha == "96f466273045932475ace1a0b4c386037318798ff44794414f0023d7120c46a7",
+    "README fixed wordmark asset changed")
   local hero = assert(readme:match("^(.-)\n%*%*Workflow%.%*%*"))
   assert(not hero:find("<table", 1, true), "README hero must remain table-free")
+  assert(not hero:find("<picture", 1, true), "README hero must use the fixed PNG")
   assert(hero:find("mascot.gif", 1, true), "README hero lost Chonk")
   assert(readme:find(contributors, 1, true), "README contributor block changed")
   for _, name in ipairs({ "GripConnect", "GripStart", "Grip", "GripQuery" }) do

@@ -1,11 +1,7 @@
 # dadbod-grip.nvim
 
 <p align="center">
-<picture>
-<source media="(prefers-color-scheme: dark)" srcset="docs/brand/dadbod-grip-wordmark-dark.svg">
-<source media="(prefers-color-scheme: light)" srcset="docs/brand/dadbod-grip-wordmark-light.svg">
-<img src="docs/brand/dadbod-grip-wordmark-light.svg" width="620" alt="Dadbod Grip">
-</picture>
+<img src="docs/brand/dadbod-grip-wordmark.png" width="620" alt="Dadbod Grip">
 </p>
 
 <p align="center">
