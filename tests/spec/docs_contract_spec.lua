@@ -272,8 +272,8 @@ end)
 
 test("release version has matching changelog notes", function()
   local version = require("dadbod-grip.version")
-  assert(version == "3.10.2", "unexpected release version: " .. tostring(version))
-  assert(changelog:find("## [" .. version .. "] - 2026-08-30", 1, true),
+  assert(version == "3.11.0", "unexpected release version: " .. tostring(version))
+  assert(changelog:find("## [" .. version .. "] - 2026-08-31", 1, true),
     "changelog section missing for " .. version)
 end)
 
