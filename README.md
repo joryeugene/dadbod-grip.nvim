@@ -217,6 +217,6 @@ Dadbod Grip works by itself and can also read vim-dadbod and vim-dadbod-ui conne
 
 Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) and open a focused pull request when you see something Dadbod Grip can do better.
 
-A special thank-you to [Gleb Yavorski (@GlebYavorski)](https://github.com/GlebYavorski).
+A special thank-you to [Gleb Yavorski (@GlebYavorski)](https://github.com/GlebYavorski) for his contributions.
 
-Dadbod Grip is available under the [MIT License](LICENSE), and I maintain the project.
+[Jory Pestorious (@joryeugene)](https://github.com/joryeugene) created and maintains Dadbod Grip, which is available under the [MIT License](LICENSE).
