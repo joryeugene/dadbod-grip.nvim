@@ -134,6 +134,8 @@ These commands cover the normal path:
 | `:GripImport` | Previews and stages CSV, TSV, or JSON rows from the clipboard or `!command`. |
 | `:GripHome` | Returns to the welcome screen. |
 
+A slow query counts up while it runs: past half a second the loading float appends live elapsed time (`querying users... 3.4s`), so a long wait is legible before the grid appears.
+
 In the query pad, `<C-CR>` runs SQL and `gA` generates SQL. In the grid, `f` filters by the current cell, `s` sorts the current column, `gf` follows a foreign key, and `gE` exports to the clipboard.
 
 The complete command and keymap reference lives in `:help dadbod-grip`. The [documentation website](https://jorypestorious.com/dadbod-grip-web/) provides task-focused guides and screenshots.
