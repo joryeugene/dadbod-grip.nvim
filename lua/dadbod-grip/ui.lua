@@ -390,6 +390,25 @@ M._timer_threshold_ms = 500
 --- window edge and make it truncate.
 local TIMER_WIDTH = 8
 
+--- Slack columns the float carries past its rendered content. The label line is
+--- `"  " .. frame .. " " .. msg`, four columns wider than msg itself, so this
+--- leaves two spare at each end rather than fitting the text exactly.
+local FLOAT_PADDING = 6
+
+--- Columns kept clear at the screen edges, capping how wide a long label can
+--- push the float. `width` is the inner text area and nvim draws the border
+--- outside it, so this is two columns of border plus a one-column gap on each
+--- side. At the cap the border lands one column inside the terminal; drop it to
+--- 2 and the border sits flush, drop it to 0 and the float runs off-screen.
+local SCREEN_MARGIN = 4
+
+--- Unit conversions for the elapsed readout. MS_PER_MINUTE is the point where
+--- format_elapsed switches from seconds to minutes, derived rather than spelled
+--- out so the cutover cannot drift from the arithmetic below it.
+local MS_PER_SECOND      = 1000
+local SECONDS_PER_MINUTE = 60
+local MS_PER_MINUTE      = SECONDS_PER_MINUTE * MS_PER_SECOND
+
 --- Format a millisecond duration for the spinner float: one decimal under a
 --- minute, minutes and zero-padded seconds past it.
 ---
@@ -400,11 +419,12 @@ local TIMER_WIDTH = 8
 --- @param ms number
 --- @return string
 function M.format_elapsed(ms)
-  if ms < 60000 then
-    return string.format("%.1fs", ms / 1000)
+  if ms < MS_PER_MINUTE then
+    return string.format("%.1fs", ms / MS_PER_SECOND)
   end
-  local total = math.floor(ms / 1000)
-  return string.format("%dm%02ds", math.floor(total / 60), total % 60)
+  local total = math.floor(ms / MS_PER_SECOND)
+  return string.format("%dm%02ds",
+    math.floor(total / SECONDS_PER_MINUTE), total % SECONDS_PER_MINUTE)
 end
 
 --- Show an animated spinner float, run fn(), then clear the float.
@@ -463,7 +483,8 @@ function M.blocking(msg, fn)
   local display = "  " .. msg
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "", "  " .. display, "" })
-  local w = math.min(vim.fn.strdisplaywidth(display) + 6 + TIMER_WIDTH, vim.o.columns - 4)
+  local w = math.min(vim.fn.strdisplaywidth(display) + FLOAT_PADDING + TIMER_WIDTH,
+    vim.o.columns - SCREEN_MARGIN)
 
   -- Suppress plugin autocmds during float create to avoid 200-400ms overhead.
   local ei = vim.o.eventignore
