@@ -614,5 +614,94 @@ test("report_split: height follows content and requests no more than 30", functi
   assert(h2 <= 30 and h2 >= h1, "actual split respects the request and available screen")
 end)
 
+-- ── live elapsed timer ──────────────────────────────────────────
+-- A slow query used to look identical to a hung one: the braille spinner turns
+-- at the same rate either way, and the only number arrived after the grid had
+-- already rendered. The float now counts up while the work runs.
+
+test("format_elapsed: seconds under a minute, m/s past it", function()
+  eq(ui.format_elapsed(0), "0.0s", "zero")
+  eq(ui.format_elapsed(612), "0.6s", "sub-second")
+  eq(ui.format_elapsed(3401), "3.4s", "seconds")
+  eq(ui.format_elapsed(47912), "47.9s", "tens of seconds")
+  -- The last millisecond below a minute rounds up to "60.0s" rather than
+  -- flipping early to "1m00s"; the boundary is on the raw ms, not the display.
+  eq(ui.format_elapsed(59999), "60.0s", "just under a minute")
+  eq(ui.format_elapsed(60000), "1m00s", "exactly a minute")
+  eq(ui.format_elapsed(72104), "1m12s", "minutes and seconds")
+  eq(ui.format_elapsed(243000), "4m03s", "seconds are zero-padded")
+end)
+
+--- The line the spinner float is currently showing, or nil when none is up.
+--- blocking() does not hand out its buffer, so find the floating window whose
+--- middle line carries the label we passed in.
+local function spinner_line(needle)
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_config(win).relative ~= "" then
+      local b = vim.api.nvim_win_get_buf(win)
+      local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+      if lines[2] and lines[2]:find(needle, 1, true) then return lines[2] end
+    end
+  end
+end
+
+--- Burn wall time the way a query does: pumping the loop, so the 80ms spinner
+--- timer actually fires. A bare loop would starve it and nothing would repaint.
+local function busy(ms)
+  vim.wait(ms, function() return false end, 10)
+end
+
+local function seconds_in(line)
+  return tonumber(line:match("(%d+%.%d+)s"))
+end
+
+test("blocking: no elapsed shown before the threshold", function()
+  local saved = ui._timer_threshold_ms
+  ui._timer_threshold_ms = 10000  -- out of reach for this test
+  local line
+  ui.blocking("threshold-test", function()
+    busy(200)
+    line = spinner_line("threshold-test")
+  end)
+  ui._timer_threshold_ms = saved
+  assert(line, "float was up during the call")
+  -- Braille frames carry no digits, so any digit here is the timer.
+  assert(not line:find("%d"), "expected no number before the threshold, got: " .. line)
+end)
+
+test("blocking: elapsed appears and advances past the threshold", function()
+  local saved = ui._timer_threshold_ms
+  ui._timer_threshold_ms = 50
+  local first, second
+  ui.blocking("timer-test", function()
+    busy(200); first  = spinner_line("timer-test")
+    busy(400); second = spinner_line("timer-test")
+  end)
+  ui._timer_threshold_ms = saved
+  assert(first and first:find("%d+%.%d+s$"),
+    "expected an elapsed suffix, got: " .. tostring(first))
+  assert(second and seconds_in(second) > seconds_in(first),
+    "expected the number to climb, got: " .. tostring(first) .. " -> " .. tostring(second))
+end)
+
+test("blocking: a nested label swap keeps the outer clock", function()
+  local saved = ui._timer_threshold_ms
+  ui._timer_threshold_ms = 50
+  local outer_line, inner_line
+  ui.blocking("outer-clock", function()
+    busy(300)
+    outer_line = spinner_line("outer-clock")
+    ui.blocking("inner-clock", function()
+      busy(300)
+      inner_line = spinner_line("inner-clock")
+    end)
+  end)
+  ui._timer_threshold_ms = saved
+  assert(outer_line and inner_line, "both labels rendered")
+  assert(seconds_in(inner_line) > seconds_in(outer_line),
+    "nested step continues the outer clock rather than restarting it: "
+      .. outer_line .. " -> " .. inner_line)
+end)
+
 print(string.format("ui_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end

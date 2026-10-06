@@ -380,6 +380,53 @@ end
 --- @type table|nil  { msg = string }
 local _spinner = nil
 
+--- How long a blocking() call must run before its float starts showing elapsed
+--- time. Under this the float is barely on screen, and a number that flashes
+--- "0.1s" on every fast schema fetch is noise rather than information.
+M._timer_threshold_ms = 500
+
+--- Columns the float reserves for the elapsed suffix. Claimed up front at
+--- creation so a timer that appears mid-run cannot push the message past the
+--- window edge and make it truncate.
+local TIMER_WIDTH = 8
+
+--- Slack columns the float carries past its rendered content. The label line is
+--- `"  " .. frame .. " " .. msg`, four columns wider than msg itself, so this
+--- leaves two spare at each end rather than fitting the text exactly.
+local FLOAT_PADDING = 6
+
+--- Columns kept clear at the screen edges, capping how wide a long label can
+--- push the float. `width` is the inner text area and nvim draws the border
+--- outside it, so this is two columns of border plus a one-column gap on each
+--- side. At the cap the border lands one column inside the terminal; drop it to
+--- 2 and the border sits flush, drop it to 0 and the float runs off-screen.
+local SCREEN_MARGIN = 4
+
+--- Unit conversions for the elapsed readout. MS_PER_MINUTE is the point where
+--- format_elapsed switches from seconds to minutes, derived rather than spelled
+--- out so the cutover cannot drift from the arithmetic below it.
+local MS_PER_SECOND      = 1000
+local SECONDS_PER_MINUTE = 60
+local MS_PER_MINUTE      = SECONDS_PER_MINUTE * MS_PER_SECOND
+
+--- Format a millisecond duration for the spinner float: one decimal under a
+--- minute, minutes and zero-padded seconds past it.
+---
+--- Deliberately not the "1234ms" the grid status line and history use. Those
+--- report a finished number that gets read once; this one ticks ~12x a second
+--- in the corner of the eye, where four changing digits are harder to read
+--- than one.
+--- @param ms number
+--- @return string
+function M.format_elapsed(ms)
+  if ms < MS_PER_MINUTE then
+    return string.format("%.1fs", ms / MS_PER_SECOND)
+  end
+  local total = math.floor(ms / MS_PER_SECOND)
+  return string.format("%dm%02ds",
+    math.floor(total / SECONDS_PER_MINUTE), total % SECONDS_PER_MINUTE)
+end
+
 --- Show an animated spinner float, run fn(), then clear the float.
 ---
 --- IMPORTANT: fn() must be synchronous OR use vim.wait() for async work.
@@ -394,6 +441,12 @@ local _spinner = nil
 --- vim.wait() calls inside fn() because both pump the libuv event loop.
 --- eventignore="all" suppresses plugin autocmds (WinNew/BufNew) that add
 --- 200-400ms overhead from noice/treesitter/nvim-cmp handlers.
+---
+--- Once a call passes M._timer_threshold_ms the float appends live elapsed
+--- time to its label, so a slow query is visibly slow while it runs instead of
+--- only after. It is wall time for the whole blocking() call, so it reads a few
+--- ms above the "Nms query" the grid status line reports afterwards -- that one
+--- times the db round-trip alone.
 ---
 --- Calls nest: only the outermost one owns the float, and an inner call just
 --- relabels it for the duration of its own work. Closing the inner float would
@@ -430,7 +483,8 @@ function M.blocking(msg, fn)
   local display = "  " .. msg
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "", "  " .. display, "" })
-  local w = math.min(vim.fn.strdisplaywidth(display) + 6, vim.o.columns - 4)
+  local w = math.min(vim.fn.strdisplaywidth(display) + FLOAT_PADDING + TIMER_WIDTH,
+    vim.o.columns - SCREEN_MARGIN)
 
   -- Suppress plugin autocmds during float create to avoid 200-400ms overhead.
   local ei = vim.o.eventignore
@@ -447,6 +501,11 @@ function M.blocking(msg, fn)
   -- to borrow, and every one after it must find a live window to relabel.
   _spinner = { msg = msg }
 
+  -- Started here, not per nested call: a nested label swap describes one step
+  -- of the work, but the number next to it answers "how long has this been
+  -- going", which is the outermost call's clock.
+  local t0 = vim.uv.hrtime()
+
   -- Best-effort paint before fn() runs. Keep this on Neovim's stable Ex
   -- command rather than the experimental nvim__redraw API.
   pcall(vim.cmd, "redraw")
@@ -460,8 +519,11 @@ function M.blocking(msg, fn)
   timer:start(80, 80, vim.schedule_wrap(function()
     fi = (fi % #frames) + 1
     if vim.api.nvim_buf_is_valid(buf) then
+      local elapsed_ms = math.floor((vim.uv.hrtime() - t0) / 1e6)
+      local suffix = (elapsed_ms >= M._timer_threshold_ms)
+        and (" " .. M.format_elapsed(elapsed_ms)) or ""
       pcall(vim.api.nvim_buf_set_lines, buf, 0, -1, false,
-        { "", "  " .. frames[fi] .. " " .. ((_spinner and _spinner.msg) or msg), "" })
+        { "", "  " .. frames[fi] .. " " .. ((_spinner and _spinner.msg) or msg) .. suffix, "" })
       pcall(vim.cmd, "redraw")
     end
   end))
