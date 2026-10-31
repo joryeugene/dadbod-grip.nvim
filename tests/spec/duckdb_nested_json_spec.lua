@@ -164,7 +164,7 @@ end
 
 -- A NULL struct must stay NULL, not become the string "null".
 local null_struct = cell("SELECT NULL::STRUCT(x INT) AS c")
-truthy(null_struct == nil or null_struct == "" or null_struct == "NULL",
+truthy(null_struct == vim.NIL,
   "NULL nested value stays NULL (got: " .. tostring(null_struct) .. ")")
 
 -- A string containing a comma and a quote must survive CSV round-tripping.

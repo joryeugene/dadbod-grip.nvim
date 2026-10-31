@@ -18,14 +18,33 @@ function M.escape_literal(v)
 end
 local escape_literal = M.escape_literal
 
-function M.quote_value(v)
-  if v == nil then
+function M.quote_value(v, adapter_kind, storage_type, exact)
+  local problem=require('dadbod-grip.provenance').kind_error(storage_type);assert(not problem,problem)
+  if v == nil or v == vim.NIL then
     return "NULL"
+  elseif (adapter_kind == "sqlite" or adapter_kind == "mysql" or adapter_kind == "mariadb") and storage_type == "blob" then
+    return "X'" .. tostring(v):gsub(".", function(ch) return string.format("%02x", ch:byte()) end) .. "'"
+  elseif adapter_kind == "sqlite" and storage_type == "integer" then
+    assert(tostring(v):match("^%-?%d+$"), "invalid integer receipt")
+    return tostring(v)
+  elseif adapter_kind == "sqlite" and storage_type == "real" then
+    local numeric = exact or tostring(v)
+    if numeric == "Inf" then numeric = "9e999" elseif numeric == "-Inf" then numeric = "-9e999" end
+    assert(numeric:match("^[%+%-]?[%d%.]+[eE]?[%+%-]?%d*$"), "invalid real receipt")
+    return "CAST(" .. numeric .. " AS REAL)"
   elseif type(v) == "boolean" then
     return v and "TRUE" or "FALSE"
   elseif type(v) == "number" then
     return tostring(v)
   else
+    if tostring(v):find("\0", 1, true) then
+      assert(adapter_kind ~= "postgresql", "PostgreSQL text cannot contain NUL bytes")
+      local hex = tostring(v):gsub(".", function(ch) return string.format("%02x", ch:byte()) end)
+      if adapter_kind == "mysql" or adapter_kind == "mariadb" then
+        return "CONVERT(X'" .. hex .. "' USING utf8mb4)"
+      elseif adapter_kind == "duckdb" then return "decode(from_hex('" .. hex .. "'))" end
+      return "CAST(X'" .. hex .. "' AS TEXT)"
+    end
     return "'" .. escape_literal(v) .. "'"
   end
 end
@@ -48,6 +67,12 @@ function M.quote_ident(name)
   return table.concat(parts, ".")
 end
 local quote_ident = M.quote_ident
+
+-- A column label is one identifier, even when its spelling contains a dot.
+function M.quote_column(name)
+  return '"' .. tostring(name):gsub('"', '""') .. '"'
+end
+local quote_column = M.quote_column
 
 -- Strip outer quotes from each part of a possibly schema-qualified identifier.
 -- Inverse of quote_ident: "public"."Participant" → public.Participant
@@ -205,87 +230,57 @@ function M.parse_dadbod_url(url, default_port)
   }
 end
 
--- M.build_update(table_name, pk_values, changes) → string
--- pk_values: { col = "val", ... }
--- changes:   { col = new_val, ... }  (data.NULL_SENTINEL means SQL NULL)
-function M.build_update(table_name, pk_values, changes)
-  local NULL_SENTINEL = require("dadbod-grip.data").NULL_SENTINEL
-  local set_parts = {}
+local function write_options(settings)
+  if type(settings) == "table" then return settings end
+  return { adapter_kind = settings }
+end
+
+local function where_keys(pk_values, opts)
+  local parts = {}
+  for col, val in pairs(pk_values) do
+    assert(val ~= nil and val ~= vim.NIL, "row identity cannot contain NULL")
+    if opts.adapter_kind == 'sqlite' and opts.key_types and opts.key_types[col] then
+      parts[#parts + 1] = 'typeof(' .. quote_column(col) .. ') = ' .. M.quote_value(opts.key_types[col])
+    end
+    parts[#parts + 1] = quote_column(col) .. " = " .. M.quote_value(val, opts.adapter_kind,
+      opts.key_types and opts.key_types[col], opts.key_exact and opts.key_exact[col])
+  end
+  assert(#parts > 0, "row identity is missing")
+  table.sort(parts)
+  return table.concat(parts, " AND ")
+end
+
+-- Values and predicates are independent structures. Never locate SQL clauses
+-- by searching generated SQL, where the same words can occur inside literals.
+function M.build_update(table_name, pk_values, changes, settings)
+  local opts, set_parts = write_options(settings), {}
   for col, val in pairs(changes) do
-    local sql_val = (val == NULL_SENTINEL) and "NULL" or M.quote_value(val)
-    table.insert(set_parts, quote_ident(col) .. " = " .. sql_val)
+    set_parts[#set_parts + 1] = quote_column(col) .. " = " .. M.quote_value(val, opts.adapter_kind,
+      opts.value_types and opts.value_types[col], opts.value_exact and opts.value_exact[col])
   end
-  -- Sort for deterministic output
   table.sort(set_parts)
-
-  local where_parts = {}
-  for col, val in pairs(pk_values) do
-    if val == nil or val == "" then
-      table.insert(where_parts, quote_ident(col) .. " IS NULL")
-    else
-      table.insert(where_parts, quote_ident(col) .. " = " .. M.quote_value(val))
-    end
-  end
-  table.sort(where_parts)
-
-  return string.format(
-    "UPDATE %s SET %s WHERE %s",
-    quote_ident(table_name),
-    table.concat(set_parts, ", "),
-    table.concat(where_parts, " AND ")
-  )
+  local identity_clause = where_keys(pk_values, opts)
+  return "UPDATE " .. quote_ident(table_name) .. " SET " .. table.concat(set_parts, ", ")
+    .. " WHERE " .. (opts.predicate or identity_clause)
 end
 
--- M.build_insert(table_name, values, columns) → string
--- values:  { col = val, ... }  (data.NULL_SENTINEL means SQL NULL)
--- columns: ordered list of column names (defines INSERT column order)
-function M.build_insert(table_name, values, columns)
-  local NULL_SENTINEL = require("dadbod-grip.data").NULL_SENTINEL
-  local col_parts = {}
-  local val_parts = {}
-
+function M.build_insert(table_name, values, columns, settings, override_identity)
+  local opts, col_parts, val_parts = write_options(settings), {}, {}
   for _, col in ipairs(columns) do
-    local val = values[col]
-    -- Skip columns with nil that aren't explicitly set (let DB use DEFAULT)
-    -- NULL_SENTINEL is non-nil and emits SQL NULL explicitly
-    if val ~= nil then
-      table.insert(col_parts, quote_ident(col))
-      local sql_val = (val == NULL_SENTINEL) and "NULL" or M.quote_value(val)
-      table.insert(val_parts, sql_val)
+    if values[col] ~= nil then
+      col_parts[#col_parts + 1] = quote_column(col)
+      val_parts[#val_parts + 1] = M.quote_value(values[col], opts.adapter_kind,
+        opts.value_types and opts.value_types[col], opts.value_exact and opts.value_exact[col])
     end
   end
-
-  if #col_parts == 0 then
-    -- All defaults: INSERT with no columns
-    return string.format("INSERT INTO %s DEFAULT VALUES", quote_ident(table_name))
-  end
-
-  return string.format(
-    "INSERT INTO %s (%s) VALUES (%s)",
-    quote_ident(table_name),
-    table.concat(col_parts, ", "),
-    table.concat(val_parts, ", ")
-  )
+  if #col_parts == 0 then return "INSERT INTO " .. quote_ident(table_name) .. " DEFAULT VALUES" end
+  return "INSERT INTO " .. quote_ident(table_name) .. " (" .. table.concat(col_parts, ", ") .. ")"
+    .. ((opts.override_identity or override_identity) and " OVERRIDING SYSTEM VALUE" or "")
+    .. " VALUES (" .. table.concat(val_parts, ", ") .. ")"
 end
 
--- M.build_delete(table_name, pk_values) → string
--- pk_values: { col = "val", ... }
-function M.build_delete(table_name, pk_values)
-  local where_parts = {}
-  for col, val in pairs(pk_values) do
-    if val == nil or val == "" then
-      table.insert(where_parts, quote_ident(col) .. " IS NULL")
-    else
-      table.insert(where_parts, quote_ident(col) .. " = " .. M.quote_value(val))
-    end
-  end
-  table.sort(where_parts)
-
-  return string.format(
-    "DELETE FROM %s WHERE %s",
-    quote_ident(table_name),
-    table.concat(where_parts, " AND ")
-  )
+function M.build_delete(table_name, pk_values, settings)
+  return "DELETE FROM " .. quote_ident(table_name) .. " WHERE " .. where_keys(pk_values, write_options(settings))
 end
 
 -- M.preview_staged(table_name, updates, deletes, inserts) → string
@@ -294,13 +289,13 @@ end
 function M.preview_staged(table_name, updates, deletes, inserts)
   local stmts = {}
   for _, del in ipairs(deletes) do
-    table.insert(stmts, M.build_delete(table_name, del.pk_values) .. ";")
+    table.insert(stmts, M.build_delete(table_name, del.pk_values, del) .. ";")
   end
   for _, upd in ipairs(updates) do
-    table.insert(stmts, M.build_update(table_name, upd.pk_values, upd.changes) .. ";")
+    table.insert(stmts, M.build_update(table_name, upd.pk_values, upd.changes, upd) .. ";")
   end
   for _, ins in ipairs(inserts) do
-    table.insert(stmts, M.build_insert(table_name, ins.values, ins.columns) .. ";")
+    table.insert(stmts, M.build_insert(table_name, ins.values, ins.columns, ins) .. ";")
   end
   if #stmts == 0 then return "-- no staged changes" end
   return table.concat(stmts, "\n")

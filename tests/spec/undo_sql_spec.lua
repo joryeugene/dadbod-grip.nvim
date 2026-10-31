@@ -1,8 +1,6 @@
 -- undo_sql_spec.lua: TDD tests for undo reverse-SQL generation from raw CSV values.
 --
--- All four adapters (PostgreSQL, MySQL, SQLite, DuckDB) represent NULL as ""
--- in their CSV output. The undo path must normalize "" → SQL NULL.
--- These tests drove the introduction of data.from_csv_raw().
+-- Decoded NULL is typed independently of empty and literal text.
 
 local data = require("dadbod-grip.data")
 local sql  = require("dadbod-grip.sql")
@@ -63,8 +61,8 @@ test("from_csv_raw: nil → NULL_SENTINEL", function()
   eq(data.from_csv_raw(nil), NULL_SENTINEL)
 end)
 
-test("from_csv_raw: empty string → NULL_SENTINEL (CSV null for all 4 adapters)", function()
-  eq(data.from_csv_raw(""), NULL_SENTINEL)
+test("from_csv_raw: empty string stays empty text", function()
+  eq(data.from_csv_raw(""), "")
 end)
 
 test("from_csv_raw: 't' passes through (pg bool true)", function()
@@ -110,7 +108,7 @@ local cols3 = { "id", "flag", "small_num" }
 
 test("undo INSERT: pg bool NULL '' → emits SQL NULL not ''", function()
   -- row: id='3', flag=NULL(pg csv=""), small_num='5'
-  local result = build_undo_insert("doopy", cols3, { "3", "", "5" })
+  local result = build_undo_insert("doopy", cols3, { "3", vim.NIL, "5" })
   has(result, '"flag"', "flag column must be present")
   has(result, "NULL", "NULL bool must emit SQL NULL")
   no(result, "''", "must not emit empty string literal for NULL column")
@@ -118,21 +116,21 @@ end)
 
 test("undo INSERT: mysql bool NULL '' → emits SQL NULL not ''", function()
   -- MySQL also uses "" for NULL in CSV
-  local result = build_undo_insert("doopy", cols3, { "3", "", "5" })
+  local result = build_undo_insert("doopy", cols3, { "3", vim.NIL, "5" })
   has(result, "NULL")
   no(result, "''")
 end)
 
 test("undo INSERT: duckdb bool NULL '' → emits SQL NULL not ''", function()
   -- DuckDB also uses "" for NULL in CSV
-  local result = build_undo_insert("doopy", cols3, { "3", "", "5" })
+  local result = build_undo_insert("doopy", cols3, { "3", vim.NIL, "5" })
   has(result, "NULL")
   no(result, "''")
 end)
 
 test("undo INSERT: multiple NULL columns → all emit SQL NULL", function()
   -- All nullable cols are NULL (full-null row except PK)
-  local result = build_undo_insert("doopy", cols3, { "3", "", "" })
+  local result = build_undo_insert("doopy", cols3, { "3", vim.NIL, vim.NIL })
   -- Both flag and small_num NULL
   has(result, '"id"')
   has(result, '"flag"')
@@ -145,7 +143,7 @@ end)
 
 test("undo INSERT: mixed NULL and real values → only NULL cols emit NULL", function()
   -- flag=NULL, small_num=420 (real value)
-  local result = build_undo_insert("doopy", cols3, { "3", "", "420" })
+  local result = build_undo_insert("doopy", cols3, { "3", vim.NIL, "420" })
   has(result, "NULL", "flag must be NULL")
   has(result, "'420'", "small_num must be quoted '420'")
   no(result, "''")
@@ -202,13 +200,13 @@ end)
 
 test("undo UPDATE: original pg bool was NULL '' → SET col = NULL not ''", function()
   -- Row originally had flag=NULL. User changed it to something, now undoing.
-  local result = build_undo_update("doopy", { id = "1" }, { "flag" }, cols3, { "1", "", "5" })
+  local result = build_undo_update("doopy", { id = "1" }, { "flag" }, cols3, { "1", vim.NIL, "5" })
   has(result, '"flag" = NULL')
   no(result, "''")
 end)
 
 test("undo UPDATE: original mysql bool was NULL '' → SET col = NULL", function()
-  local result = build_undo_update("doopy", { id = "1" }, { "flag" }, cols3, { "1", "", "5" })
+  local result = build_undo_update("doopy", { id = "1" }, { "flag" }, cols3, { "1", vim.NIL, "5" })
   has(result, '"flag" = NULL')
   no(result, "''")
 end)
@@ -222,22 +220,17 @@ end)
 test("undo UPDATE: multiple changed cols with some NULL → correct mix", function()
   -- flag was NULL, small_num was '100'
   local result = build_undo_update(
-    "doopy", { id = "1" }, { "flag", "small_num" }, cols3, { "1", "", "100" }
+    "doopy", { id = "1" }, { "flag", "small_num" }, cols3, { "1", vim.NIL, "100" }
   )
   has(result, '"flag" = NULL')
   has(result, "\"small_num\" = '100'")
   no(result, "''")
 end)
 
--- ── Known limitation documentation ───────────────────────────────────────────
-
-test("known limitation: empty string treated same as NULL (CSV ambiguity)", function()
-  -- A TEXT NOT NULL DEFAULT '' column with value '' is indistinguishable from NULL
-  -- in CSV output. Both produce SQL NULL in undo. Accepted trade-off: same behavior
-  -- as effective_value() and clone_row() throughout the codebase.
+test("undo INSERT: empty text remains an empty SQL string", function()
   local result = build_undo_insert("t", { "id", "label" }, { "1", "" })
-  -- "" in CSV → NULL in undo SQL (even if the real DB value was '')
-  has(result, "NULL", "empty string treated as NULL (known limitation)")
+  has(result, "'1', ''", "empty text must remain empty")
+  no(result, "NULL")
 end)
 
 -- ── Summary ───────────────────────────────────────────────────────────────────

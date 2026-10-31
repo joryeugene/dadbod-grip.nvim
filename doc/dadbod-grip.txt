@@ -1006,13 +1006,122 @@ Workflow:
   4. Apply all changes with `a` (wraps in BEGIN/COMMIT transaction)
   5. Undo individual edits with `u` or reset all with `U`
 
-All DML is wrapped in a transaction. If any statement fails, the entire
-transaction is rolled back and your staged changes are preserved so you
-can fix the value and retry.
+Structured grid writes run in one transaction. A guard or statement failure
+rolls back that batch and preserves staged changes. A timed-out or interrupted
+client can leave the outcome unknown; inspect and refresh before retrying.
 
 Multi-level undo: every edit operation pushes the previous state onto a
 50-deep undo stack. Press `u` repeatedly to step back through your edit
 history. Press `U` to reset to the original state in one step.
+
+Committed Undo ~
+
+After applying staged edits, `u` performs a guarded compensating row operation.
+It uses identities captured in that write's session, including post-edit keys,
+and requires the stored current values to match. A conflict or missing row
+rolls back the reversal and retains the Undo entry. This is not a universal
+transaction rollback: triggers may run again, and arbitrary trigger effects on
+other rows or tables are not reversed. If exact target-row restoration cannot
+be proved, Undo fails without consuming its entry.
+
+Generated identities are supported through SQLite rowid, PostgreSQL RETURNING,
+DuckDB RETURNING, MariaDB INSERT RETURNING, and MySQL's single auto-increment
+primary key. MySQL/MariaDB grid writes require InnoDB and enforced CHECK
+constraints. ENUM/SET definitions must have unique nonempty ASCII labels made
+of letters, digits, underscores or hyphens. Empty, case-equivalent, escaped or
+otherwise unproven labels refuse the entire batch before writing. Spatial row
+restoration is also unsupported. Custom SQL remains available.
+SQLite generated keys in WITHOUT ROWID tables, tables shadowing
+all rowid aliases, and MySQL incomplete non-auto-increment or composite keys
+require explicit complete keys. A batch containing an unsupported generated
+identity is refused before any row changes; no partial Undo is offered. NULL,
+missing, or unproven row keys also fail closed. SQL Server grids remain read-only.
+Failed writes after submission remain uncertain unless rollback is proved.
+They are never retried automatically. If original client completion is still
+unknown, refresh refuses to discard staging or clear the write guard. After
+confirmed client exit, inspect and refresh before taking a new action. An
+uncertain Undo entry cannot be replayed.
+
+Lossless SQLite reads require UTF-8 database encoding and SQLite 3.35 or newer
+for MATERIALIZED result snapshots. UTF-16 databases are refused before the
+original read; their encoding is never changed. Custom SQL execution remains
+available, but unsupported result reads do not become editable grids.
+
+MySQL/MariaDB typed reads evaluate the original SELECT once inside a derived
+table. A LIMIT fence preserves materialization and original ORDER/LIMIT and
+DISTINCT behavior. Known direct fields and explicit AS labels retain their
+spelling, including quoted names. Source metadata before the read plans headers
+only. The original read runs first in its transaction; source types, visibility
+and the complete schema are checked afterward on that same client. Source
+restoration is admitted only after matching receipts, COMMIT and client exit.
+No TEMP table privilege is required, and read-only profiles keep server-side
+transaction enforcement.
+
+Column metadata can hide columns the account cannot see. Grip also compares
+the complete quoted column names/order from SHOW CREATE TABLE with the type
+metadata while the original read's metadata lock remains held. Invisible and
+generated SQL columns are included. The bounded layout check requires
+sql_quote_show_create enabled and the adapter's fixed SQL mode. On MySQL with
+generated invisible-key support, show_gipk_in_create_table_and_information_schema
+must be ON. An absent setting is accepted only on identified MariaDB or the
+documented pre-GIPK MySQL 8.0.0--8.0.29 profile. Grip reads these settings and
+does not change them or grant access. Native verification covers MySQL 8.4 and
+MariaDB 11.8; this does not claim native testing on older server versions.
+
+A successful pre-read check that establishes an unsupported visibility/layout
+profile can select native read-only results before any original query runs.
+Denied metadata, unknown visibility or ambiguous layout parsing is an error;
+it cannot trigger a second route. A post-read layout mismatch withholds the
+result after the one query ran. SHOW CREATE supplies only a SQL-column span
+witness; type/charset metadata supplies physical types. Engine-internal hidden
+storage is outside this layout contract.
+
+Other safe single SELECTs, CTEs and set operations keep the original native
+query and headers through a route chosen before execution. Session-context
+reads also remain unwrapped. These results have unproven physical types and
+remain read-only; this route makes no universal byte or NULL fidelity claim.
+Explicit duplicate labels, batches on the SELECT route, INTO/locking clauses
+and ambiguous client commands are refused before execution. Intentional custom
+DDL/DML/routine batches remain a separate invocation path and are denied on
+read-only profiles. Safe SHOW/DESCRIBE/EXPLAIN reads remain available.
+
+Schema changes, unsupported types or unsafe warnings can withhold a result
+after the query ran. A successful original is committed when a completed
+metadata comparison or codec check withholds only its result. Actual metadata/client errors
+close the session; commit or completion failures report uncertainty. No error,
+denial or cancellation causes a fallback or automatic SQL replay.
+
+Result provenance ~
+
+A byte-encoding receipt is separate from proof of a column's physical SQL type
+and editable source. Results with unproven source restoration remain read-only;
+staging an apparent text value cannot upgrade that proof. Empty results and
+all-NULL columns also require column-level proof. Metadata-only source records
+and binding flags alone never establish an editable source.
+
+Unproven bytes display as hexadecimal in the grid and the gB split inspector.
+Text/JSON inspectors, clipboard yanks and exports refuse values whose encoding
+is unproven. Encoding-proven text may be exported for presentation, but SQL
+export, cloning and grid writes additionally require source restoration proof.
+Page, all-row and batched file exports retain the original provenance. A
+refused file export preserves any existing destination.
+
+Empty text and SQL NULL ~
+
+Empty text displays as `""`; SQL NULL displays as the NULL marker. Clearing an
+ordinary value and saving stages empty text. Saving an untouched NULL buffer
+stages nothing. The existing grid `x` action stages SQL NULL.
+
+Inside either editable cell buffer, `:GripCellEmpty` stages empty text even
+when the original value is NULL, and `:GripCellNull` stages SQL NULL. These
+commands close the float editor; the split editor stays open. They only stage
+a value. The grid's normal Apply confirmation still controls the database write.
+An editor whose grid was refreshed, replaced, or navigated elsewhere refuses
+stale saves and commands. Raw JSON text remains unchanged by no-op saves.
+
+CSV and TSV exports encode NULL as an unquoted empty field and empty text as
+`""`. JSON exports keep non-NULL cell text as strings, including numeric and
+boolean spellings, instead of guessing a value's type from its characters.
 
 Read-only mode is auto-detected when no primary key exists on the table or
 the result omits any primary-key column, including part of a composite key
@@ -1438,13 +1547,19 @@ expanded url. Passwords also reach psql, mysql, and sqlcmd through the process
 environment rather than argv, so they are not visible in another user's `ps`.
 Processes running as your user may still read those environment variables.
 
-Grip sends all database SQL and AI request content through stdin. Statements,
+Grip sends original SQL and AI request content through stdin. Statements,
 prompts, schema context, existing SQL, and JSON request bodies are absent from
 argv. AI URLs and headers also travel through `curl --config -`, and API-key
 lookup commands run through shell stdin. DuckDB attachment declarations use
 the same stdin boundary. Credentialed PostgreSQL and MySQL attachments use
 invocation-scoped temporary DuckDB secrets and attach by secret name. Grip
 never creates persistent DuckDB secrets.
+
+SQLite's lossless read path also uses a generated SQL script containing selected
+column identifiers. It creates the script as 0600 inside a fresh 0700 temporary
+directory and removes it after the client exits, including cancellation cleanup.
+Identifiers can be sensitive. The original query and mutation values remain on
+stdin, and the temporary path carries no connection credentials.
 
 Limit: a templated url is grip-only. vim-dadbod's `:DB` and any statusline
 reading `g:db` see the literal `${NAME}`. Keep such connections un-templated
