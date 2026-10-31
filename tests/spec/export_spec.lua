@@ -156,12 +156,11 @@ end)
 
 -- ── JSON edge cases ───────────────────────────────────────────────────────────
 
-test("format_export json: numeric value is unquoted in output", function()
+test("format_export json: numeric text stays quoted to preserve its type and spelling", function()
   local lines = fmt({ {"alice", "42"} }, {"name", "score"}, "json", "t")
   local joined = table.concat(lines, "\n")
-  -- "score": 42  (no quotes around 42)
-  contains(joined, '"score": 42')
-  not_contains(joined, '"score": "42"')
+  contains(joined, '"score": "42"')
+  not_contains(joined, '"score": 42')
 end)
 
 test("format_export json: value with backslash is escaped", function()

@@ -1,0 +1,35 @@
+local data, db, sql = require('dadbod-grip.data'), require('dadbod-grip.db'), require('dadbod-grip.sql')
+local pass,fail=0,0
+local function test(n,f) local ok,e=pcall(f);if ok then pass=pass+1 else fail=fail+1;print('FAIL: '..n..': '..tostring(e)) end end
+local function eq(a,b) assert(a==b,'expected '..tostring(b)..', got '..tostring(a)) end
+test('CSV lossless mode distinguishes NULL, empty, literal NULL and large numbers',function()
+ local r=db.parse_csv('n,e,t,b\n,"",NULL,9007199254740993\n',nil,false,true)
+ eq(r.rows[1][1],vim.NIL);eq(r.rows[1][2],'');eq(r.rows[1][3],'NULL');eq(r.rows[1][4],'9007199254740993')
+end)
+test('typed values keep empty text through staging and original value resolution',function()
+ local st=data.new({columns={'id','v'},rows={{'1',''}},primary_keys={'id'},table_name='t'})
+ eq(data.effective_value(st,1,'v'),'');eq(data.from_csv_raw(''),'')
+ st=data.add_change(st,1,'v','');eq(st.changes[1].v,'')
+ st=data.add_change(st,1,'v',nil);eq(st.changes[1].v,vim.NIL)
+ eq(data.NULL_SENTINEL,vim.NIL)
+end)
+test('empty key is a literal predicate; typed NULL key is rejected',function()
+ eq(sql.build_delete('t',{id=''}),[[DELETE FROM "t" WHERE "id" = '']])
+ assert(not pcall(sql.build_delete,'t',{id=vim.NIL}),'NULL key should be refused')
+ assert(not pcall(sql.build_update,'t',{}, {v='x'}),'missing identity should be refused')
+end)
+test('typed SQLite query preserves embedded CRLF bytes',function()
+ local file=vim.fn.tempname()..'.db'
+ local r,e=require('dadbod-grip.adapters.sqlite').query("SELECT char(13)||char(10) AS v",'sqlite:'..file)
+ assert(r,e);eq(r.rows[1][1],'\r\n');vim.fn.delete(file)
+end)
+test('SQLite TEXT containing NUL bytes cannot impersonate an empty key',function()
+ local file=vim.fn.tempname()..'.db'
+ local r,e=require('dadbod-grip.adapters.sqlite').query("SELECT CAST(X'004E554C4C00' AS TEXT) AS v",'sqlite:'..file)
+ assert(r,e);eq(r.rows[1][1],'\0NULL\0');vim.fn.delete(file)
+end)
+test('MySQL XML carries NULL and text without numeric or entity guessing',function()
+ local r,e=require('dadbod-grip.transport').mysql_xml([[<?xml version="1.0"?><resultset><row><field name="n" xsi:nil="true" /><field name="e"></field><field name="t">NULL</field><field name="b">9007199254740993</field><field name="s">&amp;lt;&#10;</field></row></resultset>]])
+ assert(r,e);eq(r.rows[1][1],vim.NIL);eq(r.rows[1][2],'');eq(r.rows[1][3],'NULL');eq(r.rows[1][4],'9007199254740993');eq(r.rows[1][5],'&lt;\n')
+end)
+print(('typed_values_spec: %d passed, %d failed'):format(pass,fail));if fail>0 then os.exit(1) end

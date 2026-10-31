@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The float and split cell editors provide buffer-local `:GripCellEmpty` and
+  `:GripCellNull` commands to stage empty text or SQL NULL explicitly.
+
 ### Fixed
 
+- Grid writes capture their row identities within the original transaction.
+  Committed Undo uses the post-write keys and checks stored row values before
+  reversing changes. Conflicts preserve the Undo entry instead of reporting
+  success. Unsupported generated-key batches are refused before writing.
+- SQL NULL, empty text, and literal text stay distinct through supported query
+  transports, editing, cloning, grid writes, Undo, and CSV/TSV/JSON/SQL exports.
+  Blank editor saves now mean empty text; an untouched NULL remains unchanged.
+- A failed DuckDB query wrapper surfaces its error without rerunning the
+  original statement. Unsupported batch syntax is classified before execution.
 - MySQL/MariaDB default-row inserts translate SQL tokens instead of replacing
   matching text inside data, quoted identifiers, or comments. Mixed-case and
   comment-separated `DEFAULT VALUES` clauses work without rewriting their
@@ -20,6 +34,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exact numeric values; malformed registries are refused without writing.
   Deletion refuses numeric and other unsupported profile IDs rather than
   treating rounded numeric values as the same identity.
+- SQLite reads retain actual cell storage classes through guarded edits,
+  cloning, and Undo, including BLOBs in text-declared columns. Quoted column
+  names and values containing `WHERE` use structured predicates.
+- A write error after submission reports an unknown outcome unless rollback
+  is proved. Refresh preserves staging and the write guard while the original
+  client's completion remains unknown.
+- MySQL/MariaDB grid batches refuse ambiguous or unproven ENUM/SET definitions
+  before writing. Ordinary unique nonempty ASCII label profiles retain
+  update, clone, delete and Undo support; spatial restoration is refused.
+- MySQL/MariaDB supported SELECTs preserve NUL text, mixed character sets,
+  binary bytes and exact numeric text through one original read. Source types
+  are checked on the same transaction after the read and admitted only after
+  a complete quoted column-layout witness, COMMIT and client completion.
+  Privilege-filtered column prefixes and hidden generated-key metadata cannot
+  establish restoration proof. No TEMP privilege is required; read-only
+  profiles retain server enforcement. Other safe single reads keep native
+  headers and remain read-only with unproven types. Errors never replay SQL.
+- Result provenance remains attached to staged state and page/all-row exports.
+  Values with unproven physical types or byte encoding stay read-only and
+  cannot be cloned, restored or exported as SQL. Unproven bytes display as
+  hexadecimal in the grid and split inspector instead of being parsed as JSON
+  or copied as text. Source metadata alone never enables restoration.
 
 ## [3.17.0] - 2026-10-31
 

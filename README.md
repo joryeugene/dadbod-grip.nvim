@@ -204,7 +204,7 @@ Welcome actions are also configurable, for example `keymaps = { welcome_next = "
 
 Dadbod Grip stages cell edits, inserted rows, and deletions in memory. Nothing reaches the database until you inspect the generated SQL and confirm the apply action. A connection with `"mode": "ro"` disables editing and asks the database client for a read-only session, but database permissions remain the real security boundary.
 
-Dadbod Grip sends all database SQL and AI request content through stdin. Statements, mutation values, prompts, schema context, existing SQL, and request bodies stay out of process arguments. API-key lookup commands also enter the shell through stdin.
+Dadbod Grip keeps original SQL, mutation values, AI prompts, schema context, and request bodies out of process arguments. They travel through stdin, as do API-key lookup commands. SQLite reads also use a generated SQL script with selected column identifiers, created as 0600 inside a fresh 0700 temporary directory and removed after the client exits. Those identifiers can be sensitive.
 
 For `:GripImport !command`, the parent shell receives the script through stdin, but child commands retain normal shell argument visibility. Pass credentials through environment variables, stdin, or configuration files instead of command arguments.
 

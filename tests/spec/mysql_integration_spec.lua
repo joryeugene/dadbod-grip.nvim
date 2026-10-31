@@ -85,33 +85,33 @@ test("query: basic SELECT returns rows and columns", function()
   eq(r.rows[1][2], "Alice", "first row name")
 end)
 
-test("query: NULL arrives as the literal string NULL (known transport limit)", function()
-  -- mysql --batch prints NULL as four bytes "NULL", so a real NULL is
-  -- indistinguishable from the string 'NULL'. Pinned so that changing it is a
-  -- deliberate decision -- pg's psql --csv renders NULL as "" instead.
+test("query: SQL NULL, literal NULL text, and empty text stay distinct", function()
   local r, err = my.query("SELECT NULL AS nul, 'NULL' AS lit, '' AS blank FROM users LIMIT 1", URL)
   assert(r, err)
-  eq(r.rows[1][1], "NULL", "real NULL")
-  eq(r.rows[1][2], "NULL", "string 'NULL' is not distinguishable from it")
+  eq(r.rows[1][1], vim.NIL, "real NULL stays typed NULL")
+  eq(r.rows[1][2], "NULL", "literal NULL stays text")
   eq(r.rows[1][3], "", "empty string stays empty")
 
   local u = my.query("SELECT name, email, age FROM users WHERE name IN ('Charlie','Diana') ORDER BY name", URL)
   eq(#u.rows, 2, "NULL-able columns do not drop rows")
-  eq(u.rows[1][3], "NULL", "NULL age")
-  eq(u.rows[2][2], "NULL", "NULL email")
+  eq(u.rows[1][3], vim.NIL, "NULL age")
+  eq(u.rows[2][2], vim.NIL, "NULL email")
 end)
 
-test("query: empty result set loses column headers (known --batch limit)", function()
-  -- With zero rows mysql --batch prints nothing at all, not even the header
-  -- line, so columns come back empty. psql --csv keeps them; pinned as the
-  -- documented divergence rather than as desirable behaviour.
+test("query: empty result set retains proven column headers", function()
   local r, err = my.query("SELECT * FROM empty_table", URL)
   assert(r, err)
   eq(#r.rows, 0, "no rows")
-  eq(#r.columns, 0, "no columns either")
+  eq(#r.columns, 2, "empty table metadata stays available")
+  eq(r.columns[1], "id", "first schema column")
+  eq(r.columns[2], "value", "second schema column")
 end)
 
-test("query: multibyte values survive the TSV round-trip", function()
+test("query: multibyte values survive the native transport", function()
+  local stored, stored_err = my.query("SELECT HEX(value) AS bytes FROM unicode_fun WHERE id=1", URL)
+  assert(stored, stored_err)
+  eq(stored.rows[1][1], "F09F8E89F09F9A80F09F92BEF09F94A5E29CA82050617274792074696D6521",
+    "seed stores UTF-8 bytes rather than a compensating charset error")
   local r, err = my.query("SELECT label, value FROM unicode_fun ORDER BY id", URL)
   assert(r, err)
   eq(#r.rows, 7, "all unicode rows")
@@ -122,7 +122,7 @@ test("query: multibyte values survive the TSV round-trip", function()
 end)
 
 test("query: escaped tabs and newlines inside values are unescaped", function()
-  -- --batch escapes control characters on the way out; parse_batch must undo it.
+  -- Preserve real control bytes without changing the column framing.
   local r, err = my.query("SELECT CONCAT('l1', CHAR(10), 'l2') AS multi, CONCAT('a', CHAR(9), 'b') AS tabbed", URL)
   assert(r, err)
   eq(#r.columns, 2, "two columns despite the embedded tab")

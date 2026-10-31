@@ -88,10 +88,18 @@ local function mysql_env(parsed)
 end
 
 --- Run a statement, blocking.
-local function mysql_query(parsed, sql_str, timeout_ms)
+local function mysql_query(parsed, sql_str, timeout_ms, xml, guarded, hooks)
   local opts = adapters.session_opts()
-  return adapters.run_cmd(mysql_args(parsed), timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
-    { stdin = mysql_stdin(sql_str, opts), env = mysql_env(parsed) })
+  local args = mysql_args(parsed)
+  if xml then args[#args + 1] = "--xml" end
+  if guarded then
+    args[#args + 1] = "--skip-force"; args[#args + 1] = "--skip-reconnect"
+    args[#args + 1] = "--default-character-set=utf8mb4"
+  end
+  return adapters.run_cmd(args, timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
+    { stdin = mysql_stdin(sql_str, opts), env = mysql_env(parsed), raw_output = xml,
+      on_start = hooks and hooks.on_start, on_complete = hooks and hooks.on_complete,
+      on_spawn_error = hooks and hooks.on_spawn_error, terminate_on_interrupt = hooks ~= nil })
 end
 
 --- Run a statement without blocking; same argv, stdin and env as mysql_query.
@@ -109,20 +117,15 @@ function M.query(sql_str, url)
   local parsed = parse_url(url)
   if not parsed then return nil, "Invalid MySQL URL: " .. sql_util.redact_url(url) end
 
-  local stdout, stderr, code = mysql_query(parsed, sql_str)
-  if code ~= 0 then
-    local msg = stderr ~= "" and stderr or ("mysql exited with code " .. code)
-    return nil, msg
-  end
-
-  local result, parse_err = parse_output(stdout)
-  if not result then return nil, parse_err end
-
-  return {
-    rows = result.rows,
-    columns = result.columns,
-    primary_keys = {},
-  }, nil
+  return require("dadbod-grip.mysql_read").query(sql_str, {
+    args = mysql_args(parsed), env = mysql_env(parsed),
+    setup = mysql_stdin("", adapters.session_opts()),
+    timeout = adapters.configured_timeout(DEFAULT_TIMEOUT),
+    readonly = adapters.session_opts().readonly == true,
+    identity = { schema = parsed.dbname, instance = (parsed.host or "localhost") .. ":"
+      .. tostring(parsed.port or "3306") .. "/" .. (parsed.user or "") },
+    source_provider = require("dadbod-grip.mysql_source"),
+  })
 end
 
 function M.get_primary_keys(table_name, url)
@@ -174,14 +177,17 @@ function M.get_column_info(table_name, url)
       c.COLUMN_TYPE AS data_type,
       c.IS_NULLABLE AS is_nullable,
       COALESCE(c.COLUMN_DEFAULT, '') AS column_default,
-      COALESCE(c.COLUMN_KEY, '') AS constraints
+      COALESCE(c.COLUMN_KEY, '') AS constraints, c.EXTRA AS extra,
+      COALESCE(c.CHARACTER_SET_NAME, '') AS character_set, COALESCE(c.COLLATION_NAME, '') AS collation,
+      c.ORDINAL_POSITION AS ordinal_position, COALESCE(c.GENERATION_EXPRESSION, '') AS generation_expression,
+      c.TABLE_SCHEMA AS source_schema, c.TABLE_NAME AS source_table
     FROM information_schema.COLUMNS c
     WHERE c.TABLE_SCHEMA = '%s'
       AND c.TABLE_NAME = '%s'
     ORDER BY c.ORDINAL_POSITION
   ]], esc(schema), esc(tbl))
 
-  local stdout, stderr, code = mysql_query(parsed, info_sql)
+  local stdout, stderr, code = mysql_query(parsed, info_sql, nil, false, true)
   if code ~= 0 then
     return nil, stderr ~= "" and stderr or "Failed to query column info"
   end
@@ -203,6 +209,19 @@ function M.get_column_info(table_name, url)
       is_nullable    = row[3] or "",
       column_default = row[4] or "",
       constraints    = constraint_str,
+      generated      = (row[6] or ""):find("VIRTUAL GENERATED", 1, true) ~= nil
+        or (row[6] or ""):find("STORED GENERATED", 1, true) ~= nil,
+      character_set  = row[7] or "",
+      collation      = row[8] or "",
+      column_type    = row[2], -- exact server spelling; data_type remains UI-normalized
+      extra          = row[6],
+      ordinal        = tonumber(row[9]),
+      ordinal_position = tonumber(row[9]),
+      visible        = row[6] and (row[6]:upper():find('INVISIBLE',1,true) == nil),
+      generation_expression = row[10],
+      source_schema  = row[11],
+      source_table   = row[12],
+      metadata_source = row[9] and row[11] and row[12] and 'source_schema' or nil,
     })
   end
   return cols, nil
@@ -692,6 +711,37 @@ function M.execute(sql_str, url)
   end
 
   return { affected = n, message = n .. " row(s) affected" }, nil
+end
+
+function M.grid_write(plan, url, opts)
+  local transaction = require("dadbod-grip.transaction")
+  local parsed = parse_url(url)
+  if not parsed then return nil, "Invalid MySQL URL" end
+  local schema, tbl = split_table_name(plan.table_name, parsed.dbname)
+  local output, metadata_error, metadata_code = mysql_query(parsed,
+    "SELECT VERSION(), ENGINE, (SELECT COLUMN_NAME FROM information_schema.COLUMNS"
+    .. " WHERE TABLE_SCHEMA=" .. sql_util.quote_value(schema) .. " AND TABLE_NAME=" .. sql_util.quote_value(tbl)
+    .. " AND EXTRA LIKE '%auto_increment%' LIMIT 1) FROM information_schema.TABLES WHERE TABLE_SCHEMA="
+    .. sql_util.quote_value(schema) .. " AND TABLE_NAME=" .. sql_util.quote_value(tbl), nil, true, true)
+  if metadata_code ~= 0 then return nil, metadata_error end
+  local metadata = require("dadbod-grip.transport").mysql_xml(output)
+  local row = metadata and metadata.rows[1]
+  if not row or (row[2] or ""):lower() ~= "innodb" then return nil, "Verified grid writes require InnoDB" end
+  local kind = (row[1] or ""):find("MariaDB", 1, true) and "mariadb" or "mysql"
+  local major, minor, patch = (row[1] or ""):match("(%d+)%.(%d+)%.(%d+)")
+  local version = major and (tonumber(major) * 10000 + tonumber(minor) * 100 + tonumber(patch)) or 0
+  if version < (kind == "mariadb" and 100201 or 80016) then
+    return nil, "Verified grid writes require enforced CHECK constraints (MySQL8.0.16 or MariaDB10.2.1 and newer)"
+  end
+  local script, err = transaction.compile(plan, kind, { auto_increment = row[3], schema = schema, table_name = tbl })
+  if not script then return nil, err end
+  local stdout, stderr, code = transaction.submit(kind, opts, function(hooks)
+    return mysql_query(parsed, script, nil, false, true, hooks)
+  end)
+  if code ~= 0 then return nil, stderr ~= "" and stderr or ("mysql exited with code " .. code) end
+  local result, decode_err = transaction.decode(plan, stdout, kind)
+  if result then result.sql = script end
+  return result, decode_err
 end
 
 --- Ping the server by running SELECT 1. Returns true on success, false on any error.
