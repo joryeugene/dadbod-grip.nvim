@@ -239,8 +239,9 @@ function M.compile(plan, kind, caps)
         local name = q(col)
         local spelling = "CASE WHEN " .. name .. "=9e999 THEN '9e999' WHEN " .. name
           .. "=-9e999 THEN '-9e999' ELSE printf('%!.26g'," .. name .. ') END'
-        terms[#terms + 1] = "(typeof(" .. name .. ")<>'real' OR printf('%!.26g',CAST("
-          .. spelling .. " AS REAL))=printf('%!.26g'," .. name .. '))'
+        local restored = 'CAST(' .. spelling .. ' AS REAL)'
+        terms[#terms + 1] = "(typeof(" .. name .. ")<>'real' OR (" .. restored .. ' IS ' .. name
+          .. " AND printf('%!.26g'," .. restored .. ")=printf('%!.26g'," .. name .. ')))'
       end
       check_sqlite_reals = function(tbl, where)
         real_check('COALESCE(MIN(CASE WHEN ' .. table.concat(terms, ' AND ')
