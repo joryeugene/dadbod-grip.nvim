@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Committed Undo uses the post-write keys and checks stored row values before
   reversing changes. Conflicts preserve the Undo entry instead of reporting
   success. Unsupported generated-key batches are refused before writing.
+- SQLite verifies REAL-value restoration before committing reversible grid
+  batches. Runtimes that cannot round-trip a value keep the batch staged
+  instead of committing a change that Undo cannot reverse exactly.
 - SQL NULL, empty text, and literal text stay distinct through supported query
   transports, editing, cloning, grid writes, Undo, and CSV/TSV/JSON/SQL exports.
   Blank editor saves now mean empty text; an untouched NULL remains unchanged.

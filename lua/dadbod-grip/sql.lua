@@ -31,7 +31,9 @@ function M.quote_value(v, adapter_kind, storage_type, exact)
     local numeric = exact or tostring(v)
     if numeric == "Inf" then numeric = "9e999" elseif numeric == "-Inf" then numeric = "-9e999" end
     assert(numeric:match("^[%+%-]?[%d%.]+[eE]?[%+%-]?%d*$"), "invalid real receipt")
-    return "CAST(" .. numeric .. " AS REAL)"
+    -- Use the same text-to-REAL conversion checked by SQLite transaction
+    -- admission. A numeric SQL token must not take a different parser path.
+    return "CAST('" .. numeric .. "' AS REAL)"
   elseif type(v) == "boolean" then
     return v and "TRUE" or "FALSE"
   elseif type(v) == "number" then

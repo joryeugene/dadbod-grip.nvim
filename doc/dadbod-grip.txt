@@ -1046,6 +1046,10 @@ Lossless SQLite reads require UTF-8 database encoding and SQLite 3.35 or newer
 for MATERIALIZED result snapshots. UTF-16 databases are refused before the
 original read; their encoding is never changed. Custom SQL execution remains
 available, but unsupported result reads do not become editable grids.
+Before a reversible SQLite grid batch, Grip verifies that this SQLite runtime
+can restore the original REAL values from their exact receipts. Some older
+versions cannot round-trip tiny subnormal values. Such batches remain staged
+without changing rows; clones with an unrestorable REAL receipt also refuse.
 
 MySQL/MariaDB typed reads evaluate the original SELECT once inside a derived
 table. A LIMIT fence preserves materialization and original ORDER/LIMIT and

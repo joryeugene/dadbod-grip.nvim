@@ -212,6 +212,7 @@ function M.compile(plan, kind, caps)
     local function emit(tbl, i, phase, empty)
       add('SELECT ' .. event_expr(plan, i, phase, kind, empty) .. ' AS _grip_event' .. (tbl and ' FROM ' .. tbl or ''))
     end
+    local check_sqlite_reals
     local function capture(name, where)
       if mysql then
         add('CREATE TEMPORARY TABLE ' .. name .. ' ENGINE=InnoDB AS SELECT ' .. col_list .. ' FROM ' .. target .. ' WHERE false')
@@ -221,6 +222,46 @@ function M.compile(plan, kind, caps)
           .. (kind == 'postgresql' and ' FOR UPDATE' or ''))
       end
       count(name)
+      -- Recheck captures as well: triggers in an earlier operation can change
+      -- a later row, and newly written values must keep Undo executable.
+      if check_sqlite_reals then check_sqlite_reals(name) end
+    end
+    if kind == 'sqlite' then
+      -- Some SQLite versions cannot parse their own long subnormal spelling
+      -- back to the original REAL. Check the complete batch before any target
+      -- DML: detecting this only during Undo leaves the earlier write committed.
+      local real_guard = q(token .. '_real_guard')
+      add('CREATE TEMPORARY TABLE ' .. real_guard .. ' (n INTEGER NOT NULL CONSTRAINT '
+        .. q('Grip cannot exactly restore this SQLite REAL value') .. ' CHECK(n=1))')
+      local function real_check(expr) add('INSERT INTO ' .. real_guard .. ' SELECT ' .. expr) end
+      local terms = {}
+      for _, col in ipairs(plan.columns) do
+        local name = q(col)
+        local spelling = "CASE WHEN " .. name .. "=9e999 THEN '9e999' WHEN " .. name
+          .. "=-9e999 THEN '-9e999' ELSE printf('%!.26g'," .. name .. ') END'
+        terms[#terms + 1] = "(typeof(" .. name .. ")<>'real' OR printf('%!.26g',CAST("
+          .. spelling .. " AS REAL))=printf('%!.26g'," .. name .. '))'
+      end
+      check_sqlite_reals = function(tbl, where)
+        real_check('COALESCE(MIN(CASE WHEN ' .. table.concat(terms, ' AND ')
+          .. ' THEN 1 ELSE 0 END),1) FROM ' .. tbl .. (where and (' WHERE ' .. where) or ''))
+      end
+      for _, op in ipairs(plan.ops) do
+        if op.kind ~= 'insert' then
+          local where = predicate(vim.tbl_extend('force', op.expected or {}, op.keys), kind,
+            op.expected_types, op.expected_exact, plan.schema)
+          check_sqlite_reals(target, where)
+        else
+          for col, value in pairs(op.values) do
+            if op.value_types and op.value_types[col] == 'real' then
+              local exact = op.value_exact and op.value_exact[col]
+              assert(exact, 'unproven SQLite REAL restoration receipt: ' .. col)
+              real_check("CASE WHEN printf('%!.26g'," .. sql.quote_value(value, kind, 'real', exact)
+                .. ')=' .. v(exact) .. ' THEN 1 ELSE 0 END')
+            end
+          end
+        end
+      end
     end
     for i, op in ipairs(plan.ops) do
       local before, after = q(token .. '_b' .. i), q(token .. '_a' .. i)
