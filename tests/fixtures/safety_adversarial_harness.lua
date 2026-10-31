@@ -53,7 +53,14 @@ function M.fixture(fn)
   function c.open(name)
     grip.open(name, c.url, { from_pad = true })
     local buf = vim.api.nvim_get_current_buf()
-    return buf, assert(view._sessions[buf], "missing fixture session")
+    local session = assert(view._sessions[buf], "missing fixture session")
+    -- External stale-row mutations must follow the initial metadata read.
+    -- Quiesce this fixture's callback; product query scheduling is separate.
+    if session.state.table_name then
+      assert(vim.wait(5000, function() return session._column_info ~= nil end, 1),
+        "fixture column metadata did not settle")
+    end
+    return buf, session
   end
   function c.action(action)
     local mapping = vim.fn.maparg(require("dadbod-grip.keymaps").get(action), "n", false, true)
