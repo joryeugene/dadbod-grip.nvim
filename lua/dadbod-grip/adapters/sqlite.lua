@@ -444,8 +444,8 @@ function M.execute(sql_str, url)
   local db_path = extract_path(url)
   if not db_path then return nil, "Invalid SQLite URL: " .. url end
 
-  -- Append changes() to get affected row count in a single invocation
-  local wrapped = sql_str .. "; SELECT changes();"
+  -- Keep a trailing line comment from swallowing the affected-count query.
+  local wrapped = sql_str .. "\n; SELECT changes();"
   local stdout, stderr, code = sqlite3(db_path, wrapped)
   if code ~= 0 then
     local msg = stderr ~= "" and stderr or ("sqlite3 exited with code " .. code)

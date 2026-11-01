@@ -116,168 +116,149 @@ local function deny_if_readonly(cmd_name, url)
   return require("dadbod-grip.connections").deny_if_readonly(cmd_name, url)
 end
 
--- Share the token stream between projection and source checks: comments and
--- quoted identifiers must never supply a different FROM to either check.
-local function tokenize_select(sql_text, adapter_kind)
-  local tokens = {}
-  local i = 1
-  local len = #sql_text
-  -- Keep UTF-8 identifier bytes together; punctuation still ends the word.
-  local word_start = "[%a_\128-\255]"
-  local word_part = "[%w_$\128-\255]"
-  local function skip_space()
-    while i <= len and sql_text:sub(i, i):match("%s") do i = i + 1 end
-  end
+local tokenize_select = require("dadbod-grip.sql_tokens").tokenize
 
-  local function read_word()
-    local start = i
-    if not sql_text:sub(i, i):match(word_start) then return nil end
-    i = i + 1
-    while i <= len and sql_text:sub(i, i):match(word_part) do i = i + 1 end
-    return sql_text:sub(start, i - 1)
-  end
+-- Ordinary statements keep the cheap keyword check. Leading SQL comments need
+-- the same lexical boundaries as previews, while the original text stays intact.
+local function statement_type(text, adapter_kind)
+  local keyword = text:match("^%s*([%a_\128-\255][%w_$\128-\255]*)")
+  if keyword then return keyword:upper() end
+  local tokens = tokenize_select(text, adapter_kind, true)
+  return tokens and tokens[1] and tokens[1].upper
+end
 
-  local function read_number()
-    local prefix = sql_text:sub(i, i + 1):lower()
-    local radix_pattern = prefix == "0x" and "^0[xX]_?[%da-fA-F][%da-fA-F_]*"
-      or prefix == "0b" and "^0[bB]_?[01][01_]*"
-      or prefix == "0o" and "^0[oO]_?[0-7][0-7_]*"
-    local _, finish
-    if radix_pattern then
-      _, finish = sql_text:find(radix_pattern, i)
-      if not finish then return false end
-    else
-      _, finish = sql_text:find("^%d[%d_]*", i)
-      finish = finish or (i - 1)
-      if sql_text:sub(finish + 1, finish + 1) == "." then
-        _, finish = sql_text:find("^%.[%d_]*", finish + 1)
-      end
-      local _, exponent_end = sql_text:find("^[eE][+-]?%d[%d_]*", finish + 1)
-      finish = exponent_end or finish
+-- Classify commands at WITH-body and outer-statement positions. PostgreSQL
+-- permits UPDATE/DELETE/etc. as ordinary column, alias and CTE names; scanning
+-- every word would mistake those reads for writes and discard their results.
+local cte_mutation_words = { UPDATE = true, DELETE = true, INSERT = true, REPLACE = true, MERGE = true }
+local function cte_mutation(tokens, adapter_kind)
+  -- Most WITH queries contain no DML words. Preserve their cheap read routing;
+  -- any candidate, including a nested or later statement, needs full context.
+  local candidate = false
+  for _, token in ipairs(tokens) do
+    if cte_mutation_words[token.upper] then candidate = true; break end
+  end
+  if not candidate then return false end
+  local matching, stack, starts = {}, {}, { 1 }
+  for idx, token in ipairs(tokens) do
+    if token.kind == "(" then
+      stack[#stack + 1] = idx
+    elseif token.kind == ")" then
+      local opener = table.remove(stack)
+      if not opener then return nil end
+      matching[opener] = idx
+    elseif token.kind == ";" and #stack == 0 then
+      starts[#starts + 1] = idx + 1
     end
-    i = finish + 1
-    -- Numeric suffixes must not become identifiers in qualification checks.
-    return not sql_text:sub(i, i):match(word_start)
+    -- T-SQL permits adjacent commands without separators. Its reserved DML
+    -- words retain the previous conservative check, excluding @variables and
+    -- qualified identifiers; PostgreSQL needs the structural checks below.
+    if adapter_kind == "sqlserver" then
+      local previous, following = tokens[idx - 1], tokens[idx + 1]
+      if following and (not previous or (previous.kind ~= "." and previous.kind ~= "@"))
+          and (((token.upper == "UPDATE" or token.upper == "DELETE" or token.upper == "INSERT")
+            and (following.kind == "ident" or following.kind == "@"))
+            or (token.upper == "MERGE" and following.upper == "INTO")) then return true end
+    end
   end
-
-  local function read_quoted(quote, escape_string)
-    local close_quote = quote == "[" and "]" or quote
-    local value = {}
-    i = i + 1
-    while i <= len do
-      local ch = sql_text:sub(i, i)
-      if ch == "\\" and quote == "'" then
-        local start = i
-        while sql_text:sub(i, i) == "\\" do i = i + 1 end
-        local odd = (i - start) % 2 == 1
-        if escape_string and odd then
-          if i > len then return nil end
-          i = i + 1
-        elseif odd and sql_text:sub(i, i) == "'"
-            and (adapter_kind == "postgresql" or adapter_kind == "mysql") then
-          -- Session escape settings can change this quote's closing boundary.
-          return nil
-        end
-        value[#value + 1] = sql_text:sub(start, i - 1)
-      elseif ch == close_quote then
-        if sql_text:sub(i + 1, i + 1) == close_quote then
-          value[#value + 1] = close_quote
-          i = i + 2
-        else
-          i = i + 1
-          return table.concat(value)
-        end
+  if #stack > 0 then return nil end
+  local function keyword(pos, value)
+    return tokens[pos] and tokens[pos].upper == value
+  end
+  local function identifier(pos)
+    return tokens[pos] and tokens[pos].kind == "ident"
+  end
+  local function after_keyword(pos, value)
+    while tokens[pos] do
+      if keyword(pos, value) then return pos + 1 end
+      pos = (matching[pos] or pos) + 1
+    end
+  end
+  local function command(pos, wrapped)
+    -- A top-level SELECT/WITH may be wrapped in parentheses. EXPLAIN ANALYZE
+    -- can execute its inner mutation, including in a later batch statement.
+    while matching[pos] do pos = pos + 1 end
+    local verb = tokens[pos] and tokens[pos].upper
+    if verb == "EXPLAIN" then
+      pos = pos + 1
+      if matching[pos] then
+        pos = matching[pos] + 1
       else
-        value[#value + 1] = ch
-        i = i + 1
+        while keyword(pos, "ANALYZE") or keyword(pos, "ANALYSE") or keyword(pos, "VERBOSE") do
+          pos = pos + 1
+        end
       end
+      return command(pos, true)
+    end
+    if verb == "UPDATE" or verb == "DELETE" or verb == "INSERT" or verb == "REPLACE" then return true end
+    if verb == "MERGE" then
+      return adapter_kind == "postgresql" or adapter_kind == "duckdb" or adapter_kind == "sqlserver"
+    end
+    if verb ~= "WITH" then
+      if wrapped and verb ~= "SELECT" and verb ~= "TABLE" and verb ~= "VALUES"
+          and not (adapter_kind == "duckdb" and verb == "FROM") then return nil end
+      return false
+    end
+    pos = pos + 1
+    if keyword(pos, "RECURSIVE") then pos = pos + 1 end
+    -- T-SQL WITH prefixes also carry XML namespaces or change tracking data.
+    if adapter_kind == "sqlserver" and (keyword(pos, "XMLNAMESPACES")
+        or keyword(pos, "CHANGE_TRACKING_CONTEXT")) then
+      if not matching[pos + 1] then return nil end
+      pos = matching[pos + 1] + 1
+      if not tokens[pos] or tokens[pos].kind ~= "," then return command(pos) end
+      pos = pos + 1
+    end
+    while identifier(pos) do
+      pos = pos + 1 -- CTE name, even when it spells a command keyword
+      if matching[pos] then pos = matching[pos] + 1 end -- optional columns
+      if adapter_kind == "duckdb" and keyword(pos, "USING") and keyword(pos + 1, "KEY") then
+        if not matching[pos + 2] then return nil end
+        pos = matching[pos + 2] + 1
+      end
+      if not keyword(pos, "AS") then return nil end
+      pos = pos + 1
+      if keyword(pos, "NOT") then pos = pos + 1 end
+      if keyword(pos, "MATERIALIZED") then pos = pos + 1 end
+      local finish = matching[pos]
+      if not finish then return nil end
+      local mutates = command(pos + 1)
+      if mutates ~= false then return mutates end
+      pos = finish + 1
+      -- Recursive SEARCH/CYCLE suffixes name output columns, not commands.
+      if keyword(pos, "SEARCH") then
+        if not (keyword(pos + 1, "DEPTH") or keyword(pos + 1, "BREADTH"))
+            or not keyword(pos + 2, "FIRST") or not keyword(pos + 3, "BY") then return nil end
+        pos = pos + 4
+        repeat
+          if not identifier(pos) then return nil end
+          pos = pos + 1
+          if not tokens[pos] or tokens[pos].kind ~= "," then break end
+          pos = pos + 1
+        until false
+        -- SET is also a legal sort-column name; only the delimiter after the
+        -- identifier list starts the output-column clause.
+        if not keyword(pos, "SET") or not identifier(pos + 1) then return nil end
+        pos = pos + 2
+      end
+      if keyword(pos, "CYCLE") then
+        pos = after_keyword(pos + 1, adapter_kind == "mysql" and "RESTRICT" or "USING")
+        if not pos then return nil end
+        if adapter_kind ~= "mysql" then
+          if not identifier(pos) then return nil end
+          pos = pos + 1
+        end
+      end
+      if not tokens[pos] or tokens[pos].kind ~= "," then return command(pos) end
+      pos = pos + 1
     end
     return nil
   end
-
-  while i <= len do
-    skip_space()
-    if i > len then break end
-
-    local ch = sql_text:sub(i, i)
-    local next_ch = sql_text:sub(i + 1, i + 1)
-
-    if ch == "-" and next_ch == "-" then
-      -- MySQL requires whitespace/control after --; otherwise it can be
-      -- arithmetic, e.g. total--1 AS status, rather than a comment.
-      local following = sql_text:sub(i + 2, i + 2)
-      if adapter_kind == "mysql" and following ~= ""
-          and not following:match("[%s%c]") then return nil end
-      local newline = sql_text:find("[\r\n]", i + 2)
-      -- PostgreSQL and DuckDB also end comments at a bare CR. Other clients
-      -- differ, so accept their shared CRLF form and reject an ambiguous CR.
-      if newline and sql_text:sub(newline, newline) == "\r"
-          and sql_text:sub(newline + 1, newline + 1) ~= "\n"
-          and adapter_kind ~= "postgresql" and adapter_kind ~= "duckdb" then return nil end
-      i = newline and (newline + 1) or (len + 1)
-    elseif ch == "/" and next_ch == "*" then
-      -- MySQL/MariaDB execute SQL inside these comment forms. Skipping them
-      -- could hide an alias or expression from the projection check.
-      if adapter_kind == "mysql"
-          and (sql_text:sub(i + 2, i + 2) == "!"
-            or sql_text:sub(i + 2, i + 3) == "M!") then return nil end
-      local depth = 1
-      i = i + 2
-      while i <= len and depth > 0 do
-        local pair = sql_text:sub(i, i + 1)
-        if pair == "/*" then
-          if adapter_kind ~= "postgresql" then return nil end
-          depth = depth + 1
-          i = i + 2
-        elseif pair == "*/" then
-          depth = depth - 1
-          i = i + 2
-        else
-          i = i + 1
-        end
-      end
-      if depth ~= 0 then return nil end
-    elseif ch == '"' or ch == "`" or ch == "'"
-        or (ch == "[" and adapter_kind ~= "postgresql" and adapter_kind ~= "duckdb") then
-      -- The MySQL/MariaDB adapter enables ANSI_QUOTES before each query,
-      -- so double quotes denote identifiers there too.
-      -- Adjacent string segments retain E-string escapes across newlines.
-      local previous = tokens[#tokens]
-      local escape_string = ch == "'" and previous and previous.escape_string
-      local ident = read_quoted(ch, escape_string)
-      if not ident then return nil end
-      tokens[#tokens + 1] = {
-        kind = ch == "'" and "literal" or "ident", text = ident, escape_string = escape_string,
-      }
-    elseif ch:match("%d") or (ch == "." and next_ch:match("%d")) then
-      if not read_number() then return nil end
-      tokens[#tokens + 1] = { kind = "literal" }
-    elseif ch:match(word_start) then
-      local word = read_word()
-      if word:upper() == "E" and sql_text:sub(i, i) == "'"
-          and (adapter_kind == "postgresql" or adapter_kind == "duckdb") then
-        local value = read_quoted("'", true)
-        if not value then return nil end
-        tokens[#tokens + 1] = { kind = "literal", text = value, escape_string = true }
-      else
-        tokens[#tokens + 1] = { kind = "ident", text = word, upper = word:upper() }
-      end
-    elseif ch == "$" and (adapter_kind == "postgresql" or adapter_kind == "duckdb") then
-      local delimiter = sql_text:match("^%$%$", i)
-        or sql_text:match("^%$[%a_\128-\255][%w_\128-\255]*%$", i)
-      if not delimiter then return nil end
-      local close = sql_text:find(delimiter, i + #delimiter, true)
-      if not close then return nil end
-      tokens[#tokens + 1] = { kind = "literal" }
-      i = close + #delimiter
-    elseif ch == "$" or (ch == "#" and adapter_kind ~= "postgresql" and adapter_kind ~= "duckdb") then
-      return nil
-    else
-      tokens[#tokens + 1] = { kind = ch }
-      i = i + 1
-    end
+  for _, pos in ipairs(starts) do
+    local mutates = command(pos)
+    if mutates ~= false then return mutates end
   end
-  return tokens
+  return false
 end
 
 -- Expose metadata only for direct columns of one known source. A dotted name
@@ -455,7 +436,7 @@ local function resolve_query(arg, page_size, adapter_kind)
   end
 
   -- Detect statement type
-  local upper = arg:upper():match("^%s*(%u+)")
+  local upper = statement_type(arg, adapter_kind)
   if upper == "SELECT" or upper == "TABLE" then
     local table_name = nil
     local flat = arg:gsub("\n", " ")
@@ -470,15 +451,26 @@ local function resolve_query(arg, page_size, adapter_kind)
     end
     return query.new_raw(arg, page_size), table_name
   end
-  -- WITH can be a read-only CTE (SELECT) or a mutating CTE (UPDATE/DELETE/INSERT).
-  -- Scan for mutation keywords to decide; default to SELECT if none found.
+  -- CTE mutations retain the confirmed execution path, while identifier
+  -- spellings in read queries cannot change their routing.
   if upper == "WITH" then
-    local stripped = arg:upper():gsub("'[^']*'", ""):gsub("%-%-.-%\n", "")
-    if stripped:find("%f[%u]UPDATE%f[^%u]") or stripped:find("%f[%u]DELETE%f[^%u]")
-        or stripped:find("%f[%u]INSERT%f[^%u]") then
+    local tokens = tokenize_select(arg, adapter_kind, true)
+    local mutates = tokens and cte_mutation(tokens, adapter_kind)
+    if mutates == nil then return nil, "Could not safely classify this WITH statement" end
+    if mutates then return nil, nil, nil, arg end
+    return query.new_raw(arg, page_size), nil
+  end
+  -- MERGE has no row-preview model. Preserve the original statement behind
+  -- whole-statement confirmation, consistently with mutating WITH statements.
+  if upper == "MERGE" and (adapter_kind == "postgresql"
+      or adapter_kind == "duckdb" or adapter_kind == "sqlserver") then
+    local tokens = tokenize_select(arg, adapter_kind, true)
+    if not tokens then return nil, "Could not safely classify this MERGE statement" end
+    local target = tokens[2]
+    if target and (target.upper == "INTO" or (adapter_kind == "sqlserver"
+        and (target.kind == "ident" or target.kind == "@"))) then
       return nil, nil, nil, arg
     end
-    return query.new_raw(arg, page_size), nil
   end
   -- REPLACE INTO (MySQL/SQLite): route through mutation preview like INSERT
   if upper == "REPLACE" then
@@ -487,7 +479,7 @@ local function resolve_query(arg, page_size, adapter_kind)
   -- Destructive statements: execute directly, don't wrap in SELECT
   if upper == "UPDATE" or upper == "DELETE" or upper == "INSERT"
     or upper == "ALTER" or upper == "DROP" or upper == "CREATE"
-    or upper == "BEGIN" or upper == "COMMIT" or upper == "ROLLBACK" then
+    or upper == "BEGIN" or upper == "START" or upper == "COMMIT" or upper == "ROLLBACK" then
     return nil, nil, nil, arg  -- 4th return = mutation SQL
   end
   -- Otherwise treat as table name
@@ -944,131 +936,40 @@ local function do_edit(bufnr, cell, url)
   end, edit_opts)
 end
 
--- ── parse INSERT VALUES ───────────────────────────────────────────────────
--- Best-effort parser for INSERT ... VALUES (...), (...).
--- Returns list of {col = val} tables. Skips INSERT...SELECT (no VALUES keyword).
-local function parse_insert_values(flat, columns)
-  if not flat:find("[Vv][Aa][Ll][Uu][Ee][Ss]") then return {} end
-
-  -- Extract column list between INSERT INTO tbl (...) VALUES
-  -- Pattern: everything in parens before the VALUES keyword
-  local col_str = flat:match("[Ii][Nn][Ss][Ee][Rr][Tt][^(]+%(([^)]+)%)%s*[Vv][Aa][Ll][Uu][Ee][Ss]")
-  local insert_cols
-  if col_str then
-    insert_cols = {}
-    for part in col_str:gmatch("[^,]+") do
-      local col = part:match("^%s*(.-)%s*$"):gsub('^"(.*)"$', "%1"):gsub("^`(.*)`$", "%1")
-      if col ~= "" then table.insert(insert_cols, col) end
+-- ── mutation preview ──────────────────────────────────────────────────────
+local function preview_columns(names, kind)
+  local columns, exact = {}, kind == "sqlserver" and {} or nil
+  for _, column in ipairs(names) do
+    local key = kind == "postgresql" and column or column:lower()
+    -- SQL Server may distinguish Value and value under its catalog collation.
+    -- Use exact metadata first; folded spelling is usable only when unique.
+    if exact then
+      exact[column] = column
+      columns[key] = columns[key] == nil and column or false
+    else
+      columns[key] = column
     end
-  else
-    insert_cols = columns  -- no column list: assume schema order
   end
-  if #insert_cols == 0 then return {} end
-
-  local values_part = flat:match("[Vv][Aa][Ll][Uu][Ee][Ss]%s*(.*)")
-  if not values_part then return {} end
-
-  local rows = {}
-  local pos = 1
-  while pos <= #values_part do
-    local pstart = values_part:find("%(", pos)
-    if not pstart then break end
-    -- Walk to matching ')' respecting single-quoted strings
-    local depth, i = 1, pstart + 1
-    while i <= #values_part and depth > 0 do
-      local ch = values_part:sub(i, i)
-      if ch == "'" then
-        i = i + 1
-        while i <= #values_part do
-          if values_part:sub(i, i) == "'" then
-            if values_part:sub(i + 1, i + 1) == "'" then i = i + 2
-            else i = i + 1; break end
-          else i = i + 1 end
-        end
-      elseif ch == "(" then depth = depth + 1; i = i + 1
-      elseif ch == ")" then depth = depth - 1; i = i + 1
-      else i = i + 1 end
-    end
-    local tuple = values_part:sub(pstart + 1, i - 2)
-    pos = i
-
-    -- Tokenize the tuple
-    local vals, ti, tn = {}, 1, #tuple
-    while ti <= tn do
-      while ti <= tn and (tuple:sub(ti, ti) == "," or tuple:sub(ti, ti):match("^%s$")) do ti = ti + 1 end
-      if ti > tn then break end
-      local token
-      if tuple:sub(ti, ti) == "'" then
-        local tj = ti + 1
-        while tj <= tn do
-          if tuple:sub(tj, tj) == "'" then
-            if tuple:sub(tj + 1, tj + 1) == "'" then tj = tj + 2
-            else break end
-          else tj = tj + 1 end
-        end
-        token = tuple:sub(ti + 1, tj - 1):gsub("''", "'")
-        ti = tj + 1
-      else
-        local tj = ti
-        while tj <= tn and tuple:sub(tj, tj) ~= "," do tj = tj + 1 end
-        token = tuple:sub(ti, tj - 1):match("^%s*(.-)%s*$")
-        if token:upper() == "NULL" then token = nil end
-        ti = tj
-      end
-      table.insert(vals, token)
-    end
-
-    local row = {}
-    for j, col in ipairs(insert_cols) do row[col] = vals[j] end
-    table.insert(rows, row)
-  end
-  return rows
+  return columns, exact
 end
 
--- ── mutation preview ──────────────────────────────────────────────────────
--- Shows affected rows in a grid before executing UPDATE/DELETE/INSERT.
-function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
-  local sql_mod = require("dadbod-grip.sql")
-
-  -- Extract table name from the SQL (handles quoted identifiers)
-  local flat = mutation_sql:gsub("\n", " ")
-  local table_name
-  if stmt_type == "UPDATE" then
-    local after_update = flat:match("[Uu][Pp][Dd][Aa][Tt][Ee]%s+(.*)")
-    if after_update then
-      table_name = after_update:match('^"([^"]+)"') or after_update:match("^`([^`]+)`") or after_update:match("^([%w_%.]+)")
-    end
-  elseif stmt_type == "DELETE" then
-    table_name = flat:match('[Ff][Rr][Oo][Mm]%s+"([^"]+)"')
-      or flat:match("[Ff][Rr][Oo][Mm]%s+`([^`]+)`")
-      or flat:match("[Ff][Rr][Oo][Mm]%s+([%w_%.]+)")
-  elseif stmt_type == "INSERT" then
-    table_name = flat:match('[Ii][Nn][Ss][Ee][Rr][Tt]%s+[Ii][Nn][Tt][Oo]%s+"([^"]+)"')
-      or flat:match("[Ii][Nn][Ss][Ee][Rr][Tt]%s+[Ii][Nn][Tt][Oo]%s+`([^`]+)`")
-      or flat:match("[Ii][Nn][Ss][Ee][Rr][Tt]%s+[Ii][Nn][Tt][Oo]%s+([%w_%.]+)")
-  end
-
-  if not table_name then
-    vim.notify("Could not parse table from " .. stmt_type, vim.log.levels.ERROR)
+-- Shows matching or current rows before executing UPDATE/DELETE/INSERT/REPLACE.
+function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts, execution_sql)
+  local kind = adapters.kind(db.resolved_url(url))
+  local parsed, parse_err = require("dadbod-grip.mutation").parse(
+    mutation_sql, tokenize_select(mutation_sql, kind, true), kind, stmt_type)
+  if not parsed then
+    vim.notify("Could not preview " .. stmt_type .. ": " .. (parse_err or "unsupported SQL syntax"), vim.log.levels.ERROR)
     return
   end
-
-  -- Extract WHERE clause (not applicable for INSERT)
-  local where
-  if stmt_type ~= "INSERT" then
-    where = flat:match("[Ww][Hh][Ee][Rr][Ee]%s+(.+)$")
-    if where then
-      where = where:gsub("%s*;%s*$", "")
-      -- Strip trailing ORDER BY, LIMIT etc.
-      where = where:gsub("%s+[Oo][Rr][Dd][Ee][Rr]%s+[Bb][Yy].*$", "")
-      where = where:gsub("%s+[Ll][Ii][Mm][Ii][Tt]%s+.*$", "")
-    end
-  end
-
-  -- Build preview SELECT (INSERT shows full current table state)
-  local preview_sql = "SELECT * FROM " .. sql_mod.quote_ident(table_name)
-  if where and where ~= "" then
-    preview_sql = preview_sql .. " WHERE " .. where
+  local inserting = stmt_type == "INSERT" or stmt_type == "REPLACE"
+  local table_name = parsed.table_name
+  local preview_sql = "SELECT * FROM " .. parsed.source_sql
+  if parsed.where and parsed.where ~= "" then
+    -- T-SQL does not require statement separators. Keep its balanced predicate
+    -- inside one expression even if an unrecognized command follows it.
+    local predicate = kind == "sqlserver" and ("(" .. parsed.where .. ")") or parsed.where
+    preview_sql = preview_sql .. " WHERE " .. predicate
   end
 
   local preview = ui.blocking("  previewing " .. spinner_label(table_name) .. "...", function()
@@ -1097,25 +998,35 @@ function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
     local state = data.new(result)
     local row_count = #result.rows
 
-    -- For UPDATE: parse SET clause and pre-stage changes so cells show as blue
+    -- Stage only parsed literal assignments. Expressions are executed by the
+    -- database on confirmation; their text is not a predicted cell value.
     if stmt_type == "UPDATE" and row_count > 0 then
-      local set_clause = flat:match("[Ss][Ee][Tt]%s+(.-)%s+[Ww][Hh][Ee][Rr][Ee]")
-        or flat:match("[Ss][Ee][Tt]%s+(.-)%s*;?%s*$")
-      if set_clause then
-        -- Parse "col = 'val', col2 = 'val2'" assignments
-        for assignment in set_clause:gmatch("([^,]+)") do
-          local col_raw, val_raw = assignment:match("^%s*(.-)%s*=%s*(.-)%s*$")
-          if col_raw and val_raw then
-            -- Strip quotes from column name
-            local col = col_raw:match('^"([^"]+)"$') or col_raw:match("^`([^`]+)`$") or col_raw:match("^%s*(%S+)%s*$")
-            -- Strip quotes from value
-            local val = val_raw:match("^'(.-)'$") or val_raw:match('^"(.-)"$') or val_raw
-            if col and val then
-              -- Apply as staged change to every row
-              for row_idx = 1, #state.rows do
-                state = data.add_change(state, row_idx, col, val)
-              end
-            end
+      local columns, exact = preview_columns(state.columns, kind)
+      local assignments = parsed.assignments
+      if exact then
+        -- Resolve names before discarding repeated or unknown assignments:
+        -- differently-cased spellings may refer to one column or two.
+        local latest = {}
+        for _, assignment in ipairs(assignments) do
+          local column = exact[assignment.column] or columns[assignment.column:lower()]
+          if column then
+            latest[column] = assignment.known ~= false and assignment or nil
+          end
+        end
+        assignments = {}
+        for _, assignment in pairs(latest) do assignments[#assignments + 1] = assignment end
+      end
+      for _, assignment in ipairs(assignments) do
+        local key = kind == "postgresql" and assignment.column or assignment.column:lower()
+        local column = (exact and exact[assignment.column]) or columns[key]
+        if column then
+          -- This state has not been published yet: fill it once instead of
+          -- copying every previously staged row for each cell. SQL empty
+          -- strings stay distinct from NULL (interactive edits normalize them).
+          for row_idx = 1, #state.rows do
+            local changes = state.changes[row_idx]
+            if not changes then changes = {}; state.changes[row_idx] = changes end
+            changes[column] = assignment.value == nil and data.NULL_SENTINEL or assignment.value
           end
         end
       end
@@ -1124,17 +1035,34 @@ function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
     -- For DELETE: mark all rows as deleted so they show red
     if stmt_type == "DELETE" and row_count > 0 then
       for row_idx = 1, #state.rows do
-        state = data.toggle_delete(state, row_idx)
+        state.deleted[row_idx] = true
       end
     end
 
-    -- For INSERT with VALUES: parse and add new rows highlighted green
-    if stmt_type == "INSERT" then
-      local insert_rows = parse_insert_values(flat, result.columns)
-      for _, row_values in ipairs(insert_rows) do
-        state = data.insert_row_with_values(state, #result.rows, row_values)
+    -- Stage complete literal tuples only. Conflict handling, defaults and
+    -- computed rows show current state; confirmation still runs original SQL.
+    if inserting then
+      local insert_rows = {}
+      local columns, exact = preview_columns(result.columns, kind)
+      local fields = parsed.insert_columns or result.columns
+      for _, tuple in ipairs(parsed.insert_values) do
+        if tuple.n ~= #fields then parsed.current_state = true; break end
+        local row, seen = {}, {}
+        for idx, field in ipairs(fields) do
+          local key = kind == "postgresql" and field or field:lower()
+          local column = (exact and exact[field]) or columns[key]
+          if not column or seen[column] then parsed.current_state = true; break end
+          seen[column] = true
+          row[column] = tuple[idx] == nil and data.NULL_SENTINEL or tuple[idx]
+        end
+        insert_rows[#insert_rows + 1] = row
       end
-      row_count = #insert_rows  -- count = rows being inserted, not existing rows
+      if parsed.current_state then
+        row_count = nil
+      else
+        state = data.insert_rows_with_values(state, #result.rows, insert_rows)
+        row_count = #insert_rows
+      end
     end
     return { state = state, row_count = row_count }
   end)
@@ -1149,10 +1077,13 @@ function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
   local view_opts = {
     max_col_width = OPTS.max_col_width,
     pending_mutation = {
-      sql = mutation_sql,
+      sql = execution_sql or mutation_sql,
       type = stmt_type,
       table_name = table_name,
       row_count = row_count,
+      current_state = parsed.current_state or nil,
+      -- MySQL ROW_COUNT() after COMMIT counts the commit, not the mutation.
+      affected_count_unavailable = execution_sql ~= nil and kind == "mysql" or nil,
     },
   }
   if reuse_win then view_opts.reuse_win = reuse_win end
@@ -1164,13 +1095,12 @@ function M._mutation_preview(mutation_sql, url, stmt_type, caller_opts)
   if session then
     session.pending_mutation = view_opts.pending_mutation
     session.query_spec = query.new_raw(preview_sql, OPTS.limit)
-    if stmt_type == "INSERT" then
-      if row_count > 0 then
-        session._mutation_title = string.format("INSERT into %s (%d new row%s)",
-          table_name, row_count, row_count == 1 and "" or "s")
+    if inserting then
+      if row_count then
+        session._mutation_title = string.format("%s into %s (%d new row%s)",
+          stmt_type, table_name, row_count, row_count == 1 and "" or "s")
       else
-        -- INSERT ... SELECT or unparseable VALUES
-        session._mutation_title = string.format("INSERT into %s (current state)", table_name)
+        session._mutation_title = string.format("%s into %s (current state)", stmt_type, table_name)
       end
     else
       session._mutation_title = string.format("%s %s (%d row%s)",
@@ -1214,35 +1144,56 @@ function M.open(arg, url, opts)
       vim.notify("Grip: no database connection", vim.log.levels.WARN)
       return
     end
-    local stmt_type = mutation_sql:upper():match("^%s*(%u+)") or "SQL"
+    local stmt_type = statement_type(mutation_sql, adapter_kind) or "SQL"
 
-    -- Unwrap BEGIN/COMMIT (or START TRANSACTION) blocks: extract inner DML for mutation preview.
-    -- Executing just the inner statement is correct: BEGIN/COMMIT is unnecessary for single stmts.
+    -- Preview one committed mutation, but execute the exact transaction text.
+    -- Never remove ROLLBACK or silently execute multiple hidden statements.
     if stmt_type == "BEGIN" or stmt_type == "START" then
-      local inner = mutation_sql
-        :gsub("^%s*START%s+TRANSACTION%s*;%s*\n?", "")
-        :gsub("^%s*BEGIN%s*;%s*\n?", "")
-        :gsub("\n?%s*COMMIT%s*;?%s*$", "")
-        :gsub("\n?%s*ROLLBACK%s*;?%s*$", "")
-      inner = inner:match("^%s*(.-)%s*$")
-      if inner and inner ~= "" then
-        local inner_type = inner:upper():match("^%s*(%u+)")
-        if inner_type == "UPDATE" or inner_type == "DELETE" or inner_type == "INSERT"
-            or inner_type == "REPLACE" then
-          local preview_type = inner_type == "REPLACE" and "INSERT" or inner_type
-          M._mutation_preview(inner, exec_conn, preview_type, opts)
-          return
-        end
+      local tokens = tokenize_select(mutation_sql, adapter_kind, true)
+      local last = tokens and #tokens or 0
+      if last > 0 and tokens[last].kind == ";" then last = last - 1 end
+      local first_end
+      for idx, token in ipairs(tokens or {}) do
+        if token.kind == ";" then first_end = idx; break end
       end
-      -- No DML inside: fall through to DDL confirm
+      local begin_pos = 2
+      if stmt_type == "BEGIN" and tokens and tokens[begin_pos]
+          and ({ DEFERRED = true, IMMEDIATE = true, EXCLUSIVE = true })[tokens[begin_pos].upper] then
+        begin_pos = begin_pos + 1
+      end
+      if tokens and tokens[begin_pos]
+          and (tokens[begin_pos].upper == "TRANSACTION" or tokens[begin_pos].upper == "WORK") then
+        begin_pos = begin_pos + 1
+      elseif stmt_type == "START" then
+        begin_pos = -1
+      end
+      local commit_pos = last
+      if tokens and tokens[commit_pos]
+          and (tokens[commit_pos].upper == "TRANSACTION" or tokens[commit_pos].upper == "WORK") then
+        commit_pos = commit_pos - 1
+      end
+      if not first_end or first_end ~= begin_pos or commit_pos <= first_end + 2
+          or (tokens[commit_pos].upper ~= "COMMIT" and tokens[commit_pos].upper ~= "END")
+          or tokens[commit_pos - 1].kind ~= ";" then
+        vim.notify("Could not preview transaction: use one mutation followed by COMMIT",
+          vim.log.levels.ERROR)
+        return
+      end
+      local inner_type = tokens[first_end + 1].upper
+      if inner_type ~= "UPDATE" and inner_type ~= "DELETE"
+          and inner_type ~= "INSERT" and inner_type ~= "REPLACE" then
+        vim.notify("Could not preview transaction: expected one mutation", vim.log.levels.ERROR)
+        return
+      end
+      local inner = mutation_sql:sub(tokens[first_end + 1].start, tokens[commit_pos - 1].finish)
+      M._mutation_preview(inner, exec_conn, inner_type, opts, mutation_sql)
+      return
     end
 
     -- For UPDATE/DELETE/INSERT/REPLACE: show preview grid with a:execute / U:cancel
     if stmt_type == "UPDATE" or stmt_type == "DELETE" or stmt_type == "INSERT"
         or stmt_type == "REPLACE" then
-      -- Treat REPLACE as INSERT for preview purposes
-      local preview_type = (stmt_type == "REPLACE") and "INSERT" or stmt_type
-      M._mutation_preview(mutation_sql, exec_conn, preview_type, opts)
+      M._mutation_preview(mutation_sql, exec_conn, stmt_type, opts)
       return
     end
 

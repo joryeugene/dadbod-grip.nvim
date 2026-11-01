@@ -109,10 +109,10 @@ function M.setup(bufnr, ctx)
           and vim.api.nvim_win_get_buf(current_win) == bufnr
           and vim.api.nvim_get_current_win() == current_win
       end
+      local preview_count = pm.row_count and string.format("%d row%s previewed",
+        pm.row_count, pm.row_count == 1 and "" or "s") or "current data; affected rows determined on execution"
       local choice = vim.fn.confirm(
-        string.format("Execute %s? (%d row%s affected)\n\n%s",
-          pm.type, pm.row_count, pm.row_count == 1 and "" or "s",
-          pm.sql:sub(1, 200)),
+        string.format("Execute %s? (%s)\n\n%s", pm.type, preview_count, pm.sql:sub(1, 200)),
         "&Execute\n&Cancel", 2)
       if choice ~= 1 then return end
       local written, err, ms, unknown = require("dadbod-grip.write").execute(pm.sql, session.url, pm.table_name)
@@ -120,8 +120,10 @@ function M.setup(bufnr, ctx)
         vim.notify((unknown and "" or "Failed: ") .. err, vim.log.levels.ERROR)
         return
       end
-      vim.notify(string.format("%s executed (%dms, %d row%s)",
-        pm.type, ms, pm.row_count, pm.row_count == 1 and "" or "s"), vim.log.levels.INFO)
+      local affected = not pm.affected_count_unavailable and written and tonumber(written.affected)
+      local result_count = affected and affected >= 0 and string.format(", %d row%s affected",
+        affected, affected == 1 and "" or "s") or ""
+      vim.notify(string.format("%s executed (%dms%s)", pm.type, ms, result_count), vim.log.levels.INFO)
       local history = require("dadbod-grip.history")
       history.record({ sql = pm.sql, url = session.url, type = pm.type:lower(), elapsed_ms = ms })
       local still_current = can_reload()

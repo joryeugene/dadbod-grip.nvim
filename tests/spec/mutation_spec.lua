@@ -129,6 +129,95 @@ test("preview: INSERT previews the whole table and counts the incoming rows", fu
   close_sessions()
 end)
 
+-- Keep the target alias in the preview source, without changing the stored
+-- mutation or the base table used for schema metadata. These are real SELECTs
+-- against SQLite; the MySQL DELETE form below is only previewed, not executed.
+for _, case in ipairs({
+  { source = "orders AS o", ref = "o", alias = "o" },
+  { source = "orders AS offset", ref = "offset", alias = "offset" },
+  { source = "orders as MixedCase", ref = "MixedCase", alias = "MixedCase" },
+  { source = '"orders" AS "order alias"', ref = '"order alias"', alias = '"order alias"' },
+  { source = 'orders AS "o.part"', ref = '"o.part"', alias = '"o.part"' },
+  { source = 'orders AS "o""part"', ref = '"o""part"', alias = '"o""part"' },
+  { source = 'orders AS "set"', ref = '"set"', alias = '"set"' },
+  { source = "`orders` AS `o``part`", ref = "`o``part`", alias = "`o``part`" },
+}) do
+  for _, verb in ipairs({ "UPDATE", "DELETE" }) do
+    test("preview: " .. verb .. " preserves alias " .. case.alias, function()
+      local where = case.ref .. ".id = 1"
+      local mutation_sql = verb == "UPDATE"
+        and ("UPDATE " .. case.source .. " SET status = 'done' WHERE " .. where)
+        or ("DELETE FROM " .. case.source .. " WHERE " .. where)
+      local s = preview(mutation_sql, verb)
+      eq(s.state.sql, 'SELECT * FROM "orders" AS ' .. case.alias .. " WHERE " .. where,
+        "alias retained verbatim")
+      eq(s.pending_mutation.sql, mutation_sql, "original mutation unchanged")
+      eq(s.pending_mutation.table_name, "orders", "base table retained")
+      eq(s.state.table_name, "orders", "schema metadata uses base table")
+      eq(s.pending_mutation.row_count, 1, "only matching row previewed")
+      eq(s.state.rows[1][1], "1", "matching row id")
+      eq(s.state.pks[1], "id", "primary key still resolved")
+      if verb == "UPDATE" then
+        eq(s.state.changes[1].status, "done", "update staged")
+      else
+        eq(s.state.deleted[1], true, "delete staged")
+      end
+      close_sessions()
+    end)
+  end
+end
+
+for _, case in ipairs({
+  { verb = "UPDATE", sql = "UPDATE orders o SET status = 'done' WHERE o.id = 1" },
+  { verb = "DELETE", sql = "DELETE o FROM orders o WHERE o.id = 1" },
+}) do
+  test("preview: " .. case.verb .. " preserves a bare target alias", function()
+    local s = preview(case.sql, case.verb)
+    eq(s.state.sql, 'SELECT * FROM "orders" AS o WHERE o.id = 1', "bare alias retained")
+    eq(s.pending_mutation.sql, case.sql, "original SQL unchanged")
+    eq(s.pending_mutation.row_count, 1, "one matched row")
+    close_sessions()
+  end)
+end
+
+test("preview: alias qualifiers in literals and nested predicates stay intact", function()
+  local where = "o.id = 1 AND 'o.id' = 'o.id'"
+    .. " AND EXISTS (SELECT 1 FROM orders other WHERE other.id = o.id)"
+  local s = preview("UPDATE orders AS o SET status = 'done' WHERE " .. where, "UPDATE")
+  eq(s.state.sql, 'SELECT * FROM "orders" AS o WHERE ' .. where, "WHERE unchanged")
+  eq(s.pending_mutation.row_count, 1, "correlated predicate matches one row")
+  close_sessions()
+end)
+
+for _, case in ipairs({
+  { verb = "UPDATE", sql = "UPDATE orders SET status = 'done'", suffix = "" },
+  { verb = "DELETE", sql = "DELETE FROM orders;", suffix = "" },
+  { verb = "UPDATE", sql = "UPDATE orders AS o SET status = 'done'", suffix = " AS o" },
+  { verb = "UPDATE", sql = "UPDATE orders AS offset SET status = 'done'", suffix = " AS offset" },
+  { verb = "DELETE", sql = "DELETE FROM orders AS o;", suffix = " AS o" },
+}) do
+  test("preview: no-WHERE statement " .. case.sql, function()
+    local s = preview(case.sql, case.verb)
+    eq(s.state.sql, 'SELECT * FROM "orders"' .. case.suffix, "full-table preview")
+    eq(s.pending_mutation.sql, case.sql, "original SQL unchanged")
+    assert(s.pending_mutation.row_count > 1, "all rows previewed")
+    if case.verb == "UPDATE" then eq(s.state.changes[1].status, "done", "update staged") end
+    close_sessions()
+  end)
+end
+
+test("preview: a second DELETE source is rejected instead of previewing the whole table", function()
+  close_sessions()
+  local notify, notice = vim.notify, nil
+  vim.notify = function(message) notice = message end
+  local ok, err = pcall(init._mutation_preview,
+    "DELETE FROM orders FROM orders JOIN users ON orders.user_id = users.id", URL, "DELETE", {})
+  vim.notify = notify
+  assert(ok, err)
+  eq(next(view._sessions), nil, "no guessed preview")
+  assert(notice and notice:find("single target table", 1, true), "unsupported source explained")
+end)
+
 -- ── delete on inserted row ──
 
 test("delete on inserted row removes it via undo_row", function()

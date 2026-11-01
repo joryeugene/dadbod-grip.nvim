@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Mutation previews parse UPDATE, DELETE, INSERT, and REPLACE with shared SQL
+  tokens. Target aliases, quoted names, comments, nested expressions, and
+  RETURNING no longer corrupt predicates, column mappings, or VALUES rows.
+  SQL Server OUTPUT clauses stay out of preview queries and SET values;
+  optional INTO/FROM spellings retain their target table. WITH-prefixed SQL
+  Server writes with omitted INTO/FROM or table-variable targets require
+  confirmation instead of being misrouted as SELECT queries.
+  UPDATE staging preserves NULL versus empty strings and the last assignment.
+  PostgreSQL composite and SQL Server UDT property targets no longer overwrite
+  unrelated scalar predictions. SQL Server column mapping preserves exact case
+  and only uses case-insensitive fallback when the catalog match is unique.
+  INSERT preserves column order and positional NULLs; SQLite/DuckDB INSERT OR
+  forms, DuckDB BY NAME/POSITION and FROM-first queries, parenthesized source
+  queries, and MySQL VALUE, SET, empty default lists, and row/column aliases
+  are recognized. VALUES query tails do not become predicted incoming rows.
+- UPSERT, REPLACE, ignored conflicts, explicit DEFAULT values, and
+  computed/source-query inserts show current data without predicting new
+  values or affected counts.
+  Confirmation executes the original SQL once; completed writes report the
+  adapter's affected count when available. MySQL/MariaDB transaction counts
+  are omitted when COMMIT prevents determining the mutation count.
+  SQLite trailing line comments cannot hide the affected-count query or cause
+  RETURNING values to be mistaken for affected counts.
+  Unsupported or multiple-statement previews fail without writing.
+  Committed transaction previews retain their complete SQL;
+  rollback blocks cannot be stripped into committed mutations. SQL Server
+  statements appended without semicolons and CLI command escapes are rejected
+  before a preview can issue a database request.
+- CTE DELETE modifiers and MERGE statements retain whole-statement confirmation;
+  keyword-shaped variables and SELECT FOR UPDATE locks remain query expressions.
+  MERGE uses confirmation rather than a predicted row preview. CTE command
+  positions distinguish writes from keyword-shaped columns and CTE names.
+- Build mutation preview staging in one pass instead of repeatedly copying
+  prior changes. Shared SQL tokenization scans words, strings, and comments
+  in chunks while preserving the existing SELECT editability checks.
+- MySQL optimizer hints containing client-command escapes are rejected
+  before mutation preview parsing can discard their content.
 - MySQL/MariaDB default-row inserts translate SQL tokens instead of replacing
   matching text inside data, quoted identifiers, or comments. Mixed-case and
   comment-separated `DEFAULT VALUES` clauses work without rewriting their

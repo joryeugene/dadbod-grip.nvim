@@ -521,6 +521,45 @@ All commands are global and available after the plugin loads.
   Open a table in an editable grid, run a SQL query, open a local file,
   or query a remote file via DuckDB httpfs.
 
+  UPDATE, DELETE, INSERT, and REPLACE open a preview before execution.
+  Target aliases, comments, quoted identifiers, and nested predicates are
+  recognized. Literal SET values are staged; computed expressions stay at
+  their current values until the database executes the original statement.
+  RETURNING and SQL Server OUTPUT clauses are excluded from the preview
+  SELECT but retained for execution. SQL Server INSERT may omit INTO, and
+  DELETE may omit FROM.
+  Press a to confirm the original SQL or u/U to cancel.
+  Recognized WITH-prefixed mutations confirm the entire SQL directly; this
+  also covers SQL Server's optional INTO/FROM and table-variable targets,
+  and MySQL/MariaDB DELETE modifiers. MERGE in PostgreSQL, DuckDB, and SQL
+  Server uses this whole-statement confirmation instead of a row preview.
+  PostgreSQL composite fields and SQL Server UDT properties are not predicted
+  as scalar column changes. SQL Server column mapping preserves exact case;
+  case-insensitive fallback is used only for an unambiguous metadata match.
+
+  Ordinary INSERT VALUES shows literal incoming rows, preserving the column
+  list, NULLs, and empty strings. MySQL INSERT SET and row/column aliases,
+  SQLite/DuckDB INSERT OR forms, and REPLACE are recognized. DuckDB BY NAME/
+  POSITION, parenthesized/FROM-first source queries, VALUES queries with set
+  operations or limits, and MySQL () VALUES () use current-data previews.
+  UPSERT, REPLACE, ignored conflicts, explicit DEFAULT values, computed
+  values, and INSERT SELECT show only current data: their final values and
+  affected counts are determined when the original SQL executes. The title
+  and confirmation identify this mode.
+
+  Multi-source JOIN/USING/UPDATE FROM previews and multiple statements are
+  rejected rather than showing an incomplete affected-row set. A transaction
+  containing one mutation and ending in COMMIT can be previewed; execution
+  retains the entire transaction. ROLLBACK blocks are not previewed or run.
+  SQL Server's unseparated extra commands and client command escapes are
+  rejected before querying preview data.
+
+  The existing preview still omits top-level ORDER BY/LIMIT, so its count is
+  the matching row set before those restrictions. Nested ORDER BY/LIMIT remain
+  intact. The completed-write message uses the adapter's affected count when
+  available. For MySQL/MariaDB transactions, COMMIT does not preserve the
+  mutation count, so the completed-write message omits that count.
+
   Examples: >
     :Grip users
     :Grip SELECT * FROM orders LIMIT 50
