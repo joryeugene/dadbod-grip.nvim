@@ -191,6 +191,8 @@ require("dadbod-grip").setup({
 
 Set `open_sidebar = false` to connect directly into the main workspace. Set `completion = false` when another completion engine owns SQL suggestions. Set `ai = false` to skip SQL generation and schema preloading; the AI keys remain registered and explain that AI is disabled.
 
+Standalone SQL suggestions wait for two characters or a qualifier dot and leave your text unchanged until you select a match. DuckDB completion also offers catalog functions in expressions and table functions after `FROM` or `JOIN`. Catalogs warm in the background through the query queue; completion adds no extension installs or loads.
+
 Set `show_running_time = false` to hide the loading counter or `show_result_time = false` to hide retained timing labels. Set `show_hints = false` for Zen display, or use `:GripZen` to toggle it during the session. These controls are independent; Zen keeps essential status and explicit `?` help available without changing pane layout.
 
 Set `engine_timing = true` to collect DuckDB profiler latency during an eligible single statement's original execution. Profiling adds overhead and never reruns the statement. Batches and other adapters report unsupported timing; missing or invalid profiles report unavailable timing. See `:help grip-engine-timing` for the metric and support limits.

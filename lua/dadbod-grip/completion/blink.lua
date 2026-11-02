@@ -26,6 +26,7 @@ end
 
 -- LSP CompletionItemKind values (no dependency on cmp.types)
 local KIND_FIELD   = 5
+local KIND_FUNCTION = 3
 local KIND_MODULE  = 6
 local KIND_KEYWORD = 14
 
@@ -41,7 +42,7 @@ function source:get_completions(ctx, callback)
   local lines   = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local aliases = completion.extract_aliases(table.concat(lines, "\n"))
 
-  local raw = completion.complete(before, url, aliases)
+  local raw = completion.complete(before, url, aliases, { cached = true })
   if #raw == 0 then
     callback({ items = {}, is_incomplete_backward = true })
     return
@@ -52,6 +53,8 @@ function source:get_completions(ctx, callback)
     local kind = KIND_FIELD
     if it.menu == "[table]" then
       kind = KIND_MODULE
+    elseif it.kind == "function" then
+      kind = KIND_FUNCTION
     elseif it.menu == "[keyword]" then
       kind = KIND_KEYWORD
     end

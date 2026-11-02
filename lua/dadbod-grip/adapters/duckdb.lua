@@ -1593,6 +1593,33 @@ function M.get_schema_batch_async(url, callback)
   end)
 end
 
+--- Completion uses the actual CLI session's catalog, without loading extensions.
+--- Keep this on the same queue, attachment and read-only path as schema warming.
+function M.get_completion_functions_async(url, callback)
+  local path = extract_path(url)
+  if not path then vim.schedule(function() callback(nil) end); return end
+  return duckdb_async(path,
+    "SELECT DISTINCT function_name, function_type FROM duckdb_functions() "
+      .. "WHERE schema_name = 'main' AND (database_name IN ('system', 'temp') "
+      .. "OR database_name = current_database()) AND function_type IN "
+      .. "('scalar', 'aggregate', 'macro', 'table', 'table_macro') ORDER BY function_name, function_type",
+    nil, url, function(stdout, _, code)
+      if code ~= 0 then callback(nil); return end
+      local functions, seen = {}, {}
+      for _, row in ipairs(db_util.parse_csv(stdout).rows or {}) do
+        local name, kind = row[1], row[2]
+        -- Unquoted SQL identifiers only. Operator and quoted names require a
+        -- separate insertion/quoting contract and are deliberately omitted.
+        local key = tostring(name) .. ":" .. tostring(kind)
+        if type(name) == "string" and name:match("^[%a_][%w_]*$") and not seen[key] then
+          seen[key] = true
+          functions[#functions + 1] = { name = name, type = kind }
+        end
+      end
+      callback(functions)
+    end)
+end
+
 -- Exposed for testing
 --- Ping: memory instance is always reachable; file DBs require the file to be readable.
 function M.ping(url)

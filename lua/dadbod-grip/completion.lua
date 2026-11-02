@@ -14,6 +14,9 @@ local CACHE_TTL = 300  -- 5 minutes
 
 -- _cache[url] = { tables = { name -> [{column_name, data_type, is_nullable}] }, time }
 local _cache = {}
+local _functions, _function_pending, _function_retry = {}, {}, {}
+local _schema_pending, _schema_retry = {}, {}
+local _omni_starts = {}
 -- A database wait pumps the event loop. An invalidation or newer fetch can
 -- therefore overtake both async warms and an otherwise synchronous read.
 local _generation, _request = {}, {}
@@ -71,6 +74,8 @@ end
 function M.invalidate(url)
   if type(url) ~= "string" then return end
   _cache[url] = nil
+  _functions[url], _function_pending[url], _function_retry[url] = nil, nil, nil
+  _schema_pending[url], _schema_retry[url] = nil, nil
   _generation[url] = (_generation[url] or 0) + 1
   -- Also invalidate any federated entries keyed as "url::alias"
   local prefix = url .. "::"
@@ -83,6 +88,38 @@ function M.invalidate(url)
   end
 end
 
+--- Cache-only function access: a cold typing event never waits on a process.
+function M.get_functions(url)
+  if type(url) ~= "string" then return {} end
+  local cached = _functions[url]
+  if cached and os.time() - cached.time < CACHE_TTL then return cached.items end
+  M.warm_functions(url)
+  return {}
+end
+
+function M.warm_functions(url)
+  if type(url) ~= "string" or _function_pending[url] then return end
+  local now, cached = os.time(), _functions[url]
+  if cached and now - cached.time < CACHE_TTL then return end
+  if _function_retry[url] and now < _function_retry[url] then return end
+  local db = require("dadbod-grip.db")
+  if not db.get_completion_functions_async then return end
+  _generation[url] = _generation[url] or 0
+  local pending = { generation = _generation[url] }
+  _function_pending[url] = pending
+  db.get_completion_functions_async(url, function(functions)
+    if _function_pending[url] ~= pending or _generation[url] ~= pending.generation then return end
+    _function_pending[url] = nil
+    if functions then
+      _functions[url] = { items = functions, time = os.time() }
+      _function_retry[url] = nil
+    else
+      -- Retry only on a later request after a short cooldown; never replay SQL.
+      _function_retry[url] = os.time() + 5
+    end
+  end)
+end
+
 --- Pre-warm the schema cache asynchronously so columns are ready before the first keypress.
 --- Called after connection switch and after GripAttach. No-op if adapter lacks async batch.
 --- All five adapters (duckdb, postgresql, mysql, sqlite, sqlserver) implement
@@ -90,14 +127,32 @@ end
 --- synchronous get_schema_batch, so warming can never disagree with a later cold fetch.
 function M.warm_schema(url)
   if type(url) ~= "string" then return end
+  M.warm_functions(url)
   local db = require("dadbod-grip.db")
   if not db.get_schema_batch_async then return end
   local generation, request = begin_request(url)
+  local pending = {}
+  _schema_pending[url] = pending
   db.get_schema_batch_async(url, function(schema)
+    if _schema_pending[url] == pending then
+      _schema_pending[url] = nil
+      if schema then _schema_retry[url] = nil else _schema_retry[url] = os.time() + 5 end
+    end
     if schema and current_request(url, generation, request) then
       _cache[url] = { tables = schema, time = os.time() }
     end
   end)
+end
+
+-- Used only by automatic/native and external provider requests. Explicit
+-- omnifunc keeps its established synchronous schema fallback.
+local function cached_schema(url)
+  local cached = _cache[url]
+  if cached and os.time() - cached.time < CACHE_TTL then return cached.tables end
+  if not _schema_pending[url] and (not _schema_retry[url] or os.time() >= _schema_retry[url]) then
+    M.warm_schema(url)
+  end
+  return {}
 end
 
 -- ── Alias extraction ───────────────────────────────────────────────────────────
@@ -194,6 +249,7 @@ vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
   group = _ag,
   callback = function(args)
     M._alias_cache[args.buf] = nil
+    _omni_starts[args.buf] = nil
   end,
 })
 
@@ -302,7 +358,7 @@ local SQL_KEYWORDS = {
 --- Return completion items for `before` (text before cursor) and the given URL.
 --- Optional `aliases` table maps SQL alias -> table_name for dotted completion.
 --- Returns array of { word, menu } items.
-function M.complete(before, url, aliases)
+function M.complete(before, url, aliases, opts)
   aliases = aliases or {}
   local ctx = M.parse_context_full(before)
   if not ctx then
@@ -319,7 +375,7 @@ function M.complete(before, url, aliases)
     return kw_items
   end
 
-  local schema = M.get_schema(url)
+  local schema = opts and opts.cached and cached_schema(url) or M.get_schema(url)
   local items = {}
 
   if ctx.type == "table" then
@@ -382,7 +438,7 @@ function M.complete(before, url, aliases)
       -- If nothing in the cache, fall through to a live DuckDB attachment query.
       -- Use duckdb_tables() which works for all attachment types (SQLite, PG, etc.).
       -- Never use catalog.information_schema: SQLite attachments have none.
-      if not found_in_cache then
+      if not found_in_cache and not (opts and opts.cached) then
         local ok, duckdb = pcall(require, "dadbod-grip.adapters.duckdb")
         if ok then
           -- The attachment registry is keyed by the expanded URL (that is
@@ -426,7 +482,7 @@ function M.complete(before, url, aliases)
           table.insert(items, item(cname, "[" .. (col.data_type or "?") .. "]"))
         end
       end
-    else
+    elseif not (opts and opts.cached) then
       -- Fallback: live query for DuckDB attachments not yet cached.
       -- Use duckdb_columns() which works for all attachment types (SQLite, PG, etc.).
       -- Never use catalog.information_schema: SQLite attachments have none.
@@ -449,6 +505,22 @@ function M.complete(before, url, aliases)
     end
   end
 
+  if ctx.type == "column" or (ctx.type == "table"
+      and (before:upper():match("FROM%s+[%w_]*$") or before:upper():match("JOIN%s+[%w_]*$"))) then
+    local word, seen = ctx.word:lower(), {}
+    if word ~= "" then
+      for _, fn in ipairs(M.get_functions(url)) do
+        local relation = fn.type == "table" or fn.type == "table_macro"
+        if relation == (ctx.type == "table") and fn.name:lower():sub(1, #word) == word
+            and not seen[fn.name] then
+          seen[fn.name] = true
+          items[#items + 1] = { word = fn.name .. "(", kind = "function",
+            menu = relation and "[table function]" or "[function]" }
+        end
+      end
+    end
+  end
+
   -- For table/column contexts, also append keyword matches for the typed word.
   -- This lets "SELECT col f" offer both column names AND "FROM".
   -- Skip dotted/fed_column: ctx.word is after the dot, keywords don't apply there.
@@ -463,6 +535,10 @@ function M.complete(before, url, aliases)
     end
   end
 
+  table.sort(items, function(a, b)
+    if a.word == b.word then return a.menu < b.menu end
+    return a.word < b.word
+  end)
   return items
 end
 
@@ -487,6 +563,9 @@ function M.omnifunc(findstart, base)
         break
       end
     end
+    _omni_starts[vim.api.nvim_get_current_buf()] = {
+      row = vim.api.nvim_win_get_cursor(0)[1], col = start, prefix = line:sub(1, start),
+    }
     return start
   else
     -- Return completion items.
@@ -496,6 +575,14 @@ function M.omnifunc(findstart, base)
     local line = vim.api.nvim_get_current_line()
     local col  = vim.api.nvim_win_get_cursor(0)[2]
     local before = line:sub(1, col)
+    -- During native phase two, Vim temporarily removes `base` and moves to
+    -- the start column. Reconstruct the original context without losing the
+    -- typed prefix. Direct provider calls without findstart keep their input.
+    local start = _omni_starts[vim.api.nvim_get_current_buf()]
+    if start and start.row == vim.api.nvim_win_get_cursor(0)[1]
+        and start.col == col and start.prefix == before then
+      before = before .. (base or "")
+    end
 
     -- Extract aliases from the full buffer so dotted completion resolves
     -- e.g. "SELECT e." where "FROM employees e" appears elsewhere in the query.
@@ -519,11 +606,40 @@ end
 
 -- ── Auto-complete (as-you-type) ────────────────────────────────────────────────
 
+local QUIET_OPTIONS = "menu,menuone,noinsert,noselect"
+local option_owner, saved_options
+local function release_options(bufnr)
+  if option_owner ~= bufnr then return end
+  -- Do not overwrite an explicit user option change made while the pad owns it.
+  if vim.o.completeopt == QUIET_OPTIONS then vim.o.completeopt = saved_options end
+  option_owner, saved_options = nil, nil
+end
+local function setup_options(bufnr)
+  if vim.api.nvim_get_option_info2("completeopt", {}).scope == "buf" then
+    vim.bo[bufnr].completeopt = QUIET_OPTIONS
+    return
+  end
+  -- Neovim 0.10 only has a global option. Lease it while the standalone pad
+  -- is focused, restoring on leave/deletion; other buffers retain their value.
+  local function acquire()
+    if option_owner == bufnr or vim.api.nvim_get_current_buf() ~= bufnr then return end
+    if option_owner then release_options(option_owner) end
+    saved_options, option_owner = vim.o.completeopt, bufnr
+    vim.o.completeopt = QUIET_OPTIONS
+  end
+  vim.api.nvim_create_autocmd("BufEnter", { group = _ag, buffer = bufnr, callback = acquire })
+  vim.api.nvim_create_autocmd({ "BufLeave", "BufWipeout" }, {
+    group = _ag, buffer = bufnr, callback = function() release_options(bufnr) end,
+  })
+  acquire()
+end
+
 --- Install a TextChangedI autocmd that fires vim.fn.complete() in insert mode.
 --- Completions appear automatically without any keypress.
 --- url_fn() returns the current connection URL (re-read live on each keystroke).
 --- Kept separate from omnifunc so nvim-cmp users who add { name = 'omni' } also work.
 function M.setup_auto_complete(bufnr, url_fn)
+  setup_options(bufnr)
   -- Disable nvim-cmp and blink.cmp for this buffer so they don't conflict
   -- with grip's native popup. No-op when neither is installed.
   vim.api.nvim_create_autocmd("BufEnter", {
@@ -539,9 +655,17 @@ function M.setup_auto_complete(bufnr, url_fn)
     group  = _ag,
     buffer = bufnr,
     callback = function()
+      local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      local requested_url = url_fn()
       -- Defer past all TextChangedI handlers (blink, cmp, etc.) so their popups
       -- appear first. We only show our popup if nothing else is visible.
       vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(bufnr) or vim.api.nvim_get_current_buf() ~= bufnr
+            or vim.fn.mode():sub(1, 1) ~= "i"
+            or vim.api.nvim_buf_get_changedtick(bufnr) ~= tick
+            or not vim.deep_equal(vim.api.nvim_win_get_cursor(0), cursor)
+            or url_fn() ~= requested_url then return end
         if vim.fn.pumvisible() == 1 then return end
 
         local url = url_fn()
@@ -551,15 +675,16 @@ function M.setup_auto_complete(bufnr, url_fn)
         local col  = vim.api.nvim_win_get_cursor(0)[2]
         local before = line:sub(1, col)
 
-        -- Require ≥1 word char OR a trailing dot (dotted context: supplier., alias.).
+        -- Require two word characters, except for explicit qualifier dots.
         local word = before:match("([%w_]*)$") or ""
         local in_dotted_ctx = before:match("[%w_]+%.[%w_]*$") ~= nil
-        if word == "" and not in_dotted_ctx then return end
+        if #word < 2 and not in_dotted_ctx then return end
 
         local aliases = M._get_cached_aliases(bufnr)
 
-        local raw = M.complete(before, url, aliases)
+        local raw = M.complete(before, url, aliases, { cached = true })
         if #raw == 0 then return end
+        if #raw == 1 and raw[1].word:lower() == word:lower() then return end
 
         local start = col
         while start > 0 do
@@ -619,8 +744,8 @@ function M.register_cmp_source()
 
     local aliases = M._get_cached_aliases(bufnr)
 
-    local raw = M.complete(before, url, aliases)
-    if #raw == 0 then callback(nil) return end
+    local raw = M.complete(before, url, aliases, { cached = true })
+    if #raw == 0 then callback({ items = {}, isIncomplete = true }); return end
 
     -- Map to LSP CompletionItem format that nvim-cmp expects.
     local cmp_types = require("cmp.types")
@@ -630,6 +755,10 @@ function M.register_cmp_source()
       local kind = cmp_types.lsp.CompletionItemKind.Field
       if it.menu == "[table]" then
         kind = cmp_types.lsp.CompletionItemKind.Module
+      elseif it.kind == "function" then
+        kind = cmp_types.lsp.CompletionItemKind.Function
+      elseif it.menu == "[keyword]" then
+        kind = cmp_types.lsp.CompletionItemKind.Keyword
       end
       table.insert(items, {
         label      = it.word,
@@ -638,7 +767,9 @@ function M.register_cmp_source()
         insertText = it.word,
       })
     end
-    callback({ items = items, isIncomplete = false })
+    -- Async warms may add items while the same token is being typed. cmp
+    -- must re-request instead of filtering an earlier incomplete snapshot.
+    callback({ items = items, isIncomplete = true })
   end
 
   cmp.register_source("dadbod_grip", source)

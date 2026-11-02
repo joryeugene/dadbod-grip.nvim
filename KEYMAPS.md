@@ -200,7 +200,7 @@ Note: explain query plan is accessible via `gQ` (removed from tab system).
 | `<C-p>` | Command palette (searchable action list) |
 | `<C-CR>` | Execute query |
 | `<S-CR>` | Execute and always open result in a new split (never reuses existing grid) |
-| (auto) | SQL completion fires as you type: tables, columns, aliases, federation |
+| (auto) | SQL suggestions after two characters or a qualifier dot; nothing selected or inserted |
 | `<C-Space>` | Manually trigger SQL completion |
 | `<C-x><C-o>` | SQL completion: Vim-standard omnifunc / nvim-cmp source |
 | `gA` | AI SQL generation |
