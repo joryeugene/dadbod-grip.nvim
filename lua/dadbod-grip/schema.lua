@@ -250,14 +250,25 @@ end
 local function render(state, anchor)
   if not _sidebar_bufnr or not vim.api.nvim_buf_is_valid(_sidebar_bufnr) then return end
   local bufnr, winid, generation = _sidebar_bufnr, _sidebar_winid, state._schema_generation
-  if not winid or not vim.api.nvim_win_is_valid(winid) or vim.b[bufnr].db ~= state.url then return end
+  local function owns_render()
+    return current_fetch(state, generation) and _sidebar_bufnr == bufnr and _sidebar_winid == winid
+      and vim.api.nvim_buf_is_valid(bufnr) and winid and vim.api.nvim_win_is_valid(winid)
+      and vim.b[bufnr].db == state.url
+  end
+  if not owns_render() then return end
   anchor = anchor or selection(state)
+  -- Clear-only invalidation does no database work. The next sidebar action
+  -- reloads metadata here, rather than painting an empty tree from items=nil.
+  if is_file_url(state.url) then
+    if not state.file_cols then fetch_file_schema(state) end
+  elseif not state.items then
+    fetch_tables(state)
+  end
+  if not owns_render() then return end
   local nodes = build_nodes(state)
   -- Expanding columns performs synchronous adapter calls that pump the event
   -- loop. A connection switch may have already reused and painted this buffer.
-  if not current_fetch(state, generation) or _sidebar_bufnr ~= bufnr or _sidebar_winid ~= winid
-      or not vim.api.nvim_buf_is_valid(bufnr) or not vim.api.nvim_win_is_valid(winid)
-      or vim.b[bufnr].db ~= state.url then return end
+  if not owns_render() then return end
   local lines, highlights = {}, {}
   local function line(text, hl)
     lines[#lines + 1] = text

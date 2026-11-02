@@ -178,4 +178,63 @@ for _, method in ipairs({ "execute", "query" }) do
   end)
 end
 
+H.test("invalidated visible sidebar reloads on its next expansion", function(c)
+  c.exec("CREATE TABLE items(id INTEGER PRIMARY KEY)")
+  schema.close(); schema._reset_state(); schema.toggle(c.url)
+  local win, state = schema.get_winid(), schema.get_state(c.url)
+  local buf = vim.api.nvim_win_get_buf(win)
+  for i, node in ipairs(state.nodes) do
+    if node.kind == "table" and node.name == "items" then vim.api.nvim_win_set_cursor(win, { i + 2, 0 }); break end
+  end
+  assert(db.execute("ALTER TABLE items ADD COLUMN fresh TEXT", c.url))
+  H.key(buf, "l")
+  local lines = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+  schema.close(); schema._reset_state()
+  assert(lines:find("items", 1, true) and lines:find("fresh", 1, true), "invalidated sidebar became empty")
+end)
+
+H.test("EXPLAIN ANALYZE DDL invalidates but plain EXPLAIN preserves nonexecution", function(c)
+  local url = "duckdb:" .. c.root .. "/explain.duckdb"
+  assert(db.execute("CREATE TABLE original(id INTEGER)", url))
+  assert(names(url).original)
+  local explain, explain_err = db.query("EXPLAIN CREATE TABLE not_created AS SELECT 1 AS id", url)
+  assert(explain, explain_err)
+  local function exists(name)
+    local oracle = vim.system({ "duckdb", url:sub(8), "-csv", "-c",
+      "SELECT table_name FROM information_schema.tables WHERE table_name='" .. name .. "'" }, { text = true }):wait()
+    assert(oracle.code == 0, oracle.stderr)
+    return oracle.stdout:find(name, 1, true) ~= nil
+  end
+  assert(not exists("not_created"), "plain EXPLAIN executed DDL")
+  local analyzed, analyze_err = db.query("EXPLAIN ANALYZE CREATE TABLE created AS SELECT 1 AS id", url)
+  assert(analyzed, analyze_err)
+  assert(exists("created"), "EXPLAIN ANALYZE did not execute its original")
+  assert(names(url).created, "executed EXPLAIN ANALYZE DDL retained old completion")
+end)
+
+H.test("file sidebar lazily refreshes once and retains cached file columns between paints", function(c)
+  local path = c.root .. "/rows.csv"
+  vim.fn.writefile({ "id,value", "1,one" }, path)
+  schema.close(); schema._reset_state()
+  local query, calls = db.query, 0
+  db.query = function(...) calls = calls + 1; return query(...) end
+  local ok, err = xpcall(function()
+    schema.toggle(path)
+    assert(calls == 1, "initial file schema fetch missing")
+    schema.redraw(); schema.redraw()
+    assert(calls == 1, "cached file schema refetched on every paint")
+    vim.fn.writefile({ "id,value,added", "1,one,fresh" }, path)
+    assert(db.invalidate_schema(path))
+    schema.redraw()
+    assert(calls == 2, "invalidated file schema did not refresh exactly once")
+    schema.redraw()
+    assert(calls == 2)
+    local buf = vim.api.nvim_win_get_buf(schema.get_winid())
+    assert(table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n"):find("added", 1, true))
+  end, debug.traceback)
+  db.query = query
+  schema.close(); schema._reset_state()
+  assert(ok, err)
+end)
+
 H.finish("schema_freshness_native_spec")

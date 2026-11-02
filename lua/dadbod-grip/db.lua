@@ -369,7 +369,7 @@ local function after_schema_change(url, adapter, conn)
 end
 
 local READ_HEAD = { SELECT = true, WITH = true, FROM = true, VALUES = true, TABLE = true,
-  EXPLAIN = true, SHOW = true, DESC = true, DESCRIBE = true }
+  SHOW = true, DESC = true, DESCRIBE = true }
 local function query_may_change_schema(sql, kind)
   local tokens = require("dadbod-grip.sql_tokens").tokenize(sql, kind)
   if not tokens then return true end
