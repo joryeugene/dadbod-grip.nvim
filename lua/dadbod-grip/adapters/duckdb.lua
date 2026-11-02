@@ -1600,7 +1600,8 @@ function M.get_completion_functions_async(url, callback)
   if not path then vim.schedule(function() callback(nil) end); return end
   return duckdb_async(path,
     "SELECT DISTINCT function_name, function_type FROM duckdb_functions() "
-      .. "WHERE schema_name = 'main' AND function_type IN "
+      .. "WHERE schema_name = 'main' AND (database_name IN ('system', 'temp') "
+      .. "OR database_name = current_database()) AND function_type IN "
       .. "('scalar', 'aggregate', 'macro', 'table', 'table_macro') ORDER BY function_name, function_type",
     nil, url, function(stdout, _, code)
       if code ~= 0 then callback(nil); return end

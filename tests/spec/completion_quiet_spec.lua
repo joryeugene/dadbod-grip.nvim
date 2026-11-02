@@ -12,6 +12,7 @@ vim.fn.complete = function(_, items) calls = calls + 1; supplied = items end
 local result = { { word = "SELECT", menu = "[keyword]" } }
 c.complete = function() return result end
 local buf = vim.api.nvim_create_buf(true, false)
+local old_buf, virtualedit = vim.api.nvim_get_current_buf(), vim.wo.virtualedit
 vim.api.nvim_set_current_buf(buf); vim.wo.virtualedit = "onemore"
 local url = "sqlite:/synthetic/quiet.db"
 c.setup_auto_complete(buf, function() return url end)
@@ -63,6 +64,8 @@ end)
 c.complete = saved.complete_fn
 vim.fn.mode, vim.fn.complete, vim.fn.pumvisible = saved.mode, saved.complete, saved.pumvisible
 vim.schedule = saved.schedule
+vim.wo.virtualedit = virtualedit
+vim.api.nvim_set_current_buf(old_buf)
 vim.api.nvim_buf_delete(buf, { force = true })
 print(string.format("\ncompletion_quiet_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end
