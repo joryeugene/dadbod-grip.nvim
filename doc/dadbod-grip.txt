@@ -145,6 +145,16 @@ connections file shared across projects.
 extension or read a remote URL gets a 60-second minimum for that network step.
 Health pings use 5 seconds.
 
+DuckDB queries, writes, and background metadata requests sharing the same local
+database file wait in order. Grip also coordinates local DuckDB files registered
+with GripAttach. Unrelated files can progress independently. Queued calls retain
+their original read-only options; queue waiting and CLI execution use separate
+bounded waits. A cancelled queued request never executes. A running request
+keeps its file reservation until the actual child exits, even if its result has
+already timed out. Grip never retries the original SQL after a lock error.
+External clients and filenames introduced only by custom ATTACH SQL are outside
+this coordination and can still produce native DuckDB lock errors.
+
                                                         *grip-highlights*
 Highlight overrides ~
 

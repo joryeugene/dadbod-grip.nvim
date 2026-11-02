@@ -7,6 +7,7 @@ local adapters = require("dadbod-grip.adapters")
 local sql_util = require("dadbod-grip.sql")
 local esc      = sql_util.escape_literal
 local timing   = require("dadbod-grip.engine_timing")
+local queue    = require("dadbod-grip.duckdb_queue")
 
 local M = {}
 
@@ -35,6 +36,12 @@ local _attachments = {}
 --- Populated lazily by querying duckdb_databases() for persistently-attached DBs
 --- not registered via M.attach() (e.g. ATTACH statements baked into the .duckdb file).
 local _catalog_cache = {}
+local _catalog_generation = {}
+
+function M.invalidate_schema(url)
+  _catalog_cache[url] = nil
+  _catalog_generation[url] = (_catalog_generation[url] or 0) + 1
+end
 
 --- Forward declaration: body assigned after duckdb() is defined (Lua scoping).
 local get_catalog_set
@@ -418,6 +425,26 @@ local function extract_path(url)
   return path
 end
 
+local function local_attachment_path(dsn)
+  if dsn:match("^duckdb:") then return extract_path(dsn) end
+  -- Other scanner/remote schemes do not share a local DuckDB file lock.
+  if detect_extension(dsn) or dsn:match("^[%a][%w+.-]*:") then return nil end
+  return dsn
+end
+
+local function coordination_keys(db_path, url, validation_dsn)
+  local paths = { db_path }
+  for _, attachment in ipairs(url and _attachments[url] or {}) do
+    local path = local_attachment_path(attachment.dsn)
+    if path then paths[#paths + 1] = path end
+  end
+  if validation_dsn then
+    local path = local_attachment_path(validation_dsn)
+    if path then paths[#paths + 1] = path end
+  end
+  return queue.keys(paths)
+end
+
 --- Name DuckDB gives the main catalog: the file's basename without its
 --- extension ("softrear" for /data/softrear.duckdb), or "memory" for the
 --- in-memory instance. Every catalog query that has to name the main database
@@ -526,7 +553,7 @@ local function duckdb(db_path, sql_str, timeout_ms, url, opts)
   local effective_sql, has_setup = with_csv_setup(setup_sql, (profile and profile.prefix or "") .. sql_str)
 
   local stdout, stderr, code, engine = timing.run(profile, function()
-    return adapters.run_cmd(args, effective_timeout, { stdin = effective_sql, raw_output = true,
+    return queue.run(coordination_keys(db_path, url), args, effective_timeout, { stdin = effective_sql, raw_output = true,
       on_start = opts and opts.on_start, on_complete = opts and opts.on_complete,
       on_spawn_error = opts and opts.on_spawn_error,
       terminate_on_interrupt = (profile and profile.path ~= nil) or (opts and opts.on_start ~= nil) })
@@ -555,7 +582,8 @@ end
 --- Result is cached per URL; invalidated when attachments change.
 get_catalog_set = function(db_path, url)
   if _catalog_cache[url] then return _catalog_cache[url] end
-  local stdout = duckdb(db_path,
+  local generation = _catalog_generation[url]
+  local stdout, _, code = duckdb(db_path,
     "SELECT database_name FROM duckdb_databases() WHERE NOT internal", nil, url)
   local cats = {}
   for line in (stdout or ""):gmatch("[^\r\n]+") do
@@ -563,7 +591,7 @@ get_catalog_set = function(db_path, url)
       cats[line] = true
     end
   end
-  _catalog_cache[url] = cats
+  if code == 0 and generation == _catalog_generation[url] then _catalog_cache[url] = cats end
   return cats
 end
 
@@ -578,7 +606,7 @@ local function duckdb_async(db_path, sql_str, timeout_ms, url, callback)
     effective_timeout = math.max(effective_timeout, NETWORK_TIMEOUT)
   end
   local args = duckdb_args(db_path, adapters.session_opts(), { "-csv", "-header" })
-  adapters.run_cmd_async(args, effective_timeout, function(stdout, stderr, code)
+  return queue.run_async(coordination_keys(db_path, url), args, effective_timeout, function(stdout, stderr, code)
     if url then note_ext_installed(url, code) end
     if has_setup then stdout = strip_csv_setup(stdout) end
     -- Same reason as in duckdb(): the ATTACH prefix is in this SQL.
@@ -604,7 +632,7 @@ local function duckdb_exec(db_path, sql_str, timeout_ms, url, opts)
   local effective_sql = setup_sql .. (profile and profile.prefix or "") .. sql_str
   -- Same reason as in duckdb(): the ATTACH prefix is in this SQL.
   local stdout, stderr, code, engine = timing.run(profile, function()
-    return adapters.run_cmd(args, effective_timeout, { stdin = effective_sql,
+    return queue.run(coordination_keys(db_path, url), args, effective_timeout, { stdin = effective_sql,
       terminate_on_interrupt = profile and profile.path ~= nil })
   end)
   if url then note_ext_installed(url, code) end
@@ -1316,12 +1344,12 @@ local function store_attachment(url, dsn, alias, template)
       a.dsn = dsn
       a.extension = ext
       a.template = template
-      _catalog_cache[url] = nil  -- attachment list changed; re-query on next use
+      M.invalidate_schema(url)
       return
     end
   end
   table.insert(_attachments[url], { dsn = dsn, alias = alias, extension = ext, template = template })
-  _catalog_cache[url] = nil  -- attachment list changed; re-query on next use
+  M.invalidate_schema(url)
 end
 
 
@@ -1389,7 +1417,8 @@ function M.attach(url, dsn, alias, template)
   -- (both also open the same file), causing "Failed to lock file" on connection switch.
   local args = duckdb_args(":memory:", nil)
 
-  local _, stderr_attach, code_attach = adapters.run_cmd(args, timeout, { stdin = test_sql })
+  local _, stderr_attach, code_attach = queue.run(coordination_keys(":memory:", nil, dsn),
+    args, timeout, { stdin = test_sql })
   if code_attach ~= 0 then
     -- The DSN is in the SQL the CLI just rejected, so its stderr can quote
     -- the credentials straight back at us. Never return it raw.
@@ -1414,7 +1443,7 @@ function M.detach(url, alias)
   for i, a in ipairs(atts) do
     if a.alias == alias then
       table.remove(atts, i)
-      _catalog_cache[url] = nil  -- attachment list changed
+      M.invalidate_schema(url)
       return
     end
   end
@@ -1433,11 +1462,11 @@ end
 function M.load_attachments(url, attachments)
   if not attachments or #attachments == 0 then
     _attachments[url] = nil
-    _catalog_cache[url] = nil
+    M.invalidate_schema(url)
     return
   end
   _attachments[url] = {}
-  _catalog_cache[url] = nil
+  M.invalidate_schema(url)
   for _, a in ipairs(attachments) do
     local dsn = M.url_to_dsn(a.dsn)
     local err = M.attach(url, dsn, a.alias, a.template)
@@ -1558,7 +1587,7 @@ function M.get_schema_batch_async(url, callback)
   local main_catalog = main_catalog_name(db_path)
   local sql_str = _make_schema_batch_sql(has_attachments, main_catalog)
 
-  duckdb_async(db_path, sql_str, nil, url, function(stdout, _, code)
+  return duckdb_async(db_path, sql_str, nil, url, function(stdout, _, code)
     if code ~= 0 then callback(nil); return end
     callback(_parse_schema_batch_rows(db_util.parse_csv(stdout), main_catalog))
   end)

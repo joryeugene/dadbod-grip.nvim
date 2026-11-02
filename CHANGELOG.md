@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manual refresh. Removing the last page moves to the previous valid page
   while preserving filters, sorting, and page size. Failed counts stay unknown;
   raw-query refreshes avoid an additional count evaluation.
+- DuckDB queries, writes, and background metadata work sharing a known local
+  database file wait in order instead of opening competing CLI processes.
+  Queueing retains each call's read-only options, and cancellation waits for
+  the actual child exit before admitting the next request. Invalidated catalog
+  lookups cannot repopulate the cache with an older result.
 
 ## [3.19.0] - 2026-11-02
 
