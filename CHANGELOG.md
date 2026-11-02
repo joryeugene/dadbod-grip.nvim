@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Table-grid refreshes recount matching rows after Apply, committed Undo, and
+  manual refresh. Removing the last page moves to the previous valid page
+  while preserving filters, sorting, and page size. Failed counts stay unknown;
+  raw-query refreshes avoid an additional count evaluation.
+
 ## [3.19.0] - 2026-11-02
 
 ### Fixed

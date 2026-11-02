@@ -736,6 +736,26 @@ local function fetch_refresh(url, query_sql, table_name, is_raw)
   return { result = result, elapsed_ms = elapsed_ms }
 end
 
+--- Recount before selecting a table page, so a committed delete cannot leave
+--- the grid past its last page. A failed count is unknown, never the previous
+--- result's total. Raw refreshes avoid adding another evaluation of arbitrary
+--- SQL; explicit requery keeps its existing count contract.
+local function fetch_page(url, spec, table_name, count_raw)
+  local total_rows
+  if not spec.is_raw or count_raw then
+    local counted = db.query(query.build_count_sql(spec), url)
+    local count = counted and counted.rows[1] and tonumber(counted.rows[1][1])
+    if count and count >= 0 and count < math.huge and count == math.floor(count) then
+      total_rows = count
+      local total_pages = math.max(1, math.ceil(count / spec.page_size))
+      if spec.page > total_pages then spec = query.set_page(spec, total_pages) end
+    end
+  end
+  local query_sql = query.build_sql(spec)
+  return fetch_refresh(url, query_sql, table_name, spec.is_raw),
+    { spec = spec, sql = query_sql, total_rows = total_rows }
+end
+
 --- Render what fetch_refresh returned. Kept outside the spinner float so the
 --- grid repaints after it is torn down, the same order init.open() uses.
 local function apply_refresh(bufnr, fetched, owner, generation, query_update, write_result)
@@ -785,10 +805,18 @@ local function do_refresh(bufnr, url, query_sql, table_name, write_result)
   if write_result then
     write_result.is_current = require("dadbod-grip.write").capture_owner(bufnr, owner)
   end
-  local fetched = ui.blocking("  querying " .. spinner_label(table_name) .. "...", function()
-    return fetch_refresh(url, query_sql, table_name, owner.query_spec and owner.query_spec.is_raw)
+  -- Clearing generations is cheap and cannot start a competing metadata read.
+  -- This also lets manual refresh recover schema changed outside Grip.
+  if type(db.invalidate_schema) == "function" then db.invalidate_schema(url) end
+  local fetched, query_update
+  ui.blocking("  querying " .. spinner_label(table_name) .. "...", function()
+    if owner.query_spec then
+      fetched, query_update = fetch_page(url, owner.query_spec, table_name, false)
+    else
+      fetched = fetch_refresh(url, query_sql, table_name)
+    end
   end)
-  apply_refresh(bufnr, fetched, owner, generation, nil, write_result)
+  apply_refresh(bufnr, fetched, owner, generation, query_update, write_result)
 end
 
 -- ── edit cell ─────────────────────────────────────────────────────────────
@@ -1302,23 +1330,11 @@ function M.open(arg, url, opts)
       -- COUNT and SELECT share a spinner, but pending metadata must not
       -- replace the displayed result's identity if SELECT fails/interruption
       -- returns an error, or a newer refresh completes while this one waits.
-      local new_sql, page_fetch
-      local pending_total = s.total_rows
+      local page_fetch, query_update
       ui.blocking("  querying " .. spinner_label(table_name_arg) .. "...", function()
-        local count_sql = query.build_count_sql(new_spec)
-        local count_result = db.query(count_sql, conn)
-        if count_result and count_result.rows[1] then
-          pending_total = tonumber(count_result.rows[1][1]) or 0
-        end
-        if pending_total then
-          local total_pages = math.max(1, math.ceil(pending_total / new_spec.page_size))
-          if new_spec.page > total_pages then new_spec = query.set_page(new_spec, total_pages) end
-        end
-        new_sql = query.build_sql(new_spec)
-        page_fetch = fetch_refresh(conn, new_sql, table_name_arg, new_spec.is_raw)
+        page_fetch, query_update = fetch_page(conn, new_spec, table_name_arg, true)
       end)
-      apply_refresh(bid, page_fetch, s, generation,
-        { spec = new_spec, sql = new_sql, total_rows = pending_total })
+      apply_refresh(bid, page_fetch, s, generation, query_update)
     end,
 
     on_apply = function(bid)

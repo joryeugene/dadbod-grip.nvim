@@ -909,6 +909,13 @@ SORT / FILTER / PAGINATION ~
   ]p / [p         Previous / next page (alternate)
   ]P / [P         Last / first page
 
+Table-grid refreshes recount the active filters after Apply, committed Undo,
+or `r`. If the current page no longer exists, Grip loads the last valid page;
+an empty table remains on page one. Sorting, filters, and page size stay intact.
+If a count fails, the total is unknown and Grip does not guess a page boundary.
+Raw-query refreshes do not add another COUNT evaluation; their total becomes
+unknown until an explicit pagination, sort, or filter requery counts it again.
+
 FK NAVIGATION ~
                                                             *grip-fk-nav*
   gf              Follow foreign key under cursor to referenced row

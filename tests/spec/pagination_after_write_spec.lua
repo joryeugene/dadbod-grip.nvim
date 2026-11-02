@@ -8,9 +8,10 @@ local fixture = vim.fn.tempname() .. "_pagination"
 vim.fn.mkdir(fixture, "p")
 local file, url = fixture .. "/fixture.sqlite", "sqlite:" .. fixture .. "/fixture.sqlite"
 local saved = { root = paths.project_root, notify = vim.notify, confirm = ui.confirm,
-  error = editor.show_error, opts = grip.get_opts() }
+  error = editor.show_error, native_confirm = vim.fn.confirm, opts = grip.get_opts() }
 paths.project_root = function() return fixture end
 vim.notify, ui.confirm, editor.show_error = function() end, function() return true end, function() end
+vim.fn.confirm = function() return 1 end
 grip.setup({ limit = 2, connections_path = fixture .. "/connections.json", completion = false })
 
 local function eq(actual, expected, label)
@@ -43,6 +44,7 @@ local function open(statement)
   local buf = vim.api.nvim_get_current_buf()
   local session = assert(view._sessions[buf], "public open did not create a grid")
   assert(vim.wait(1000, function() return session._column_info ~= nil end, 5), "column metadata did not settle")
+  session.on_requery(buf, query.toggle_sort(session.query_spec, "id"))
   return buf, session
 end
 local function page(buf, session, n)
@@ -70,6 +72,10 @@ test("confirmed delete clamps the last page and refetches its surviving rows", f
   eq(session.query_spec.page, 2, "clamped page")
   eq(ids(session), "3,4", "previous page rows")
   eq(session.query_sql, query.build_sql(session.query_spec), "published SQL")
+  undo(buf)
+  eq(native("SELECT COUNT(*) FROM items"), "5", "delete Undo committed")
+  eq(session.total_rows, 5, "delete Undo total")
+  eq(session.query_spec.page, 2, "delete Undo retains valid page")
 end)
 
 test("deleting the only row publishes zero rows on page one", function()
@@ -106,7 +112,7 @@ end)
 test("filtered update recounts and clamps without losing filter sort or page size", function()
   local buf, session = open()
   local spec = query.add_filter(session.query_spec, '"active" = 1', { pinned = true })
-  spec = query.toggle_sort(query.toggle_sort(spec, "id"), "id")
+  spec = query.toggle_sort(spec, "id")
   session.on_requery(buf, query.set_page(spec, 2))
   eq(ids(session), "1", "filtered last page")
   view.apply_edit(buf, data.add_change(session.state, 1, "active", "0"))
@@ -167,6 +173,22 @@ test("raw refresh does not add a count execution or keep a stale total", functio
   eq(session.total_rows, nil, "raw total becomes unknown")
   eq(session.query_spec.page, 3, "raw current page retained")
   eq(ids(session), "5", "raw current rows")
+end)
+
+test("malformed count remains unknown instead of clamping to page one", function()
+  local buf, session = open()
+  page(buf, session, 3)
+  local real_query = db.query
+  db.query = function(sql, ...)
+    if sql:find("COUNT(*)", 1, true) then return { columns = { "count" }, rows = {{ "not-a-count" }} } end
+    return real_query(sql, ...)
+  end
+  local ok, err = pcall(session.on_requery, buf, query.set_page(session.query_spec, 3))
+  db.query = real_query
+  assert(ok, err)
+  eq(session.total_rows, nil, "malformed total")
+  eq(session.query_spec.page, 3, "unproved clamp refused")
+  eq(ids(session), "5", "current rows")
 end)
 
 test("failed page SELECT does not publish a fresh count or clamp over staged rows", function()
@@ -231,6 +253,7 @@ end)
 cleanup()
 grip.setup(saved.opts)
 paths.project_root, vim.notify, ui.confirm, editor.show_error = saved.root, saved.notify, saved.confirm, saved.error
+vim.fn.confirm = saved.native_confirm
 vim.fn.delete(fixture, "rf")
 print(string.format("\npagination_after_write_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end
