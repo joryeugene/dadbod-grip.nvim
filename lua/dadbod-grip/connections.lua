@@ -980,7 +980,7 @@ function M.switch(url, name, conn_type, opts)
         if not schema.is_open() and auto_sidebar then
           schema.toggle(url)
         elseif schema.is_open() then
-          schema.refresh(url)
+          schema.refresh(url, { switch = true })
         end
         require("dadbod-grip.query_pad").open(db_url)
         vim.notify("Grip: opening " .. label, vim.log.levels.INFO)
@@ -1048,7 +1048,7 @@ function M.switch(url, name, conn_type, opts)
       if not schema.is_open() and auto_sidebar then
         schema.toggle(url)
       elseif schema.is_open() then
-        schema.refresh(url)
+        schema.refresh(url, { switch = true })
       end
 
       -- Show welcome screen in the main content area

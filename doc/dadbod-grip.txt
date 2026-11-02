@@ -1384,6 +1384,11 @@ columns from all attached databases appear with schema-qualified names
 (e.g. `pg.users.email`). The nvim-cmp source name is `dadbod_grip`.
 Works with nvim-cmp, blink.cmp, or standalone via `<C-Space>`.
 
+After a successful custom SQL write, Grip discards cached table and column
+metadata. The sidebar and SQL completion reload it when next needed. Use
+`r` or `R` in the sidebar to refresh completion after schema changes made
+outside Grip.
+
 Query pad keymaps:
   q / Q           Go to welcome (q elsewhere opens/focuses this pad)
   1               Open/focus sidebar (1 inside sidebar opens connections)

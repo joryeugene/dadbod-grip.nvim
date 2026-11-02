@@ -14,6 +14,17 @@ local CACHE_TTL = 300  -- 5 minutes
 
 -- _cache[url] = { tables = { name -> [{column_name, data_type, is_nullable}] }, time }
 local _cache = {}
+-- A database wait pumps the event loop. An invalidation or newer fetch can
+-- therefore overtake both async warms and an otherwise synchronous read.
+local _generation, _request = {}, {}
+local function begin_request(url)
+  _generation[url] = _generation[url] or 0
+  _request[url] = (_request[url] or 0) + 1
+  return _generation[url], _request[url]
+end
+local function current_request(url, generation, request)
+  return _generation[url] == generation and _request[url] == request
+end
 
 -- ── Schema fetching ────────────────────────────────────────────────────────────
 
@@ -25,6 +36,7 @@ function M.get_schema(url)
   if cached and (now - cached.time) < CACHE_TTL then
     return cached.tables
   end
+  local generation, request = begin_request(url)
 
   local db = require("dadbod-grip.db")
 
@@ -34,15 +46,18 @@ function M.get_schema(url)
   if db.get_schema_batch then
     tables = db.get_schema_batch(url)
   end
+  if not current_request(url, generation, request) then return {} end
 
   if not tables then
     local result, err = db.list_tables(url)
+    if not current_request(url, generation, request) then return {} end
     if err or not result then return {} end
     tables = {}
     for _, t in ipairs(result) do
       local name = type(t) == "table" and (t.name or (t.rows and t.rows[1] and t.rows[1][1])) or t
       if name and name ~= "" then
         local cols, _ = db.get_column_info(name, url)
+        if not current_request(url, generation, request) then return {} end
         tables[name] = cols or {}
       end
     end
@@ -54,12 +69,16 @@ end
 
 --- Invalidate the cache for a given URL (call on connection switch or GripAttach/Detach).
 function M.invalidate(url)
+  if type(url) ~= "string" then return end
   _cache[url] = nil
+  _generation[url] = (_generation[url] or 0) + 1
   -- Also invalidate any federated entries keyed as "url::alias"
   local prefix = url .. "::"
-  for k in pairs(_cache) do
+  -- Requests are registered before they can yield, including uncached aliases.
+  for k in pairs(_generation) do
     if k:sub(1, #prefix) == prefix then
       _cache[k] = nil
+      _generation[k] = _generation[k] + 1
     end
   end
 end
@@ -70,10 +89,12 @@ end
 --- get_schema_batch_async, each building the same SQL and reusing the same parser as its
 --- synchronous get_schema_batch, so warming can never disagree with a later cold fetch.
 function M.warm_schema(url)
+  if type(url) ~= "string" then return end
   local db = require("dadbod-grip.db")
   if not db.get_schema_batch_async then return end
+  local generation, request = begin_request(url)
   db.get_schema_batch_async(url, function(schema)
-    if schema then
+    if schema and current_request(url, generation, request) then
       _cache[url] = { tables = schema, time = os.time() }
     end
   end)
