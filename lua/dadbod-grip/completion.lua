@@ -16,6 +16,7 @@ local CACHE_TTL = 300  -- 5 minutes
 local _cache = {}
 local _functions, _function_pending, _function_retry = {}, {}, {}
 local _schema_pending, _schema_retry = {}, {}
+local _omni_starts = {}
 -- A database wait pumps the event loop. An invalidation or newer fetch can
 -- therefore overtake both async warms and an otherwise synchronous read.
 local _generation, _request = {}, {}
@@ -248,6 +249,7 @@ vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
   group = _ag,
   callback = function(args)
     M._alias_cache[args.buf] = nil
+    _omni_starts[args.buf] = nil
   end,
 })
 
@@ -561,6 +563,9 @@ function M.omnifunc(findstart, base)
         break
       end
     end
+    _omni_starts[vim.api.nvim_get_current_buf()] = {
+      row = vim.api.nvim_win_get_cursor(0)[1], col = start, prefix = line:sub(1, start),
+    }
     return start
   else
     -- Return completion items.
@@ -570,6 +575,14 @@ function M.omnifunc(findstart, base)
     local line = vim.api.nvim_get_current_line()
     local col  = vim.api.nvim_win_get_cursor(0)[2]
     local before = line:sub(1, col)
+    -- During native phase two, Vim temporarily removes `base` and moves to
+    -- the start column. Reconstruct the original context without losing the
+    -- typed prefix. Direct provider calls without findstart keep their input.
+    local start = _omni_starts[vim.api.nvim_get_current_buf()]
+    if start and start.row == vim.api.nvim_win_get_cursor(0)[1]
+        and start.col == col and start.prefix == before then
+      before = before .. (base or "")
+    end
 
     -- Extract aliases from the full buffer so dotted completion resolves
     -- e.g. "SELECT e." where "FROM employees e" appears elsewhere in the query.
@@ -593,12 +606,40 @@ end
 
 -- ── Auto-complete (as-you-type) ────────────────────────────────────────────────
 
+local QUIET_OPTIONS = "menu,menuone,noinsert,noselect"
+local option_owner, saved_options
+local function release_options(bufnr)
+  if option_owner ~= bufnr then return end
+  -- Do not overwrite an explicit user option change made while the pad owns it.
+  if vim.o.completeopt == QUIET_OPTIONS then vim.o.completeopt = saved_options end
+  option_owner, saved_options = nil, nil
+end
+local function setup_options(bufnr)
+  if vim.api.nvim_get_option_info2("completeopt", {}).scope == "buf" then
+    vim.bo[bufnr].completeopt = QUIET_OPTIONS
+    return
+  end
+  -- Neovim 0.10 only has a global option. Lease it while the standalone pad
+  -- is focused, restoring on leave/deletion; other buffers retain their value.
+  local function acquire()
+    if option_owner == bufnr or vim.api.nvim_get_current_buf() ~= bufnr then return end
+    if option_owner then release_options(option_owner) end
+    saved_options, option_owner = vim.o.completeopt, bufnr
+    vim.o.completeopt = QUIET_OPTIONS
+  end
+  vim.api.nvim_create_autocmd("BufEnter", { group = _ag, buffer = bufnr, callback = acquire })
+  vim.api.nvim_create_autocmd({ "BufLeave", "BufWipeout" }, {
+    group = _ag, buffer = bufnr, callback = function() release_options(bufnr) end,
+  })
+  acquire()
+end
+
 --- Install a TextChangedI autocmd that fires vim.fn.complete() in insert mode.
 --- Completions appear automatically without any keypress.
 --- url_fn() returns the current connection URL (re-read live on each keystroke).
 --- Kept separate from omnifunc so nvim-cmp users who add { name = 'omni' } also work.
 function M.setup_auto_complete(bufnr, url_fn)
-  vim.bo[bufnr].completeopt = "menu,menuone,noinsert,noselect"
+  setup_options(bufnr)
   -- Disable nvim-cmp and blink.cmp for this buffer so they don't conflict
   -- with grip's native popup. No-op when neither is installed.
   vim.api.nvim_create_autocmd("BufEnter", {
@@ -704,7 +745,7 @@ function M.register_cmp_source()
     local aliases = M._get_cached_aliases(bufnr)
 
     local raw = M.complete(before, url, aliases, { cached = true })
-    if #raw == 0 then callback(nil) return end
+    if #raw == 0 then callback({ items = {}, isIncomplete = true }); return end
 
     -- Map to LSP CompletionItem format that nvim-cmp expects.
     local cmp_types = require("cmp.types")
@@ -726,7 +767,9 @@ function M.register_cmp_source()
         insertText = it.word,
       })
     end
-    callback({ items = items, isIncomplete = false })
+    -- Async warms may add items while the same token is being typed. cmp
+    -- must re-request instead of filtering an earlier incomplete snapshot.
+    callback({ items = items, isIncomplete = true })
   end
 
   cmp.register_source("dadbod_grip", source)

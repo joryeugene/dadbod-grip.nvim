@@ -1399,8 +1399,10 @@ qualifier dot such as `users.`. A sole exact match stays quiet. Suggestions
 do not insert text or select an item automatically: use Tab or the arrow keys
 to select, then Enter to accept. Enter with nothing selected inserts a newline.
 Manual `<C-Space>` / `<C-x><C-o>` completion also works with shorter prefixes.
-These menu options apply only to Grip's standalone query pad; external engines
-retain their own popup and selection settings when `completion = false`.
+These menu options apply only to Grip's standalone query pad. On Neovim 0.10,
+Grip temporarily owns the global option while the pad is focused and restores
+it on leave or deletion; newer Neovim uses a buffer-local option. External
+engines retain their settings when `completion = false`.
 
 DuckDB also suggests scalar, aggregate and macro functions in expressions,
 and table functions/macros after FROM or JOIN. Choosing one inserts its name
@@ -1410,8 +1412,9 @@ it never opens a delayed menu or inserts a function on its own. Successful
 catalogs are cached for five minutes. Failed warms have a short cooldown;
 manual schema refresh or a schema-changing SQL attempt clears them immediately.
 Suggestions include ordinary unquoted function names in the main schema of
-the actual CLI session. Completion adds no extension INSTALL or LOAD command;
-functions loaded only in a different client session are not promised.
+the actual CLI session. Catalog lookup loads no additional extensions; existing
+configured attachment setup still applies. Functions loaded only in a different
+client session, or macros in another attached catalog, are not promised.
 
 After a custom SQL write attempt, Grip discards cached table and column
 metadata, including when a later statement fails after earlier DDL committed.

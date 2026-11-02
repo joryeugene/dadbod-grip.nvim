@@ -68,13 +68,19 @@ test('A10 deleted buffer suppresses deferred work', function()
   auto_case('SE', function(s) vim.api.nvim_buf_delete(s.buf,{force=true}) end, 0)
 end)
 test('A11 existing popup is left alone', function() auto_case('SE',function(s) s.popup(1) end,0) end)
-test('A12 native options are buffer-local and non-inserting', function()
-  local global = vim.o.completeopt
+test('A12 native options stay scoped and non-inserting on supported floors', function()
+  local global, oldbuf = vim.o.completeopt, vim.api.nvim_get_current_buf()
   local buf = vim.api.nvim_create_buf(false,true)
   completion.setup_auto_complete(buf,function() return nil end)
-  local opts = vim.bo[buf].completeopt
+  local scope = vim.api.nvim_get_option_info2('completeopt',{}).scope
+  -- Neovim0.10 has a global-only option. The original literal buffer accessor
+  -- fails before a popup; preserve that RED, and check equivalent native scope.
+  assert(vim.o.completeopt == global,'unfocused pad changed global completeopt')
+  vim.api.nvim_set_current_buf(buf)
+  local opts = scope == 'global' and vim.o.completeopt or vim.bo[buf].completeopt
+  vim.api.nvim_set_current_buf(oldbuf)
   vim.api.nvim_buf_delete(buf,{force=true})
-  assert(vim.o.completeopt == global,'global completeopt changed')
+  assert(vim.o.completeopt == global,'pad leave did not restore global completeopt')
   assert(opts:find('noinsert',1,true) and opts:find('noselect',1,true),'missing noinsert/noselect: '..opts)
 end)
 

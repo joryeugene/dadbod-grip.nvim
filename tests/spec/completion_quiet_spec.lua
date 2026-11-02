@@ -30,7 +30,7 @@ local function test(name, fn)
   if ok then pass = pass + 1 else fail = fail + 1; print("FAIL: " .. name .. ": " .. err) end
 end
 test("popup options are local and never insert or select", function()
-  local opts = vim.bo[buf].completeopt
+  local opts = vim.o.completeopt
   assert(opts:find("noinsert", 1, true) and opts:find("noselect", 1, true), opts)
 end)
 test("one letter is quiet, two letters suggest", function()
