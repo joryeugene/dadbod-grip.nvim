@@ -163,13 +163,13 @@ for _, surface in ipairs({ "float", "split" }) do
     eq(data.effective_value(session.state, 1, "payload"), nil, "still NULL")
   end)
 
-  test(surface .. ": clearing a JSON cell stages NULL", function()
+  test(surface .. ": clearing a JSON cell stages empty text", function()
     local grid, session = open_grid(1)
     local buf = open_editor(surface, grid)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "" })
     save(surface, buf)
-    eq(data.has_changes(session.state), true, "NULL staged")
-    eq(data.effective_value(session.state, 1, "payload"), nil, "actual NULL")
+    eq(data.has_changes(session.state), true, "empty text staged")
+    eq(data.effective_value(session.state, 1, "payload"), "", "empty text")
   end)
 
   test(surface .. ": cancel leaves the original JSON untouched", function()

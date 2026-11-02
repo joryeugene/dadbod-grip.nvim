@@ -101,8 +101,12 @@ local function assert_edit_targets(session, column)
     session.state.table_name, data.get_updates(changed), {}, {})
   eq(preview,
     'UPDATE "projection_values" SET "' .. column
-      .. '" = \'changed\' WHERE "id" = \'1\';',
+      .. '" = \'changed\' WHERE "id" = 1 AND typeof("id") = \'integer\';',
     "staged update must target the displayed base-table column")
+  local actual = vim.fn.system({ "sqlite3", fixture }, 'BEGIN;\n' .. preview
+    .. '\nSELECT ' .. sql.quote_column(column) .. ' FROM projection_values WHERE id=1;\nROLLBACK;')
+  eq(vim.v.shell_error, 0, "typed preview must execute")
+  eq(actual, "changed\n", "preview must update the exact displayed column")
 end
 
 for _, projection in ipairs({ "姓名", '"姓名"' }) do

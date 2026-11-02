@@ -2,20 +2,18 @@
 -- All functions take state, return new state. No mutation. No self.
 
 local M = {}
+local provenance = require('dadbod-grip.provenance')
 
 -- Sentinel stored in changes table to represent an explicitly NULL-staged value.
 -- Cannot use Lua nil as a table value (it removes the key).
 -- Callers pass nil to add_change() for NULL; this sentinel is internal only.
-local NULL_SENTINEL = "\0NULL\0"
+local NULL_SENTINEL = vim.NIL
 M.NULL_SENTINEL = NULL_SENTINEL  -- exposed so sql.lua / view.lua can check
 
--- M.from_csv_raw(raw) → value ready for sql.build_*() functions
--- Normalizes a raw CSV cell value for use in undo SQL generation.
--- All adapters (PostgreSQL, MySQL, SQLite, DuckDB) represent NULL as ""
--- in their CSV output (the "psql --csv quirk" documented throughout this file).
--- Returns NULL_SENTINEL for nil or "" so build_insert/build_update emit SQL NULL.
+-- Convert a decoded cell to a SQL builder value. Typed NULL never collides
+-- with text, including empty text and strings used by older sentinels.
 function M.from_csv_raw(raw)
-  if raw == nil or raw == "" then
+  if raw == nil or raw == NULL_SENTINEL then
     return NULL_SENTINEL
   end
   return raw
@@ -23,7 +21,7 @@ end
 
 -- State shape (plain table, no methods):
 -- {
---   rows       = {},        -- original rows from query (list of string lists)
+--   rows       = {},        -- original cells: strings or vim.NIL (SQL NULL)
 --   columns    = {},        -- ordered column names
 --   pks        = {},        -- primary key column names
 --   table_name = nil,       -- nil if computed query (readonly)
@@ -73,8 +71,13 @@ end
 --- (changes, deleted, inserted). Rows, columns, and pks are shared
 --- since they are never mutated after creation.
 local function edit_copy(state)
-  return {
+  local result = {
     rows             = state.rows,      -- immutable: share
+    cell_types       = state.cell_types,
+    cell_exact       = state.cell_exact,
+    storage_adapter  = state.storage_adapter,
+    column_info      = state.column_info,
+    _unknown_columns = state._unknown_columns,
     columns          = state.columns,   -- immutable: share
     pks              = state.pks,       -- immutable: share
     table_name       = state.table_name,
@@ -86,6 +89,8 @@ local function edit_copy(state)
     _next_insert_idx = state._next_insert_idx,
     readonly         = state.readonly,
   }
+  for field,value in pairs(provenance.copy(state,true)) do result[field]=value end
+  return result
 end
 
 -- M.new(query_result) → State
@@ -99,16 +104,23 @@ function M.new(query_result)
   local columns = deep_copy(query_result.columns or {})
   local pks = query_result.primary_keys or {}
   local table_name = query_result.table_name
-  local readonly = (#pks == 0) or (table_name == nil) or query_result.readonly == true
+  local readonly = (#pks == 0) or (table_name == nil) or query_result.readonly == true or query_result.lossless == false
+    or provenance.write_error(query_result) ~= nil
   -- UPDATE/DELETE predicates use the original result's key values. A missing
   -- projected key would disappear from that predicate and could match siblings
   -- sharing the remaining composite-key values. Require the entire key.
   local present = col_index_map(columns)
+  local unknown_columns={}
+  for index=1,#columns do unknown_columns[index]=provenance.column_unknown(query_result,index) end
   for _, pk in ipairs(pks) do
     if not present[pk] then readonly = true; break end
   end
-  return {
+  local result = {
     rows = deep_copy(query_result.rows or {}),
+    cell_types = deep_copy(query_result.cell_types),
+    cell_exact = deep_copy(query_result.cell_exact),
+    storage_adapter = query_result.storage_adapter,
+    column_info = deep_copy(query_result.column_info),
     columns = columns,
     pks = deep_copy(pks),
     table_name = table_name,
@@ -119,7 +131,10 @@ function M.new(query_result)
     inserted = {},
     _next_insert_idx = #(query_result.rows or {}) + 1000,
     readonly = readonly,
+    _unknown_columns = unknown_columns,
   }
+  for field,value in pairs(provenance.copy(query_result)) do result[field]=value end
+  return result
 end
 
 -- M.add_change(state, row_idx, field, value) → State
@@ -127,11 +142,13 @@ end
 -- key survives in the Lua table (assigning nil would remove it).
 function M.add_change(state, row_idx, field, value)
   local s = edit_copy(state)
-  -- Empty string and explicit nil both become NULL
-  local stored = (value == nil or value == "") and NULL_SENTINEL or value
+  -- Empty text remains text; only explicit nil stages SQL NULL.
+  local stored = value == nil and NULL_SENTINEL or value
   -- Inserted rows: write directly into inserted.values (not changes table)
   if s.inserted[row_idx] then
     s.inserted[row_idx].values[field] = stored
+    if s.inserted[row_idx].value_types then s.inserted[row_idx].value_types[field] = nil end
+    if s.inserted[row_idx].value_exact then s.inserted[row_idx].value_exact[field] = nil end
   else
     if not s.changes[row_idx] then s.changes[row_idx] = {} end
     s.changes[row_idx][field] = stored
@@ -181,24 +198,50 @@ function M.insert_row(state, after_idx)
   return s
 end
 
+-- Original storage metadata is immutable, just like the original cell bytes.
+function M.cell_type(state, row_idx, field)
+  local column_index = col_index_map(state.columns)[field]
+  if column_index and ((state._unknown_columns and state._unknown_columns[column_index])
+      or (not state._unknown_columns and provenance.column_unknown(state,column_index))) then return 'raw_unknown' end
+  local inserted = state.inserted[row_idx]
+  if inserted then return inserted.value_types and inserted.value_types[field] end
+  if state.changes[row_idx] and state.changes[row_idx][field] ~= nil then
+    if state.changes[row_idx][field] == NULL_SENTINEL then return 'null' end
+    return nil
+  end
+  local idx = col_index_map(state.columns)[field]
+  return idx and state.cell_types and state.cell_types[row_idx] and state.cell_types[row_idx][idx]
+end
+
+function M.cell_exact(state, row_idx, field)
+  local inserted = state.inserted[row_idx]
+  if inserted then return inserted.value_exact and inserted.value_exact[field] end
+  if state.changes[row_idx] and state.changes[row_idx][field] ~= nil then return nil end
+  local idx = col_index_map(state.columns)[field]
+  return idx and state.cell_exact and state.cell_exact[row_idx] and state.cell_exact[row_idx][idx]
+end
+
 -- M.clone_row(state, row_idx) → State
 -- Copies all non-PK effective values into a new staged INSERT after row_idx.
 function M.clone_row(state, row_idx)
+  local problem=provenance.write_error(state);assert(not problem,problem)
   local s = edit_copy(state)
   local new_idx = s._next_insert_idx
   s._next_insert_idx = s._next_insert_idx + 1
   local pk_set = {}
   for _, pk in ipairs(s.pks) do pk_set[pk] = true end
-  local values = {}
+  local values, types, exact = {}, {}, {}
   for _, col in ipairs(s.columns) do
     if not pk_set[col] then
       local v = M.effective_value(state, row_idx, col)
-      -- Skip nil and "": both represent NULL in original rows (psql --csv quirk)
-      if v ~= nil and v ~= "" then values[col] = v end
+      -- A clone copies NULL explicitly, rather than applying a column default.
+      values[col] = v == nil and NULL_SENTINEL or v
+      types[col], exact[col] = M.cell_type(state, row_idx, col), M.cell_exact(state, row_idx, col)
     end
     -- PK columns: omit so DB SERIAL/AUTO_INCREMENT generates a new ID on commit
   end
-  s.inserted[new_idx] = { _after = row_idx, values = values }
+  s.inserted[new_idx] = { _after = row_idx, values = values,
+    value_types = next(types) and types or nil, value_exact = next(exact) and exact or nil }
   return s
 end
 
@@ -222,6 +265,16 @@ function M.undo_all(state)
 end
 
 -- M.get_updates(state) → list of {row_idx, pk_values, changes}
+local function write_metadata(state, row_idx)
+  local problem=provenance.write_error(state);assert(not problem,problem)
+  if not state.storage_adapter then return {} end
+  local types, exact = {}, {}
+  for ci, col in ipairs(state.columns) do
+    if state.cell_types and state.cell_types[row_idx] then types[col] = state.cell_types[row_idx][ci] end
+    if state.cell_exact and state.cell_exact[row_idx] then exact[col] = state.cell_exact[row_idx][ci] end
+  end
+  return { adapter_kind = state.storage_adapter, key_types = types, key_exact = exact }
+end
 function M.get_updates(state)
   local updates = {}
   for row_idx, field_changes in pairs(state.changes) do
@@ -240,11 +293,9 @@ function M.get_updates(state)
       for col, val in pairs(field_changes) do
         clean_changes[col] = val
       end
-      table.insert(updates, {
-        row_idx = row_idx,
-        pk_values = pk_values,
-        changes = clean_changes,
-      })
+      local update = write_metadata(state,row_idx)
+      update.row_idx, update.pk_values, update.changes = row_idx, pk_values, clean_changes
+      table.insert(updates, update)
     end
   end
   return updates
@@ -252,6 +303,7 @@ end
 
 -- M.get_inserts(state) → list of {values, columns}
 function M.get_inserts(state)
+  local problem=provenance.write_error(state);assert(not problem,problem)
   local inserts = {}
   for _, idx in ipairs(sorted_numeric_keys(state.inserted)) do
     local ins = state.inserted[idx]
@@ -261,6 +313,9 @@ function M.get_inserts(state)
     end
     table.insert(inserts, {
       values = clean_values,
+      value_types = deep_copy(ins.value_types),
+      value_exact = deep_copy(ins.value_exact),
+      adapter_kind = state.storage_adapter,
       columns = deep_copy(state.columns),
     })
   end
@@ -279,7 +334,9 @@ function M.get_deletes(state)
         local idx = col_idx[pk]
         pk_values[pk] = idx and state.rows[row_idx][idx] or nil
       end
-      table.insert(deletes, { row_idx = row_idx, pk_values = pk_values })
+      local deletion = write_metadata(state,row_idx)
+      deletion.row_idx, deletion.pk_values = row_idx, pk_values
+      table.insert(deletes, deletion)
     end
   end
   return deletes
@@ -324,12 +381,8 @@ function M.effective_value(state, row_idx, field)
   local idx = col_index_map(state.columns)[field]
   if not idx then return nil end
   local raw = state.rows[row_idx] and state.rows[row_idx][idx]
-  -- CSV CLIs emit "" for NULL, and db.parse_csv collapses quoted "" (real
-  -- empty string) and unquoted empty (NULL) into the same Lua "" — the
-  -- distinction is not recoverable here, so "" uniformly means NULL.
-  -- NOTE: must be an explicit if — `raw == "" and nil or raw` is the classic
-  -- and/or trap: (true and nil) short-circuits to the or-branch and returns "".
-  if raw == "" then return nil end
+  -- The public cell API uses nil for typed SQL NULL, preserving all strings.
+  if raw == NULL_SENTINEL then return nil end
   return raw
 end
 

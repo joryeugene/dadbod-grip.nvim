@@ -44,12 +44,32 @@ jobs:
             -S localhost -U sa -C -Q "IF DB_ID('grip_test') IS NULL CREATE DATABASE grip_test"
           SQLCMDPASSWORD="$MSSQL_SA_PASSWORD" "$RUNNER_TEMP/bin/sqlcmd" \
             -S localhost -U sa -C -d grip_test -i tests/seed_mssql.sql
+      - name: Install deterministic database tools
+        run: sudo apt-get update && sudo apt-get install -y sqlite3 unzip
+      - name: Install pinned DuckDB CLI
+        run: |
+          curl -fsSL -o duckdb.zip \
+            https://github.com/duckdb/duckdb/releases/download/v1.5.5/duckdb_cli-linux-amd64.zip
+          echo "08c0ca117111fcede14239d0093792352befdc174218c344d232c13279643d05  duckdb.zip" \
+            | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/duckdb"
+          unzip -q duckdb.zip -d "$RUNNER_TEMP/duckdb"
+          echo "$RUNNER_TEMP/duckdb" >> "$GITHUB_PATH"
+      - name: Pre-install DuckDB SQLite scanner
+        run: |
+          for attempt in 1 2 3; do
+            if "$RUNNER_TEMP/duckdb/duckdb" -c "INSTALL sqlite_scanner; LOAD sqlite_scanner;"; then
+              exit 0
+            fi
+            echo "sqlite_scanner install failed (attempt $attempt of 3)"
+            sleep 5
+          done
+          exit 1
       - name: Run required SQL Server release scenarios
         env:
+          GRIP_REQUIRE_DUCKDB: "1"
           GRIP_TEST_LIVE_URL: "sqlserver://sa:Grip-ci-2025!@localhost/grip_test?encrypt=optional&trust_server_certificate=true"
         run: |
-          sudo apt-get update
-          sudo apt-get install -y sqlite3
           just test-live sqlserver-2025
       - name: Show SQL Server logs on failure
         if: failure()

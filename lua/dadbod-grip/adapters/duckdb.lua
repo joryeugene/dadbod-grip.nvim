@@ -526,8 +526,10 @@ local function duckdb(db_path, sql_str, timeout_ms, url, opts)
   local effective_sql, has_setup = with_csv_setup(setup_sql, (profile and profile.prefix or "") .. sql_str)
 
   local stdout, stderr, code, engine = timing.run(profile, function()
-    return adapters.run_cmd(args, effective_timeout, { stdin = effective_sql,
-      terminate_on_interrupt = profile and profile.path ~= nil })
+    return adapters.run_cmd(args, effective_timeout, { stdin = effective_sql, raw_output = true,
+      on_start = opts and opts.on_start, on_complete = opts and opts.on_complete,
+      on_spawn_error = opts and opts.on_spawn_error,
+      terminate_on_interrupt = (profile and profile.path ~= nil) or (opts and opts.on_start ~= nil) })
   end)
   if has_setup then stdout = strip_csv_setup(stdout) end
 
@@ -652,9 +654,10 @@ end
 --- Returns nil when the statement is not a wrappable query, in which case the
 --- caller runs it unchanged.
 local NESTED_JSON_TEMPLATE = [[
-SELECT CASE WHEN regexp_matches(typeof(COLUMNS('(.*)')), '^(STRUCT|MAP|UNION)\(|\]$')
-            THEN to_json(COLUMNS('(.*)'))::VARCHAR
-            ELSE COLUMNS('(.*)')::VARCHAR
+SELECT CASE WHEN COLUMNS('(.*)') IS NULL THEN 'N'
+            WHEN regexp_matches(typeof(COLUMNS('(.*)')), '^(STRUCT|MAP|UNION)\(|\]$')
+            THEN 'V' || to_json(COLUMNS('(.*)'))::VARCHAR
+            ELSE 'V' || COLUMNS('(.*)')::VARCHAR
        END AS "\1"
 FROM (
 %s
@@ -681,7 +684,8 @@ function M.query(sql_str, url, opts)
   if not db_path then return nil, "Invalid DuckDB URL: " .. url end
 
   local requested = opts and opts.engine_timing == true
-  local wrapped = nested_json_sql(sql_str)
+  local single_sql = timing.statement(sql_str)
+  local wrapped = single_sql and nested_json_sql(single_sql) or nil
   local absent
   if requested then
     local single, reason = timing.statement(sql_str)
@@ -697,17 +701,14 @@ function M.query(sql_str, url, opts)
       if probe_err then return nil, probe_err end
     end
   end
-  local stdout, stderr, code, engine, profiled
+  local stdout, stderr, code, engine
   if wrapped then
-    stdout, stderr, code, engine, profiled = duckdb(db_path, wrapped, nil, url, opts)
+    stdout, stderr, code, engine = duckdb(db_path, wrapped, nil, url, opts)
   end
-  -- Without profiling, the rewrite is an enhancement: a DuckDB too old for
-  -- COLUMNS(...) AS "\1", or a statement the subquery cannot hold after all, falls
-  -- back to the original query -- and to its own error message, so a genuinely
-  -- broken user query still reports what is wrong with it, not with the wrapper.
-  -- Once profiling is actually enabled, never retry the failed wrapper/query.
-  -- A failed private-directory setup leaves the legacy compatibility path.
-  if not wrapped or (code ~= 0 and not profiled) then
+  -- Never rerun a user's statement after any attempt, including a volatile
+  -- SELECT. Unwrappable syntax is classified before execution; wrapper errors
+  -- are surfaced instead of falling back to a second run.
+  if not wrapped then
     stdout, stderr, code, engine = duckdb(db_path, sql_str, nil, url, opts)
   end
   if code ~= 0 then
@@ -725,11 +726,16 @@ function M.query(sql_str, url, opts)
 
   local parsed, parse_err = db_util.parse_csv(stdout)
   if not parsed then return nil, parse_err end
+  if wrapped then
+    parsed, parse_err = require("dadbod-grip.transport").duckdb_values(parsed)
+    if not parsed then return nil, parse_err end
+  end
 
   return {
     rows = parsed.rows,
     columns = parsed.columns,
     primary_keys = {},
+    lossless = wrapped ~= nil,
     engine_timing = engine or absent,
   }, nil
 end
@@ -1587,5 +1593,20 @@ M._nested_json_sql = nested_json_sql
 --- query gets depends on that state, so a spec asserting on either branch has to
 --- be able to start from a cold session.
 M._forget_installed_extensions = function() _installed_ext = {} end
+
+function M.grid_write(plan, url, opts)
+  local transaction = require("dadbod-grip.transaction")
+  local path = extract_path(url)
+  if not path then return nil, "Invalid DuckDB URL" end
+  local script, err = transaction.compile(plan, "duckdb")
+  if not script then return nil, err end
+  local stdout, stderr, code = transaction.submit('duckdb', opts, function(hooks)
+    return duckdb(path, script, nil, url, hooks)
+  end)
+  if code ~= 0 then return nil, stderr ~= "" and stderr or ("duckdb exited with code " .. code) end
+  local result, decode_err = transaction.decode(plan, stdout, "duckdb")
+  if result then result.sql = script end
+  return result, decode_err
+end
 
 return M

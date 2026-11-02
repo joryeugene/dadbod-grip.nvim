@@ -124,10 +124,10 @@ test("add_change: nil stores as NULL", function()
   eq(data.effective_value(st2, 1, "name"), nil, "nil means NULL")
 end)
 
-test("add_change: empty string stores as NULL", function()
+test("add_change: empty string stays empty text", function()
   local st = make_state({})
   local st2 = data.add_change(st, 1, "name", "")
-  eq(data.effective_value(st2, 1, "name"), nil, "empty string means NULL")
+  eq(data.effective_value(st2, 1, "name"), "", "empty text is distinct from NULL")
 end)
 
 test("add_change: multiple changes on same row", function()
@@ -217,20 +217,15 @@ test("effective_value: returns original for unstaged", function()
   eq(data.effective_value(st, 2, "name"), "bob")
 end)
 
-test("effective_value: NULL original (empty CSV cell) returns nil", function()
-  -- All CSV CLIs emit "" for NULL, and db.parse_csv collapses quoted "" (a
-  -- genuinely empty string) and unquoted empty (NULL) into the same Lua "".
-  -- The distinction is therefore unrecoverable at this layer: "" in original
-  -- rows uniformly means NULL, and the documented contract is that
-  -- effective_value returns nil for NULL.
-  local st = make_state({ rows = { { "1", "", "test@x.com" } } })
+test("effective_value: typed NULL original returns nil", function()
+  local st = make_state({ rows = { { "1", vim.NIL, "test@x.com" } } })
   eq(data.effective_value(st, 1, "name"), nil, "NULL original must come back as nil")
 end)
 
 test("effective_value: staged NULL round-trip", function()
   -- Stage a value over a NULL original, then undo: the cell must read as
   -- NULL (nil) again, not "".
-  local st = make_state({ rows = { { "1", "", "test@x.com" } } })
+  local st = make_state({ rows = { { "1", vim.NIL, "test@x.com" } } })
   local st2 = data.add_change(st, 1, "name", "temp")
   eq(data.effective_value(st2, 1, "name"), "temp", "staged value visible")
   local st3 = data.undo_row(st2, 1)
@@ -392,8 +387,8 @@ test("clone_row: PK values are nil in cloned row", function()
   eq(data.effective_value(st2, ins_idx, "id"), nil, "PK should be nil so DB generates new ID")
 end)
 
-test("clone_row: NULL source values are not stored", function()
-  local st = make_state({ rows = { { "1", "", "alice@test.com" } } })
+test("clone_row: NULL source values are stored explicitly", function()
+  local st = make_state({ rows = { { "1", vim.NIL, "alice@test.com" } } })
   local st2 = data.clone_row(st, 1)
   local ordered = data.get_ordered_rows(st2)
   local ins_idx
@@ -401,7 +396,7 @@ test("clone_row: NULL source values are not stored", function()
     if idx ~= 1 then ins_idx = idx; break end
   end
   assert(ins_idx, "should have an inserted row")
-  -- empty string in original = nil (NULL), should not be stored
+  eq(st2.inserted[ins_idx].values.name, vim.NIL, "clone must override a possible non-NULL default")
   eq(data.effective_value(st2, ins_idx, "name"), nil, "NULL source value should stay nil in clone")
 end)
 

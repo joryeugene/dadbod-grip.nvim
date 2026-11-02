@@ -8,6 +8,12 @@ local sql    = require("dadbod-grip.sql")
 local db     = require("dadbod-grip.db")
 
 local M = {}
+local function refuse_unknown(state)
+  if require('dadbod-grip.provenance').has_unknown(state) then
+    vim.notify('Unproven byte encoding; use the cell buffer to inspect raw bytes',vim.log.levels.WARN)
+    return true
+  end
+end
 
 --- Inspection floats: staged SQL preview/copy, table info and properties,
 --- column rename, cell explain, cell expand, row view, cell buffer, JSON
@@ -38,6 +44,8 @@ function M.setup(bufnr, ctx)
     end
 
     local st = session.state
+    local problem=require('dadbod-grip.provenance').write_error(st)
+    if problem then vim.notify(problem,vim.log.levels.WARN);return end
     if not data.has_changes(st) then
       vim.notify("No staged changes", vim.log.levels.INFO)
       return
@@ -65,6 +73,8 @@ function M.setup(bufnr, ctx)
     local session = ctx.session()
     if not session then return end
     local st = session.state
+    local problem=require('dadbod-grip.provenance').write_error(st)
+    if problem then vim.notify(problem,vim.log.levels.WARN);return end
     if not data.has_changes(st) then
       vim.notify("No staged changes", vim.log.levels.INFO)
       return
@@ -206,7 +216,8 @@ function M.setup(bufnr, ctx)
         lines[#lines + 1] = "  Constraints: " .. col_info.constraints
       end
     end
-    lines[#lines + 1] = "  Value: " .. (cell.value or "NULL")
+    lines[#lines + 1] = "  Value: " .. (cell.storage_type=='raw_unknown'
+      and require('dadbod-grip.provenance').raw_display(cell.value) or (cell.value or 'NULL'))
     lines[#lines + 1] = "  Status: " .. display_status
     local grip_win = vim.api.nvim_get_current_win()
     open_info_float(grip_win, lines, {
@@ -308,6 +319,7 @@ function M.setup(bufnr, ctx)
       return
     end
     local st = session.state
+    if refuse_unknown(st) then return end
     local max_name_w = 0
     for _, col in ipairs(st.columns) do
       max_name_w = math.max(max_name_w, vim.fn.strdisplaywidth(col))
@@ -424,6 +436,10 @@ function M.setup(bufnr, ctx)
       vim.notify("Move cursor to a data row", vim.log.levels.INFO)
       return
     end
+    if cell.storage_type=='raw_unknown' then
+      vim.notify('Unproven byte encoding; JSON inspection is unavailable',vim.log.levels.WARN)
+      return
+    end
     require("dadbod-grip.json_tree").open(cell.value, {
       title      = " " .. cell.col_name .. " (JSON) ",
       origin_win = vim.api.nvim_get_current_win(),
@@ -439,6 +455,7 @@ function M.setup(bufnr, ctx)
     local session = ctx.session()
     if not session then return end
     local st = session.state
+    if refuse_unknown(st) then return end
 
     local max_name_w = 0
     for _, col in ipairs(st.columns) do
@@ -503,6 +520,7 @@ function M.setup(bufnr, ctx)
     local session = ctx.session()
     if not session then return end
     local st = session.state
+    if refuse_unknown(st) then return end
 
     local max_name_w = 0
     for _, col in ipairs(st.columns) do

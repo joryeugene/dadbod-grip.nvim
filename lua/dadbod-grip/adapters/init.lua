@@ -52,7 +52,7 @@ function M.run_cmd(args, timeout_ms, opts)
   -- Adapters promise never to throw, and only query/execute/ping pre-check
   -- vim.fn.executable(), so swallow it here and report it like a failed exit.
   local sys_opts = {
-    text = true,
+    text = not (opts and opts.raw_output),
     timeout = t,
     stdin = opts and opts.stdin or nil,
     env = opts and opts.env or nil,
@@ -60,10 +60,14 @@ function M.run_cmd(args, timeout_ms, opts)
   local ok, process = pcall(vim.system, args, sys_opts, function(r)
     out = r
     done = true
+    if opts and opts.on_complete then pcall(opts.on_complete) end
   end)
   if not ok then
+    if opts and opts.on_spawn_error then pcall(opts.on_spawn_error) end
+    if opts and opts.on_complete then pcall(opts.on_complete) end
     return "", tostring(process), 1
   end
+  if opts and opts.on_start then pcall(opts.on_start, process) end
   -- Poll at 1ms so done is detected immediately after the on_exit callback fires.
   -- The 80ms spinner timer fires when vim.wait pumps the event loop regardless of
   -- poll interval; tight polling just reduces per-call overhead in tests.
@@ -135,7 +139,7 @@ function M.run_cmd_async(args, timeout_ms, callback, opts)
   end, t + M._exit_grace_ms)
 
   local sys_opts = {
-    text = true,
+    text = not (opts and opts.raw_output),
     timeout = t,
     stdin = opts and opts.stdin or nil,
     env = opts and opts.env or nil,

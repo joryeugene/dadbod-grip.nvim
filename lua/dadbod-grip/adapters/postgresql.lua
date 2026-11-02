@@ -193,13 +193,18 @@ function M.readonly_caveat(url)
   return nil
 end
 
-local function psql(url, sql_str, timeout_ms)
+local function psql(url, sql_str, timeout_ms, raw_output, hooks)
   local service_path, password, service_err = write_service_file(url)
-  if not service_path then return "", service_err, 1 end
+  if not service_path then
+    if hooks then hooks.on_spawn_error(); hooks.on_complete() end
+    return "", service_err, 1
+  end
   local stdout, stderr, code = adapters.run_cmd(psql_args(),
     timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT),
-    { stdin = sql_str, env = psql_env(url, adapters.session_opts(), service_path, password) })
-  pcall(vim.fn.delete, service_path)
+    { stdin = sql_str, env = psql_env(url, adapters.session_opts(), service_path, password), raw_output = raw_output,
+      on_start = hooks and hooks.on_start, on_spawn_error = hooks and hooks.on_spawn_error,
+      on_complete = function() pcall(vim.uv.fs_unlink, service_path); if hooks then hooks.on_complete() end end,
+      terminate_on_interrupt = true })
   return stdout, stderr, code
 end
 
@@ -218,19 +223,26 @@ function M.query(sql_str, url)
     return nil, "psql not found. Install postgresql-client."
   end
 
-  local stdout, stderr, code = psql(url, sql_str)
+  -- psql's display CSV conflates NULL and empty text. Server COPY CSV
+  -- quotes empty data fields and keeps NULL unquoted, positionally.
+  local single = require("dadbod-grip.engine_timing").statement(sql_str)
+  local head = single and single:match("^%s*(%a+)")
+  local lossless = head and ({ SELECT = true, TABLE = true, WITH = true, VALUES = true })[head:upper()] or false
+  local wire_sql = lossless and ("COPY (" .. single .. "\n) TO STDOUT WITH (FORMAT CSV, HEADER true, NULL '')") or sql_str
+  local stdout, stderr, code = psql(url, wire_sql, nil, true)
   if code ~= 0 then
     local msg = stderr ~= "" and stderr or ("psql exited with code " .. code)
     return nil, msg
   end
 
-  local parsed, parse_err = db_util.parse_csv(stdout)
+  local parsed, parse_err = db_util.parse_csv(stdout, nil, false, true)
   if not parsed then return nil, parse_err end
 
   return {
     rows = parsed.rows,
     columns = parsed.columns,
     primary_keys = {},
+    lossless = lossless,
   }, nil
 end
 
@@ -285,7 +297,7 @@ function M.get_column_info(table_name, url)
            AND kcu.table_name = '%s'
            AND kcu.column_name = c.column_name),
         ''
-      ) AS constraints
+      ) AS constraints, c.is_generated
     FROM information_schema.columns c
     WHERE c.table_schema = '%s'
       AND c.table_name = '%s'
@@ -309,6 +321,7 @@ function M.get_column_info(table_name, url)
       is_nullable = row[3] or "",
       column_default = row[4] or "",
       constraints = row[5] or "",
+      generated = row[6] == "ALWAYS",
     })
   end
   return cols, nil
@@ -793,5 +806,18 @@ end
 M._psql_args = psql_args
 M._psql_env = psql_env
 M._pg_service_lines = pg_service_lines
+
+function M.grid_write(plan, url, opts)
+  local transaction = require("dadbod-grip.transaction")
+  local script, err = transaction.compile(plan, "postgresql")
+  if not script then return nil, err end
+  local stdout, stderr, code = transaction.submit('postgresql', opts, function(hooks)
+    return psql(url, script, nil, nil, hooks)
+  end)
+  if code ~= 0 then return nil, stderr ~= "" and stderr or ("postgresql exited with code " .. code) end
+  local result, decode_err = transaction.decode(plan, stdout, "postgresql")
+  if result then result.sql = script end
+  return result, decode_err
+end
 
 return M

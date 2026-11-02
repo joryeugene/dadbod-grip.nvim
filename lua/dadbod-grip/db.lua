@@ -68,7 +68,7 @@ end
 --- Handles multiline quoted fields (RFC 4180).
 --- Shared by all adapters that use CSV CLI output; imports also pass a tab
 --- delimiter and strict=true for user-supplied TSV.
-function M.parse_csv(raw, delimiter, strict)
+function M.parse_csv(raw, delimiter, strict, typed)
   if not raw or raw == "" then
     return { columns = {}, rows = {} }
   end
@@ -118,7 +118,7 @@ function M.parse_csv(raw, delimiter, strict)
         if b == DELIM then
           i = i + 1
           if i > len or raw:byte(i) == LF or raw:byte(i) == CR then
-            table.insert(fields, "")
+            table.insert(fields, typed and vim.NIL or "")
           end
         elseif b == LF or b == CR then
           if b == CR and raw:byte(i + 1) == LF then i = i + 1 end
@@ -130,10 +130,10 @@ function M.parse_csv(raw, delimiter, strict)
         end
       end
     elseif b == DELIM then
-      table.insert(fields, "")
+      table.insert(fields, typed and vim.NIL or "")
       i = i + 1
       if i > len or raw:byte(i) == LF or raw:byte(i) == CR then
-        table.insert(fields, "")
+        table.insert(fields, typed and vim.NIL or "")
       end
     elseif b == LF or b == CR then
       if b == CR and raw:byte(i + 1) == LF then i = i + 1 end
@@ -154,7 +154,7 @@ function M.parse_csv(raw, delimiter, strict)
         if b == DELIM then
           i = i + 1
           if i > len or raw:byte(i) == LF or raw:byte(i) == CR then
-            table.insert(fields, "")
+            table.insert(fields, typed and vim.NIL or "")
           end
         elseif b == LF or b == CR then
           if b == CR and raw:byte(i + 1) == LF then i = i + 1 end
@@ -173,8 +173,8 @@ function M.parse_csv(raw, delimiter, strict)
   -- Filter out empty rows and psql "(N rows)" footer
   local filtered = {}
   for _, row in ipairs(all_rows) do
-    if not (#row == 1 and row[1]:match("^%(%d+ rows?%)$")) then
-      if not (#row == 1 and row[1] == "") then
+    if typed or not (#row == 1 and type(row[1]) == "string" and row[1]:match("^%(%d+ rows?%)$")) then
+      if typed or not (#row == 1 and row[1] == "") then
         table.insert(filtered, row)
       end
     end
@@ -183,13 +183,14 @@ function M.parse_csv(raw, delimiter, strict)
   if #filtered == 0 then return { columns = {}, rows = {} } end
 
   local columns = filtered[1]
+  for ci, name in ipairs(columns) do if name == vim.NIL then columns[ci] = "" end end
   local rows = {}
   for ri = 2, #filtered do
     local row = filtered[ri]
     if strict and #row ~= #columns then
       return nil, string.format("row %d has %d fields; expected %d", ri - 1, #row, #columns)
     end
-    while #row < #columns do table.insert(row, "") end
+    while #row < #columns do table.insert(row, typed and vim.NIL or "") end
     table.insert(rows, row)
   end
 
@@ -353,11 +354,25 @@ function M.get_column_info(table_name, url)
 end
 
 function M.execute(sql, url, opts)
+  if type(sql) == "table" then return M.grid_write(sql, url, opts) end
   if type(opts) ~= "table" then opts = nil end
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
   local result, exec_err = via_adapter(url, adapter.execute, sql, conn, opts)
   return with_engine_timing(result, conn, opts), exec_err
+end
+
+-- Execute a structured, guarded grid transaction in one adapter session.
+function M.grid_write(plan, url, opts)
+  if type(opts) ~= 'table' then opts = nil end
+  if opts and opts.write_lifecycle then
+    opts.write_lifecycle.state, opts.write_lifecycle.settled = 'not_started', true
+  end
+  local adapter, conn, err = resolve(url)
+  if not adapter then return nil, err end
+  if not adapter.grid_write then return nil, "Verified grid writes unsupported for this adapter" end
+  if M.is_readonly(url) then return nil, "Connection is read-only" end
+  return via_adapter(url, adapter.grid_write, plan, conn, opts)
 end
 
 --- Ping a connection. Returns true on success, false on any error.

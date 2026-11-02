@@ -46,6 +46,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in chunks while preserving the existing SELECT editability checks.
 - MySQL optimizer hints containing client-command escapes are rejected
   before mutation preview parsing can discard their content.
+
+## [3.18.0] - 2026-11-02
+
+### Added
+
+- The float and split cell editors provide buffer-local `:GripCellEmpty` and
+  `:GripCellNull` commands to stage empty text or SQL NULL explicitly.
+
+### Fixed
+
+- Grid writes capture their row identities within the original transaction.
+  Committed Undo uses the post-write keys and checks stored row values before
+  reversing changes. Conflicts preserve the Undo entry instead of reporting
+  success. Unsupported generated-key batches are refused before writing.
+- SQLite verifies REAL-value restoration before committing reversible grid
+  batches. Runtimes that cannot round-trip a value keep the batch staged
+  instead of committing a change that Undo cannot reverse exactly.
+- SQL NULL, empty text, and literal text stay distinct through supported query
+  transports, editing, cloning, grid writes, Undo, and CSV/TSV/JSON/SQL exports.
+  Blank editor saves now mean empty text; an untouched NULL remains unchanged.
+- A failed DuckDB query wrapper surfaces its error without rerunning the
+  original statement. Unsupported batch syntax is classified before execution.
 - MySQL/MariaDB default-row inserts translate SQL tokens instead of replacing
   matching text inside data, quoted identifiers, or comments. Mixed-case and
   comment-separated `DEFAULT VALUES` clauses work without rewriting their
@@ -57,6 +79,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exact numeric values; malformed registries are refused without writing.
   Deletion refuses numeric and other unsupported profile IDs rather than
   treating rounded numeric values as the same identity.
+- SQLite reads retain actual cell storage classes through guarded edits,
+  cloning, and Undo, including BLOBs in text-declared columns. Quoted column
+  names and values containing `WHERE` use structured predicates.
+- A write error after submission reports an unknown outcome unless rollback
+  is proved. Refresh preserves staging and the write guard while the original
+  client's completion remains unknown.
+- MySQL/MariaDB grid batches refuse ambiguous or unproven ENUM/SET definitions
+  before writing. Ordinary unique nonempty ASCII label profiles retain
+  update, clone, delete and Undo support; spatial restoration is refused.
+- MySQL/MariaDB supported SELECTs preserve NUL text, mixed character sets,
+  binary bytes and exact numeric text through one original read. Source types
+  are checked on the same transaction after the read and admitted only after
+  a complete quoted column-layout witness, COMMIT and client completion.
+  Privilege-filtered column prefixes and hidden generated-key metadata cannot
+  establish restoration proof. No TEMP privilege is required; read-only
+  profiles retain server enforcement. Other safe single reads keep native
+  headers and remain read-only with unproven types. Errors never replay SQL.
+- Result provenance remains attached to staged state and page/all-row exports.
+  Values with unproven physical types or byte encoding stay read-only and
+  cannot be cloned, restored or exported as SQL. Unproven bytes display as
+  hexadecimal in the grid and split inspector instead of being parsed as JSON
+  or copied as text. Source metadata alone never enables restoration.
 
 ## [3.17.0] - 2026-10-31
 
@@ -852,7 +896,8 @@ older tags are left in place so anyone pinned to them keeps working.
 - **joryeugene** — SQL Server adapter, PostgreSQL routines in the schema sidebar, focused ER diagram
   ([PR #17](https://github.com/joryeugene/dadbod-grip.nvim/pull/17)).
 
-[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.17.0...HEAD
+[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.18.0...HEAD
+[3.18.0]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.17.0...v3.18.0
 [3.17.0]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.16.0...v3.17.0
 [3.16.0]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.15.0...v3.16.0
 [3.15.0]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.14.0...v3.15.0
