@@ -1394,6 +1394,25 @@ columns from all attached databases appear with schema-qualified names
 (e.g. `pg.users.email`). The nvim-cmp source name is `dadbod_grip`.
 Works with nvim-cmp, blink.cmp, or standalone via `<C-Space>`.
 
+The standalone automatic menu waits for two identifier characters, or a
+qualifier dot such as `users.`. A sole exact match stays quiet. Suggestions
+do not insert text or select an item automatically: use Tab or the arrow keys
+to select, then Enter to accept. Enter with nothing selected inserts a newline.
+Manual `<C-Space>` / `<C-x><C-o>` completion also works with shorter prefixes.
+These menu options apply only to Grip's standalone query pad; external engines
+retain their own popup and selection settings when `completion = false`.
+
+DuckDB also suggests scalar, aggregate and macro functions in expressions,
+and table functions/macros after FROM or JOIN. Choosing one inserts its name
+and opening parenthesis. Catalog warming is asynchronous and shares Grip's
+DuckDB query queue. While it warms, keep typing or trigger completion again;
+it never opens a delayed menu or inserts a function on its own. Successful
+catalogs are cached for five minutes. Failed warms have a short cooldown;
+manual schema refresh or a schema-changing SQL attempt clears them immediately.
+Suggestions include ordinary unquoted function names in the main schema of
+the actual CLI session. Completion adds no extension INSTALL or LOAD command;
+functions loaded only in a different client session are not promised.
+
 After a custom SQL write attempt, Grip discards cached table and column
 metadata, including when a later statement fails after earlier DDL committed.
 It preserves the original SQL result or error and does not retry the SQL.
@@ -1417,7 +1436,7 @@ Query pad keymaps:
   <C-Space>       Trigger SQL completion manually
   <Tab>/<S-Tab>   Trigger or move through completion choices
   <Down>/<Up>     Move through completion choices, or move normally
-  <CR>            Accept completion, or insert a newline
+  <CR>            Accept selected completion, or insert a newline
   <C-s>           Save query with :GripSave
   gq              Load saved query (picker with SQL preview)
   gA              AI SQL generation (natural language)

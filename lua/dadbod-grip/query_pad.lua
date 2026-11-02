@@ -111,7 +111,8 @@ local function setup_completion_keymaps(bufnr)
     if ok and cmp.visible() and cmp.get_selected_entry() then
       cmp.confirm({ select = false })
     elseif vim.fn.pumvisible() == 1 then
-      vim.api.nvim_feedkeys(fk("<C-y>"), "n", false)
+      local selected = vim.fn.complete_info({ "selected" }).selected
+      vim.api.nvim_feedkeys(fk(selected >= 0 and "<C-y>" or "<C-e><CR>"), "n", false)
     else
       vim.api.nvim_feedkeys(fk("<CR>"), "n", false)
     end
@@ -153,7 +154,7 @@ local function ensure_buf(url)
     -- indexing vim.b on a dead buffer raises "Invalid buffer id".
     if not vim.api.nvim_buf_is_valid(warm_bufnr) then return end
     local u = vim.b[warm_bufnr].db or vim.g.db
-    if u and u ~= "" then pcall(require("dadbod-grip.completion").get_schema, u) end
+    if u and u ~= "" then pcall(require("dadbod-grip.completion").warm_schema, u) end
   end)
 
   -- Mark buffer as not modified after creation

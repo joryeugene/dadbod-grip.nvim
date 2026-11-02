@@ -515,6 +515,13 @@ function M.get_schema_batch_async(url, callback)
   via_adapter(url, adapter.get_schema_batch_async, conn, callback)
 end
 
+--- Optional adapter catalog for SQL function completion. Never a query fallback.
+function M.get_completion_functions_async(url, callback)
+  local adapter, conn = resolve(url)
+  if not adapter or not adapter.get_completion_functions_async then callback(nil); return end
+  return via_adapter(url, adapter.get_completion_functions_async, conn, callback)
+end
+
 function M.get_indexes(table_name, url)
   local adapter, conn, err = resolve(url)
   if not adapter then return {}, err end

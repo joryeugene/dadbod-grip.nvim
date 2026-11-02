@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- DuckDB completion suggests session-visible functions and macros in expressions,
+  and table functions after FROM or JOIN. Catalogs warm asynchronously through
+  the existing query queue, with stale-result fencing and schema invalidation.
+
+### Changed
+
+- Standalone completion waits for two characters or a qualifier dot, suppresses
+  a sole exact match, and leaves suggestions unselected without inserting text.
+  Enter accepts a selected match; otherwise it inserts a newline. Automatic
+  native and cmp/blink requests use cached schema rather than waiting on a query.
+
 ## [3.19.1] - 2026-11-02
 
 ### Fixed
