@@ -37,10 +37,11 @@ local function not_started(job)
 end
 
 local function refuse(job, message, code)
-  if job.started or job.removed then return false end
+  if job.spawn_attempted or job.removed then return false end
   job.removed = true
   stop_timer(job)
   not_started(job) -- no child was admitted, so completion is already proved
+  job.stdout, job.stderr, job.code, job.finished = "", message, code, true
   vim.schedule(function() deliver(job, "", message, code) end)
   defer_drain()
   return true
@@ -62,6 +63,19 @@ local function hooks(job, opts)
   return result
 end
 
+local function run_sync(job)
+  job.spawn_attempted = true
+  local opts = hooks(job, job.opts)
+  opts.terminate_on_interrupt = true
+  local ok, stdout, stderr, code = pcall(adapters.run_cmd, job.args, job.timeout, opts)
+  if ok then job.stdout, job.stderr, job.code = stdout, stderr, code
+  else
+    if not job.process then not_started(job) end
+    job.error = stdout
+  end
+  job.finished = true
+end
+
 drain = function()
   local blocked = {}
   local index = 1
@@ -80,6 +94,7 @@ drain = function()
         stop_timer(job)
         for _, key in ipairs(job.keys) do active[key] = job end
         if job.callback then
+          job.spawn_attempted = true
           local ok, handle = pcall(adapters.run_cmd_async, job.args, job.timeout, function(stdout, stderr, code)
             deliver(job, stdout, stderr, code)
           end, hooks(job, job.opts))
@@ -88,9 +103,15 @@ drain = function()
             if not job.process then not_started(job) end
             vim.schedule(function() deliver(job, "", tostring(handle), 1) end)
           end
+        else
+          -- Execute here, not after waking the requesting stack. An async
+          -- completion callback may itself synchronously query this file;
+          -- reserving a lane for an unresumed waiter would deadlock that
+          -- callback behind a child which has not actually been spawned.
+          run_sync(job)
         end
-        -- One admission per frame lets a synchronous caller actually spawn
-        -- before another operation's on_start can re-enter the event loop.
+        -- A later admission scans the current queue after callback reentry,
+        -- rather than continuing through a stale iteration snapshot.
         if #pending > 0 then defer_drain() end
         return
       else
@@ -133,27 +154,23 @@ local function enqueue(job)
 end
 
 function M.run(keys, args, timeout, opts)
-  local job = { keys = keys, opts = opts }
+  local job = { keys = keys, args = args, timeout = timeout, opts = opts }
   enqueue(job)
-  if not job.started then
+  if not job.finished then
     local ok, admitted, reason = pcall(vim.wait, (timeout or 30000) + adapters._exit_grace_ms,
-      function() return job.started end, 1)
-    if not ok or not admitted then
+      function() return job.finished end, 1)
+    if not job.finished and (not ok or not admitted) then
       local interrupted = not ok or reason == -2
-      refuse(job, interrupted and "query interrupted before execution" or "database queue timed out", interrupted and 130 or 124)
-      return "", interrupted and "query interrupted before execution" or "database queue timed out", interrupted and 130 or 124
+      local message = interrupted and "query interrupted before execution" or "database queue timed out"
+      if refuse(job, message, interrupted and 130 or 124) then
+        return "", message, interrupted and 130 or 124
+      end
+      -- A completion fault must not be relabelled as an unstarted operation.
+      return "", "query interrupted; database outcome unknown", interrupted and 130 or 124
     end
   end
-  local call_opts = hooks(job, opts)
-  call_opts.terminate_on_interrupt = true
-  local ok, stdout, stderr, code = pcall(adapters.run_cmd, args, timeout, call_opts)
-  if not ok then
-    -- A Lua exception does not prove that a started child exited. Leave its
-    -- lane owned until the real lifecycle hook arrives.
-    if not job.process then not_started(job) end
-    return "", tostring(stdout), 1
-  end
-  return stdout, stderr, code
+  if job.error then error(job.error, 0) end
+  return job.stdout, job.stderr, job.code
 end
 
 function M.run_async(keys, args, timeout, callback, opts)

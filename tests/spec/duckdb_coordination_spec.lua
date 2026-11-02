@@ -28,6 +28,7 @@ end
 -- no user SQL is replayed, and the test can observe real on_exit ownership.
 local function with_held_first(path, fn)
   local original = vim.system
+  local original_wait = vim.wait
   local held, alive, marker, starts, overlaps = nil, false, path .. ".ready", 0, 0
   local calls = {}
   vim.system = function(args, opts, callback)
@@ -57,6 +58,7 @@ local function with_held_first(path, fn)
   }
   local ok, err = xpcall(function() fn(control) end, debug.traceback)
   vim.system = original
+  vim.wait = original_wait
   if held then pcall(held.write, held, nil); pcall(held.wait, held, 1000) end
   if not ok then error(err) end
 end
@@ -227,6 +229,45 @@ test("native queued timeout never starts or later replays the write", function()
     local result, err = adapter.query("SELECT value FROM items", url)
     assert(result, err); eq(result.rows[1][1], "before", "timed-out write cannot run later")
     eq(c.starts(), 2, "only metadata and oracle read started")
+  end)
+end)
+
+test("controlled Ctrl-C before admission never submits a native write", function()
+  local path, url = fixture()
+  with_held_first(path, function(c)
+    adapter.get_schema_batch_async(url, function() end)
+    assert(vim.wait(2000, c.ready, 1), "metadata never acquired its native file")
+    local wait = vim.wait
+    vim.wait = function() return false, -2 end
+    local result, err = adapter.execute("UPDATE items SET value = 'must-not-run' WHERE id = 1", url)
+    vim.wait = wait
+    eq(result, nil); assert(err:find("before execution", 1, true)); eq(c.starts(), 1)
+    c.release()
+    assert(vim.wait(2000, function() return not c.alive() end, 1))
+    local oracle = assert(adapter.query("SELECT value FROM items", url))
+    eq(oracle.rows[1][1], "before"); eq(c.starts(), 2)
+  end)
+end)
+
+test("controlled active interruption reaps the real writer without replaying its committed SQL", function()
+  local path, url = fixture()
+  with_held_first(path, function(c)
+    local wait, interrupted = vim.wait, false
+    vim.wait = function(ms, predicate, interval)
+      if not interrupted then
+        assert(wait(2000, c.ready, 1), "writer never executed its actual SQL")
+        interrupted = true
+        return false, -2
+      end
+      return wait(ms, predicate, interval)
+    end
+    local result, err = adapter.execute("UPDATE items SET value = value || 'x' WHERE id = 1", url)
+    vim.wait = wait
+    eq(result, nil); assert(err:find("database outcome unknown", 1, true))
+    eq(c.alive(), false, "interrupted writer must be reaped before it returns")
+    local oracle = assert(adapter.query("SELECT value FROM items", url))
+    eq(oracle.rows[1][1], "beforex", "one actual committed write, no retry")
+    eq(c.overlaps(), 0)
   end)
 end)
 

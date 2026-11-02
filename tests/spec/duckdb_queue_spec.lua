@@ -127,5 +127,80 @@ test("queued synchronous cancellation proves not-started lifecycle", function()
   end)
 end)
 
+test("completed synchronous result survives a later waiter interruption", function()
+  local async, run, wait = adapters.run_cmd_async, adapters.run_cmd, vim.wait
+  local starts, executed, release_first, release_last = 0, 0
+  adapters.run_cmd_async = function(_, _, _, opts)
+    starts = starts + 1
+    if starts == 1 then release_first = opts.on_complete else release_last = opts.on_complete end
+    opts.on_start({})
+    return { cancel = function() return true end }
+  end
+  adapters.run_cmd = function(_, _, opts)
+    executed = executed + 1; opts.on_start({}); opts.on_complete()
+    return "completed", "", 0
+  end
+  local ok, err = xpcall(function()
+    queue.run_async({ "admission-interrupt" }, { "held" }, 1000, function() end)
+    vim.wait = function(_, predicate)
+      release_first()
+      assert(wait(100, predicate, 1), "synchronous operation did not complete")
+      return false, -2
+    end
+    local output, message, code = queue.run({ "admission-interrupt" }, { "completed" }, 1000)
+    vim.wait = wait
+    eq(executed, 1); eq(code, 0); eq(output, "completed"); eq(message, "")
+    queue.run_async({ "admission-interrupt" }, { "later" }, 1000, function() end)
+    wait(30, function() return starts == 2 end, 1)
+    eq(starts, 2, "completed operation must release its lane")
+  end, debug.traceback)
+  adapters.run_cmd_async, adapters.run_cmd, vim.wait = async, run, wait
+  if release_last then release_last() end
+  if not ok then error(err) end
+end)
+
+test("unexpected Lua failure before spawn propagates and releases only its unstarted lane", function()
+  local run, async = adapters.run_cmd, adapters.run_cmd_async
+  local later, release_later = 0
+  adapters.run_cmd = function() error("model Lua interruption") end
+  adapters.run_cmd_async = function(_, _, _, opts)
+    later = later + 1; release_later = opts.on_complete; opts.on_start({})
+    return { cancel = function() return true end }
+  end
+  local ok, err = xpcall(function()
+    local success, message = pcall(queue.run, { "unstarted-Lua-failure" }, { "never" }, 1000)
+    eq(success, false); assert(tostring(message):find("model Lua interruption", 1, true))
+    queue.run_async({ "unstarted-Lua-failure" }, { "later" }, 1000, function() end)
+    eq(later, 1)
+  end, debug.traceback)
+  adapters.run_cmd, adapters.run_cmd_async = run, async
+  if release_later then release_later() end
+  if not ok then error(err) end
+end)
+
+test("unexpected Lua failure after a start retains the lane until completion", function()
+  local run, async = adapters.run_cmd, adapters.run_cmd_async
+  local later, complete, release_later = 0
+  adapters.run_cmd = function(_, _, opts)
+    complete = opts.on_complete; opts.on_start({}); error("model failure after start")
+  end
+  adapters.run_cmd_async = function(_, _, _, opts)
+    later = later + 1; release_later = opts.on_complete; opts.on_start({})
+    return { cancel = function() return true end }
+  end
+  local ok, err = xpcall(function()
+    local success, message = pcall(queue.run, { "started-Lua-failure" }, { "started" }, 1000)
+    eq(success, false); assert(tostring(message):find("model failure after start", 1, true))
+    queue.run_async({ "started-Lua-failure" }, { "later" }, 1000, function() end)
+    eq(later, 0, "a Lua error is not proof that the child exited")
+    complete()
+    assert(vim.wait(1000, function() return later == 1 end, 1))
+  end, debug.traceback)
+  adapters.run_cmd, adapters.run_cmd_async = run, async
+  if complete then complete() end
+  if release_later then release_later() end
+  if not ok then error(err) end
+end)
+
 print(string.format("\nduckdb_queue_spec: %d passed, %d failed", pass, fail))
 if fail > 0 then os.exit(1) end
