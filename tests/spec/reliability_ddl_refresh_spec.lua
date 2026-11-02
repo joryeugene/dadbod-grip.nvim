@@ -27,6 +27,11 @@ H.test('failed public DDL keeps the visible schema intact', function(c)
   c.exec('CREATE TABLE old_table(id INTEGER PRIMARY KEY)')
   sidebar(c, function()
     grip.open('CREATE TABLE old_table(id INTEGER PRIMARY KEY)', c.url)
+    -- A failed batch may have committed a prefix, so cached knowledge may be
+    -- cleared. Its displayed schema and explicit reload must stay accurate.
+    local lines = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(schema.get_winid()), 0, -1, false)
+    assert(table.concat(lines, '\n'):find('old_table', 1, true))
+    schema.refresh(c.url)
     assert(has(schema.get_state(c.url).items, 'old_table'))
     H.eq(c.scalar("SELECT count(*) FROM sqlite_master WHERE name='old_table'"), '1')
   end)
