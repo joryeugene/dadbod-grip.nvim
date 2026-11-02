@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- SQL admission rejects embedded NUL bytes before preview requests, so a
+  client cannot truncate the statement into a different mutation. SQL
+  expressions such as `CHAR(0)` still support NUL data values.
 - Mutation previews parse UPDATE, DELETE, INSERT, and REPLACE with shared SQL
   tokens. Target aliases, quoted names, comments, nested expressions, and
   RETURNING no longer corrupt predicates, column mappings, or VALUES rows.

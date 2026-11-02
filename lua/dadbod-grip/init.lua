@@ -415,6 +415,10 @@ local function resolve_query(arg, page_size, adapter_kind)
   if arg == "" then
     return nil, "No table name or query provided."
   end
+  -- Reject before lexical failure can fall back to a bare-table query.
+  if arg:find("\0", 1, true) then
+    return nil, "SQL text cannot contain NUL bytes; use CHAR(0) or a hex expression for NUL data."
+  end
 
   -- File-as-table or URL-as-table: route to DuckDB
   if is_queryable_file(arg) then

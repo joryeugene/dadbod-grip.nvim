@@ -547,6 +547,9 @@ All commands are global and available after the plugin loads.
   affected counts are determined when the original SQL executes. The title
   and confirmation identify this mode.
 
+  SQL text containing embedded NUL bytes is rejected before any preview
+  request. Use CHAR(0) or a hex expression to generate NUL data values.
+
   Multi-source JOIN/USING/UPDATE FROM previews and multiple statements are
   rejected rather than showing an incomplete affected-row set. A transaction
   containing one mutation and ending in COMMIT can be previewed; execution

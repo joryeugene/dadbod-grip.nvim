@@ -12,6 +12,9 @@ word_start[95] = true
 -- true adds source positions for mutation parsing. Partial mode returns only
 -- complete prefix tokens; execution and editability checks use strict mode.
 function M.tokenize(sql_text, adapter_kind, with_positions, partial)
+  -- CLI parsers can terminate SQL at NUL while this lexer still sees a suffix.
+  -- Never preview a different statement from the one the client will execute.
+  if sql_text:find("\0", 1, true) then return nil end
   local tokens, count = {}, 0
   local i, len = 1, #sql_text
   local positions = with_positions == true
