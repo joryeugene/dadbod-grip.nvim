@@ -672,6 +672,28 @@ local function spinner_label(table_name)
   return ((label:match("^([^\n]+)") or "query"):sub(1, 50))
 end
 
+--- Column formatting follows the rows it describes. A metadata request pumps
+--- the event loop too, so check its owner again after the adapter returns.
+local function schedule_column_info(bufnr, owner, table_name, url)
+  owner._column_info = nil
+  if not table_name then return end
+  local state, spec, generation = owner.state, owner.query_spec, owner._refresh_generation
+  local owner_url = owner.url
+  local function is_current()
+    return view._sessions[bufnr] == owner and vim.api.nvim_buf_is_valid(bufnr)
+      and owner.state == state and owner.query_spec == spec and owner.url == owner_url
+      and owner._refresh_generation == generation and state.table_name == table_name
+  end
+  vim.schedule(function()
+    if not is_current() then return end
+    local info = db.get_column_info(table_name, url)
+    if info and is_current() then
+      owner._column_info = info
+      M._render_if_visible(bufnr)
+    end
+  end)
+end
+
 --- Every db round-trip one refresh needs. Split out of do_refresh so a caller
 --- that has its own db work to do first (on_requery runs a COUNT) can put the
 --- whole batch inside one ui.blocking float instead of flashing two.
@@ -744,7 +766,9 @@ local function apply_refresh(bufnr, fetched, owner, generation, query_update, wr
     session._write_times[new_state.rows] = write_result.write_elapsed_ms
     session._write_engine_times[new_state.rows] = write_result.write_engine_timing
   end
+  session._column_info = nil
   view.render(bufnr, new_state)
+  schedule_column_info(bufnr, session, new_state.table_name, new_state.url)
 end
 
 local function begin_refresh(bufnr)
@@ -1144,6 +1168,14 @@ function M.open(arg, url, opts)
       vim.notify(string.format("%s executed (%dms)", stmt_type, ms), vim.log.levels.INFO)
       local history = require("dadbod-grip.history")
       history.record({ sql = mutation_sql, url = exec_conn, type = stmt_type:lower(), elapsed_ms = ms })
+      if stmt_type == "CREATE" or stmt_type == "ALTER" or stmt_type == "DROP" then
+        local refreshed, refresh_err = pcall(function()
+          require("dadbod-grip.schema").refresh(exec_conn)
+        end)
+        if not refreshed then
+          vim.notify("DDL committed; schema refresh failed: " .. tostring(refresh_err), vim.log.levels.WARN)
+        end
+      end
       -- Refresh the grids the user can actually see. Iterating _sessions and
       -- breaking on the first hit picked an arbitrary grid (pairs order), which
       -- could leave the visible one stale while refreshing a hidden buffer.
@@ -1250,19 +1282,7 @@ function M.open(arg, url, opts)
     -- assignments stay so a caller that reuses an existing buffer still gets them.
     session.query_spec = spec
     session.total_rows = total_rows
-    -- Auto-fetch column info for conditional formatting
-    if table_name_arg and not session._column_info then
-      vim.schedule(function()
-        local s = view._sessions[bufnr]
-        if s and not s._column_info then
-          local info = db.get_column_info(table_name_arg, conn)
-          if info then
-            s._column_info = info
-            M._render_if_visible(bufnr)
-          end
-        end
-      end)
-    end
+    schedule_column_info(bufnr, session, table_name_arg, conn)
   end
 
   -- Wire callbacks

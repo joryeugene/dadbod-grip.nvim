@@ -66,4 +66,49 @@ H.test('postcommit sidebar failure cannot turn successful DDL into refusal', fun
     assert(table.concat(c.notices, '\n'):find('CREATE executed', 1, true), 'commit was not reported as successful')
   end)
 end)
+local function external_alter(c)
+  local result = vim.system({ 'sqlite3', c.root .. '/case.sqlite',
+    'ALTER TABLE items ADD COLUMN fresh TEXT' }, { text = true }):wait()
+  H.eq(result.code, 0, result.stderr)
+end
+local function has_column(info, name)
+  for _, column in ipairs(info or {}) do if column.column_name == name then return true end end
+  return false
+end
+H.test('manual grid refresh replaces cached column metadata after external ALTER', function(c)
+  c.exec('CREATE TABLE items(id INTEGER PRIMARY KEY); INSERT INTO items VALUES(1)')
+  local buf, session = c.open('items')
+  assert(not has_column(session._column_info, 'fresh'))
+  external_alter(c)
+  H.key(buf, require('dadbod-grip.keymaps').get('grid_refresh'))
+  assert(vim.wait(1000, function() return has_column(session._column_info, 'fresh') end, 1),
+    'grid retained old column metadata after a successful refreshed SELECT')
+  H.eq(session.state.columns, { 'id', 'fresh' })
+end)
+H.test('delayed old metadata cannot overwrite a newer refreshed grid', function(c)
+  c.exec('CREATE TABLE items(id INTEGER PRIMARY KEY); INSERT INTO items VALUES(1)')
+  local db, view = require('dadbod-grip.db'), require('dadbod-grip.view')
+  local original, armed, injected, session, buf = db.get_column_info, false, false
+  db.get_column_info = function(name, url)
+    local info, err = original(name, url)
+    if armed and not injected and name == 'items' and url == c.url then
+      injected = true
+      external_alter(c)
+      session.on_refresh(buf)
+      vim.wait(10)
+    end
+    return info, err
+  end
+  local ok, err = xpcall(function()
+    grip.open('items', c.url, { from_pad = true })
+    buf = vim.api.nvim_get_current_buf(); session = assert(view._sessions[buf])
+    armed = true
+    assert(vim.wait(1000, function() return injected and session._column_info ~= nil end, 1),
+      'metadata completion fixture did not run')
+    assert(has_column(session._column_info, 'fresh'), 'older metadata response overwrote refreshed columns')
+    H.eq(session.state.columns, { 'id', 'fresh' })
+  end, debug.traceback)
+  db.get_column_info = original
+  assert(ok, err)
+end)
 H.finish('reliability_ddl_refresh_spec')
