@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.20.0] - 2026-11-03
+
 ### Added
 
 - DuckDB completion suggests session-visible functions and macros in expressions,
@@ -935,7 +937,8 @@ older tags are left in place so anyone pinned to them keeps working.
 - **joryeugene** — SQL Server adapter, PostgreSQL routines in the schema sidebar, focused ER diagram
   ([PR #17](https://github.com/joryeugene/dadbod-grip.nvim/pull/17)).
 
-[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.19.1...HEAD
+[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.20.0...HEAD
+[3.20.0]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.19.1...v3.20.0
 [3.19.1]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.19.0...v3.19.1
 [3.19.0]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.18.0...v3.19.0
 [3.18.0]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.17.0...v3.18.0
