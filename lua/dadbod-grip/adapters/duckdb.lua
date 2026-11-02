@@ -33,8 +33,8 @@ local _installed_ext = {}
 local _attachments = {}
 
 --- Catalog cache: url -> { db_name -> true }
---- Populated lazily by querying duckdb_databases() for persistently-attached DBs
---- not registered via M.attach() (e.g. ATTACH statements baked into the .duckdb file).
+--- Populated lazily by querying duckdb_databases() for catalog-qualified name
+--- resolution. Attachments belong to each CLI session, not the database file.
 local _catalog_cache = {}
 local _catalog_generation = {}
 

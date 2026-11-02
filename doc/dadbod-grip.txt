@@ -1400,6 +1400,8 @@ It preserves the original SQL result or error and does not retry the SQL.
 The sidebar and SQL completion reload metadata when next needed. Use
 `r` or `R` in the sidebar to refresh completion after schema changes made
 outside Grip.
+Grid `r` also reloads column metadata. Delayed metadata from an older result
+cannot replace the current grid's column information.
 
 Query pad keymaps:
   q / Q           Go to welcome (q elsewhere opens/focuses this pad)

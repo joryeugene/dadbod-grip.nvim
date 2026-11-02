@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Queueing retains each call's read-only options, and cancellation waits for
   the actual child exit before admitting the next request. Invalidated catalog
   lookups cannot repopulate the cache with an older result.
+- Schema and completion caches discard old metadata after custom SQL write
+  attempts, including batches that change the schema before returning an error.
+  Older background fetches cannot restore invalidated metadata or repaint a
+  sidebar after its connection changes. Grid refresh also reloads column
+  metadata, so formatting and inspection follow the current result.
 
 ## [3.19.0] - 2026-11-02
 
