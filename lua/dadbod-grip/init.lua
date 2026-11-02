@@ -701,7 +701,7 @@ end
 --- Returns ONE table, never a bare `nil, err`: ui.blocking() forwards its fn's
 --- returns through table.unpack, which drops everything after a leading nil.
 --- @return table { result: table|nil, err: string|nil, elapsed_ms: number }
-local function fetch_refresh(url, query_sql, table_name, is_raw)
+local function fetch_refresh(url, query_sql, table_name, is_raw, is_current)
   local t0 = vim.uv.hrtime()
   local result, err = db.query(query_sql, url, { engine_timing = OPTS.engine_timing })
   local elapsed_ms = math.floor((vim.uv.hrtime() - t0) / 1e6)
@@ -711,9 +711,19 @@ local function fetch_refresh(url, query_sql, table_name, is_raw)
   -- columns of our full-table SELECT *, but not a raw query's projection.
   local unproven_projection = is_raw and #result.columns == 0
 
+  local column_info, columns_requested
+  local function read_columns()
+    if not columns_requested then
+      columns_requested = true
+      local ok, info = pcall(db.get_column_info, table_name, url)
+      if ok then column_info = info end
+    end
+    return column_info
+  end
+
   -- Empty result: fetch columns from schema (adapter returns none for 0 rows)
   if (#result.columns == 0) and table_name then
-    local col_info = db.get_column_info(table_name, url)
+    local col_info = read_columns()
     if col_info then
       for _, ci in ipairs(col_info) do
         table.insert(result.columns, ci.column_name)
@@ -730,10 +740,15 @@ local function fetch_refresh(url, query_sql, table_name, is_raw)
     result.primary_keys = {}
   end
 
+  -- Finish refresh metadata under the same owned spinner. A scheduled reader
+  -- after Apply returns can collide with the caller's next SQLite write.
+  -- Formatting metadata failure must not relabel an already committed write.
+  if is_current and table_name and is_current() then read_columns() end
+
   result.table_name = table_name
   result.url = url
   result.sql = query_sql
-  return { result = result, elapsed_ms = elapsed_ms }
+  return { result = result, elapsed_ms = elapsed_ms, column_info = column_info }
 end
 
 --- Recount before selecting a table page, so a committed delete cannot leave
@@ -756,7 +771,7 @@ local function fetch_page(url, spec, table_name, count_raw, is_current)
   -- newer write must cancel this page fetch before another DB round-trip.
   if not is_current() then return { cancelled = true } end
   local query_sql = query.build_sql(spec)
-  return fetch_refresh(url, query_sql, table_name, spec.is_raw),
+  return fetch_refresh(url, query_sql, table_name, spec.is_raw, is_current),
     { spec = spec, sql = query_sql, total_rows = total_rows }
 end
 
@@ -790,9 +805,8 @@ local function apply_refresh(bufnr, fetched, owner, generation, query_update, wr
     session._write_times[new_state.rows] = write_result.write_elapsed_ms
     session._write_engine_times[new_state.rows] = write_result.write_engine_timing
   end
-  session._column_info = nil
+  session._column_info = fetched.column_info
   view.render(bufnr, new_state)
-  schedule_column_info(bufnr, session, new_state.table_name, new_state.url)
 end
 
 local function begin_refresh(bufnr)
@@ -818,7 +832,7 @@ local function do_refresh(bufnr, url, query_sql, table_name, write_result)
     if owner.query_spec then
       fetched, query_update = fetch_page(url, owner.query_spec, table_name, false, is_current)
     else
-      fetched = fetch_refresh(url, query_sql, table_name)
+      fetched = fetch_refresh(url, query_sql, table_name, nil, is_current)
     end
   end)
   if not is_current() then return end
