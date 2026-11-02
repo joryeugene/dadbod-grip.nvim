@@ -83,6 +83,7 @@ local function get_state(url)
       col_cache = {},        -- table_name → column_info[]
       pk_cache = {},         -- table_name → set
       fk_cache = {},         -- table_name → fk_info[]
+      _schema_generation = 0,
       nodes = {},         -- flat rendered node list
       filter = nil,       -- search filter string
     }
@@ -90,15 +91,22 @@ local function get_state(url)
   return _states[url]
 end
 
+local function current_fetch(state, generation)
+  return _states[state.url] == state and state._schema_generation == generation
+end
+
 --- Fetch table list for a persistent DB state.
 local function fetch_tables(state)
+  local generation = state._schema_generation
   local tables, err = db.list_tables(state.url)
+  if not current_fetch(state, generation) then return end
   if not tables then
     vim.notify("Grip: " .. (err or "Failed to list tables"), vim.log.levels.ERROR)
     return
   end
-  state.items = tables
   local routines = db.list_routines(state.url)
+  if not current_fetch(state, generation) then return end
+  state.items = tables
   state.routines = routines or {}
   -- DuckDB's adapter deliberately omits .schema for its known main-schema rows.
   -- Other missing metadata conveys no ownership, including bare PostgreSQL names.
@@ -109,10 +117,12 @@ end
 --- Fetch column schema for a file-as-table URL (Parquet, CSV, remote file).
 --- Uses DuckDB's DESCRIBE to get column names and types without needing a DB.
 local function fetch_file_schema(state)
+  local generation = state._schema_generation
   local file_url = state.url
   local safe_url = esc(file_url)
   local sql = string.format("DESCRIBE SELECT * FROM '%s' LIMIT 0", safe_url)
   local result, err = db.query(sql, "duckdb::memory:")
+  if not current_fetch(state, generation) then return end
   if not result then
     vim.notify("Grip: could not read file schema: " .. (err or "unknown"), vim.log.levels.WARN)
     state.file_cols = {}
@@ -134,19 +144,21 @@ end
 --- Fetch column info for a table (lazy, cached).
 local function ensure_columns(state, table_name)
   if state.col_cache[table_name] then return end
+  local generation = state._schema_generation
 
   local cols = db.get_column_info(table_name, state.url)
-  state.col_cache[table_name] = cols or {}
+  if not current_fetch(state, generation) then return end
 
   local pks = db.get_primary_keys(table_name, state.url)
+  if not current_fetch(state, generation) then return end
   local pk_set = {}
   for _, pk in ipairs(pks or {}) do pk_set[pk] = true end
-  state.pk_cache[table_name] = pk_set
-
   local fks = db.get_foreign_keys(table_name, state.url)
+  if not current_fetch(state, generation) then return end
   local fk_map = {}
   for _, fk in ipairs(fks or {}) do fk_map[fk.column] = fk.ref_table end
-  state.fk_cache[table_name] = fk_map
+  state.col_cache[table_name], state.pk_cache[table_name], state.fk_cache[table_name] = cols or {}, pk_set, fk_map
+  return true
 end
 
 --- Build flat node list from state.
@@ -180,12 +192,13 @@ local function build_nodes(state)
 
   if not state.items then return nodes end
   local tree = require("dadbod-grip.schema_tree")
+  local generation = state._schema_generation
   nodes = tree.build(state)
   local loaded = false
   for _, node in ipairs(nodes) do
     if node.kind == "table" and node.columns_expanded and not state.col_cache[node.name] then
-      ensure_columns(state, node.name)
-      loaded = true
+      loaded = ensure_columns(state, node.name) or loaded
+      if not current_fetch(state, generation) then return state.nodes end
     end
   end
   if loaded then nodes = tree.build(state) end
@@ -236,8 +249,26 @@ end
 --- Render complete buffer labels; the window viewport handles horizontal clipping.
 local function render(state, anchor)
   if not _sidebar_bufnr or not vim.api.nvim_buf_is_valid(_sidebar_bufnr) then return end
+  local bufnr, winid, generation = _sidebar_bufnr, _sidebar_winid, state._schema_generation
+  local function owns_render()
+    return current_fetch(state, generation) and _sidebar_bufnr == bufnr and _sidebar_winid == winid
+      and vim.api.nvim_buf_is_valid(bufnr) and winid and vim.api.nvim_win_is_valid(winid)
+      and vim.b[bufnr].db == state.url
+  end
+  if not owns_render() then return end
   anchor = anchor or selection(state)
+  -- Clear-only invalidation does no database work. The next sidebar action
+  -- reloads metadata here, rather than painting an empty tree from items=nil.
+  if is_file_url(state.url) then
+    if not state.file_cols then fetch_file_schema(state) end
+  elseif not state.items then
+    fetch_tables(state)
+  end
+  if not owns_render() then return end
   local nodes = build_nodes(state)
+  -- Expanding columns performs synchronous adapter calls that pump the event
+  -- loop. A connection switch may have already reused and painted this buffer.
+  if not owns_render() then return end
   local lines, highlights = {}, {}
   local function line(text, hl)
     lines[#lines + 1] = text
@@ -548,12 +579,7 @@ local function setup_keymaps(url)
   -- Refresh (r and R)
   local function do_refresh()
     ui.blocking("Grip: refreshing schema...", function()
-      state.items = nil
-      state.col_cache = {}
-      state.pk_cache = {}
-      state.fk_cache = {}
-      fetch_tables(state)
-      render(state)
+      M.refresh(url)
     end)
     vim.notify("Grip: schema refreshed", vim.log.levels.INFO)
   end
@@ -695,11 +721,7 @@ local function setup_keymaps(url)
     if require("dadbod-grip.connections").deny_if_readonly("Drop table", url) then return end
     local ddl = require("dadbod-grip.ddl")
     ddl.drop_table(node.name, url, function()
-      state.items = nil
-      state.routines = nil
-      state.col_cache = {}
-      fetch_tables(state)
-      render(state)
+      M.refresh(url)
     end)
   end)
 
@@ -708,10 +730,7 @@ local function setup_keymaps(url)
     if require("dadbod-grip.connections").deny_if_readonly("Create table", url) then return end
     local ddl = require("dadbod-grip.ddl")
     ddl.create_table(url, function()
-      state.items = nil
-      state.col_cache = {}
-      fetch_tables(state)
-      render(state)
+      M.refresh(url)
     end)
   end)
 
@@ -962,10 +981,11 @@ M._sidebar_width_for = sidebar_width_for
 
 M._build_nodes = build_nodes
 
---- Refresh sidebar if visible (e.g., after connection switch).
-function M.refresh(url)
+--- Clear cached metadata without doing database or UI work.
+function M.invalidate(url)
   if not url then return end
   local state = get_state(url)
+  state._schema_generation = state._schema_generation + 1
   -- Invalidate all caches so fresh data is fetched
   state.items = nil
   state.routines = nil
@@ -973,13 +993,31 @@ function M.refresh(url)
   state.col_cache = {}
   state.pk_cache = {}
   state.fk_cache = {}
+  state.row_count_cache = {}
+  state._tree_index = nil
+end
+
+--- Refresh only this URL's visible sidebar. Connection switching is explicit:
+--- { switch = true } rebinds the reused sidebar buffer to the new URL.
+function M.refresh(url, opts)
+  if not url then return end
+  db.invalidate_schema(url)
+  local state = get_state(url)
+  local generation = state._schema_generation
   -- Only re-render if sidebar is currently visible
   if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
+  if not _sidebar_bufnr or not vim.api.nvim_buf_is_valid(_sidebar_bufnr) then return end
+  if not (opts and opts.switch) and vim.b[_sidebar_bufnr].db ~= url then return end
+  if opts and opts.switch then vim.b[_sidebar_bufnr].db = url end
+  local bufnr, winid = _sidebar_bufnr, _sidebar_winid
   if is_file_url(url) then
     fetch_file_schema(state)
   else
     fetch_tables(state)
   end
+  if not current_fetch(state, generation) or _sidebar_bufnr ~= bufnr or _sidebar_winid ~= winid
+      or not vim.api.nvim_buf_is_valid(bufnr) or not vim.api.nvim_win_is_valid(winid)
+      or vim.b[bufnr].db ~= url then return end
   if _sidebar_bufnr and vim.api.nvim_buf_is_valid(_sidebar_bufnr) then
     setup_keymaps(url)
   end

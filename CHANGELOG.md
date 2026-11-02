@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.19.1] - 2026-11-02
+
+### Fixed
+
+- Table-grid refreshes recount matching rows after Apply, committed Undo, and
+  manual refresh. Removing the last page moves to the previous valid page
+  while preserving filters, sorting, and page size. Failed counts stay unknown;
+  raw-query refreshes avoid an additional count evaluation.
+- DuckDB queries, writes, and background metadata work sharing a known local
+  database file wait in order instead of opening competing CLI processes.
+  Queueing retains each call's read-only options, and cancellation waits for
+  the actual child exit before admitting the next request. Invalidated catalog
+  lookups cannot repopulate the cache with an older result.
+- Schema and completion caches discard old metadata after custom SQL write
+  attempts, including batches that change the schema before returning an error.
+  Older background fetches cannot restore invalidated metadata or repaint a
+  sidebar after its connection changes. Grid refresh also reloads column
+  metadata, so formatting and inspection follow the current result. Metadata
+  finishes within the reload instead of leaving a reader that can collide
+  with the next SQLite write.
+
 ## [3.19.0] - 2026-11-02
 
 ### Fixed
@@ -901,7 +922,8 @@ older tags are left in place so anyone pinned to them keeps working.
 - **joryeugene** — SQL Server adapter, PostgreSQL routines in the schema sidebar, focused ER diagram
   ([PR #17](https://github.com/joryeugene/dadbod-grip.nvim/pull/17)).
 
-[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.19.0...HEAD
+[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.19.1...HEAD
+[3.19.1]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.19.0...v3.19.1
 [3.19.0]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.18.0...v3.19.0
 [3.18.0]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.17.0...v3.18.0
 [3.17.0]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.16.0...v3.17.0

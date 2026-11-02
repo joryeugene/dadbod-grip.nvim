@@ -333,11 +333,67 @@ local function with_engine_timing(result, conn, opts)
   return result
 end
 
+-- Invalidation is deliberately clear-only: do not do another database read in
+-- the completion path of a committed write. Capture the requested and resolved
+-- URLs before entering the adapter; vim.wait may change the ambient connection.
+local function invalidate_schema(url, adapter, conn)
+  local ok = true
+  local function clear(fn, ...)
+    if type(fn) == "function" then ok = pcall(fn, ...) and ok end
+  end
+  local completion = package.loaded["dadbod-grip.completion"]
+  local schema = package.loaded["dadbod-grip.schema"]
+  clear(completion and completion.invalidate, url)
+  clear(schema and schema.invalidate, url)
+  if conn ~= url then
+    clear(completion and completion.invalidate, conn)
+    clear(schema and schema.invalidate, conn)
+  end
+  clear(adapter and adapter.invalidate_schema, conn)
+  return ok
+end
+
+function M.invalidate_schema(url)
+  local requested = M.get_url(url)
+  if not requested then return false end
+  local adapter, conn = resolve(requested)
+  return invalidate_schema(requested, adapter, conn)
+end
+
+local function after_schema_change(url, adapter, conn)
+  if invalidate_schema(url, adapter, conn) then return end
+  -- A cache failure cannot turn a committed statement into an SQL refusal.
+  vim.schedule(function()
+    vim.notify("Grip: schema cache invalidation failed. Refresh schema manually.", vim.log.levels.WARN)
+  end)
+end
+
+local READ_HEAD = { SELECT = true, WITH = true, FROM = true, VALUES = true, TABLE = true,
+  SHOW = true, DESC = true, DESCRIBE = true }
+local function query_may_change_schema(sql, kind)
+  local tokens = require("dadbod-grip.sql_tokens").tokenize(sql, kind)
+  if not tokens then return true end
+  local start = true
+  for _, token in ipairs(tokens) do
+    if token.kind == ";" then
+      start = true
+    elseif start then
+      if not READ_HEAD[token.upper] then return true end
+      start = false
+    end
+  end
+  return false
+end
+
 function M.query(sql, url, opts)
   if type(opts) ~= "table" then opts = nil end
+  local requested = M.get_url(url)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
   local result, query_err = via_adapter(url, adapter.query, sql, conn, opts)
+  if query_may_change_schema(sql, adapters.kind(conn)) then
+    after_schema_change(requested, adapter, conn)
+  end
   return with_engine_timing(result, conn, opts), query_err
 end
 
@@ -356,9 +412,13 @@ end
 function M.execute(sql, url, opts)
   if type(sql) == "table" then return M.grid_write(sql, url, opts) end
   if type(opts) ~= "table" then opts = nil end
+  local requested = M.get_url(url)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
   local result, exec_err = via_adapter(url, adapter.execute, sql, conn, opts)
+  -- A later statement can fail after an earlier DDL statement committed. An
+  -- error must preserve its exact SQL outcome, not stale schema knowledge.
+  after_schema_change(requested, adapter, conn)
   return with_engine_timing(result, conn, opts), exec_err
 end
 

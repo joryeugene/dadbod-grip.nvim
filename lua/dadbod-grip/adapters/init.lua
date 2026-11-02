@@ -117,10 +117,30 @@ end
 --- @param opts table|nil  { stdin = string, env = table<string,string> } stdin
 ---   to feed the process and env merged into the inherited environment, the
 ---   same contract as M.run_cmd.
+---   Optional on_start(process), on_complete(), and on_spawn_error() lifecycle
+---   hooks are independent of result delivery. on_complete runs at real native
+---   exit (a fast event) or a proven spawn failure, never at a synthetic
+---   watchdog timeout. It must not touch buffers. The returned handle offers
+---   cancel() and reaped(); cancellation requests termination without claiming
+---   rollback or exit, and a late actual exit still invokes on_complete once.
 function M.run_cmd_async(args, timeout_ms, callback, opts)
   local t = timeout_ms or 30000
   local watchdog
   local delivered = false
+  local reaped, cancelled, process, kill_timer = false, false, nil, nil
+
+  -- Lifecycle completion is separate from result delivery: the watchdog may
+  -- answer while a child still owns a database lock. Only an actual on_exit
+  -- (or a proven failed spawn) can attest that ownership has ended.
+  local function complete()
+    if reaped then return end
+    reaped = true
+    if kill_timer and not kill_timer:is_closing() then
+      kill_timer:stop()
+      kill_timer:close()
+    end
+    if opts and opts.on_complete then pcall(opts.on_complete) end
+  end
 
   -- Whichever of on_exit, the spawn failure and the watchdog gets here first
   -- wins; the callback must run exactly once.
@@ -144,14 +164,34 @@ function M.run_cmd_async(args, timeout_ms, callback, opts)
     stdin = opts and opts.stdin or nil,
     env = opts and opts.env or nil,
   }
-  local ok, err = pcall(vim.system, args, sys_opts, function(r)
+  local ok, spawned = pcall(vim.system, args, sys_opts, function(r)
+    complete()
     vim.schedule(function()
-      deliver(r.stdout or "", r.stderr or "", r.code)
+      if cancelled then deliver("", "query interrupted", 130)
+      else deliver(r.stdout or "", r.stderr or "", r.code) end
     end)
   end)
   if not ok then
-    vim.schedule(function() deliver("", tostring(err), 1) end)
+    if opts and opts.on_spawn_error then pcall(opts.on_spawn_error) end
+    complete()
+    vim.schedule(function() deliver("", tostring(spawned), 1) end)
+  else
+    process = spawned
+    if opts and opts.on_start then pcall(opts.on_start, process) end
   end
+
+  return {
+    cancel = function()
+      if reaped or cancelled then return false end
+      cancelled = true
+      if process then pcall(process.kill, process, 15) end
+      kill_timer = vim.defer_fn(function()
+        if not reaped and process then pcall(process.kill, process, 9) end
+      end, 100)
+      return true
+    end,
+    reaped = function() return reaped end,
+  }
 end
 
 local SCHEME_MAP = {

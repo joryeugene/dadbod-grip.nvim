@@ -672,6 +672,28 @@ local function spinner_label(table_name)
   return ((label:match("^([^\n]+)") or "query"):sub(1, 50))
 end
 
+--- Column formatting follows the rows it describes. A metadata request pumps
+--- the event loop too, so check its owner again after the adapter returns.
+local function schedule_column_info(bufnr, owner, table_name, url)
+  owner._column_info = nil
+  if not table_name then return end
+  local state, spec, generation = owner.state, owner.query_spec, owner._refresh_generation
+  local owner_url = owner.url
+  local function is_current()
+    return view._sessions[bufnr] == owner and vim.api.nvim_buf_is_valid(bufnr)
+      and owner.state == state and owner.query_spec == spec and owner.url == owner_url
+      and owner._refresh_generation == generation and state.table_name == table_name
+  end
+  vim.schedule(function()
+    if not is_current() then return end
+    local info = db.get_column_info(table_name, url)
+    if info and is_current() then
+      owner._column_info = info
+      M._render_if_visible(bufnr)
+    end
+  end)
+end
+
 --- Every db round-trip one refresh needs. Split out of do_refresh so a caller
 --- that has its own db work to do first (on_requery runs a COUNT) can put the
 --- whole batch inside one ui.blocking float instead of flashing two.
@@ -679,7 +701,7 @@ end
 --- Returns ONE table, never a bare `nil, err`: ui.blocking() forwards its fn's
 --- returns through table.unpack, which drops everything after a leading nil.
 --- @return table { result: table|nil, err: string|nil, elapsed_ms: number }
-local function fetch_refresh(url, query_sql, table_name, is_raw)
+local function fetch_refresh(url, query_sql, table_name, is_raw, is_current)
   local t0 = vim.uv.hrtime()
   local result, err = db.query(query_sql, url, { engine_timing = OPTS.engine_timing })
   local elapsed_ms = math.floor((vim.uv.hrtime() - t0) / 1e6)
@@ -689,9 +711,19 @@ local function fetch_refresh(url, query_sql, table_name, is_raw)
   -- columns of our full-table SELECT *, but not a raw query's projection.
   local unproven_projection = is_raw and #result.columns == 0
 
+  local column_info, columns_requested
+  local function read_columns()
+    if not columns_requested then
+      columns_requested = true
+      local ok, info = pcall(db.get_column_info, table_name, url)
+      if ok then column_info = info end
+    end
+    return column_info
+  end
+
   -- Empty result: fetch columns from schema (adapter returns none for 0 rows)
   if (#result.columns == 0) and table_name then
-    local col_info = db.get_column_info(table_name, url)
+    local col_info = read_columns()
     if col_info then
       for _, ci in ipairs(col_info) do
         table.insert(result.columns, ci.column_name)
@@ -708,10 +740,39 @@ local function fetch_refresh(url, query_sql, table_name, is_raw)
     result.primary_keys = {}
   end
 
+  -- Finish refresh metadata under the same owned spinner. A scheduled reader
+  -- after Apply returns can collide with the caller's next SQLite write.
+  -- Formatting metadata failure must not relabel an already committed write.
+  if is_current and table_name and is_current() then read_columns() end
+
   result.table_name = table_name
   result.url = url
   result.sql = query_sql
-  return { result = result, elapsed_ms = elapsed_ms }
+  return { result = result, elapsed_ms = elapsed_ms, column_info = column_info }
+end
+
+--- Recount before selecting a table page, so a committed delete cannot leave
+--- the grid past its last page. A failed count is unknown, never the previous
+--- result's total. Raw refreshes avoid adding another evaluation of arbitrary
+--- SQL; explicit requery keeps its existing count contract.
+local function fetch_page(url, spec, table_name, count_raw, is_current)
+  if not is_current() then return { cancelled = true } end
+  local total_rows
+  if not spec.is_raw or count_raw then
+    local counted = db.query(query.build_count_sql(spec), url)
+    local count = counted and counted.rows[1] and tonumber(counted.rows[1][1])
+    if count and count >= 0 and count < math.huge and count == math.floor(count) then
+      total_rows = count
+      local total_pages = math.max(1, math.ceil(count / spec.page_size))
+      if spec.page > total_pages then spec = query.set_page(spec, total_pages) end
+    end
+  end
+  -- A count wait pumps input. Closing, navigating, staging, or starting a
+  -- newer write must cancel this page fetch before another DB round-trip.
+  if not is_current() then return { cancelled = true } end
+  local query_sql = query.build_sql(spec)
+  return fetch_refresh(url, query_sql, table_name, spec.is_raw, is_current),
+    { spec = spec, sql = query_sql, total_rows = total_rows }
 end
 
 --- Render what fetch_refresh returned. Kept outside the spinner float so the
@@ -744,6 +805,7 @@ local function apply_refresh(bufnr, fetched, owner, generation, query_update, wr
     session._write_times[new_state.rows] = write_result.write_elapsed_ms
     session._write_engine_times[new_state.rows] = write_result.write_engine_timing
   end
+  session._column_info = fetched.column_info
   view.render(bufnr, new_state)
 end
 
@@ -758,13 +820,23 @@ end
 local function do_refresh(bufnr, url, query_sql, table_name, write_result)
   local owner, generation = begin_refresh(bufnr)
   if not owner then return end
+  local is_current = require("dadbod-grip.write").capture_owner(bufnr, owner)
   if write_result then
-    write_result.is_current = require("dadbod-grip.write").capture_owner(bufnr, owner)
+    write_result.is_current = is_current
   end
-  local fetched = ui.blocking("  querying " .. spinner_label(table_name) .. "...", function()
-    return fetch_refresh(url, query_sql, table_name, owner.query_spec and owner.query_spec.is_raw)
+  -- Clearing generations is cheap and cannot start a competing metadata read.
+  -- This also lets manual refresh recover schema changed outside Grip.
+  if type(db.invalidate_schema) == "function" then db.invalidate_schema(url) end
+  local fetched, query_update
+  ui.blocking("  querying " .. spinner_label(table_name) .. "...", function()
+    if owner.query_spec then
+      fetched, query_update = fetch_page(url, owner.query_spec, table_name, false, is_current)
+    else
+      fetched = fetch_refresh(url, query_sql, table_name, nil, is_current)
+    end
   end)
-  apply_refresh(bufnr, fetched, owner, generation, nil, write_result)
+  if not is_current() then return end
+  apply_refresh(bufnr, fetched, owner, generation, query_update, write_result)
 end
 
 -- ── edit cell ─────────────────────────────────────────────────────────────
@@ -1144,6 +1216,14 @@ function M.open(arg, url, opts)
       vim.notify(string.format("%s executed (%dms)", stmt_type, ms), vim.log.levels.INFO)
       local history = require("dadbod-grip.history")
       history.record({ sql = mutation_sql, url = exec_conn, type = stmt_type:lower(), elapsed_ms = ms })
+      if stmt_type == "CREATE" or stmt_type == "ALTER" or stmt_type == "DROP" then
+        local refreshed, refresh_err = pcall(function()
+          require("dadbod-grip.schema").refresh(exec_conn)
+        end)
+        if not refreshed then
+          vim.notify("DDL committed; schema refresh failed: " .. tostring(refresh_err), vim.log.levels.WARN)
+        end
+      end
       -- Refresh the grids the user can actually see. Iterating _sessions and
       -- breaking on the first hit picked an arbitrary grid (pairs order), which
       -- could leave the visible one stale while refreshing a hidden buffer.
@@ -1250,19 +1330,7 @@ function M.open(arg, url, opts)
     -- assignments stay so a caller that reuses an existing buffer still gets them.
     session.query_spec = spec
     session.total_rows = total_rows
-    -- Auto-fetch column info for conditional formatting
-    if table_name_arg and not session._column_info then
-      vim.schedule(function()
-        local s = view._sessions[bufnr]
-        if s and not s._column_info then
-          local info = db.get_column_info(table_name_arg, conn)
-          if info then
-            s._column_info = info
-            M._render_if_visible(bufnr)
-          end
-        end
-      end)
-    end
+    schedule_column_info(bufnr, session, table_name_arg, conn)
   end
 
   -- Wire callbacks
@@ -1278,27 +1346,17 @@ function M.open(arg, url, opts)
     on_requery = function(bid, new_spec)
       local s, generation = begin_refresh(bid)
       if not s then return end
+      local is_current = require("dadbod-grip.write").capture_owner(bid, s)
 
       -- COUNT and SELECT share a spinner, but pending metadata must not
       -- replace the displayed result's identity if SELECT fails/interruption
       -- returns an error, or a newer refresh completes while this one waits.
-      local new_sql, page_fetch
-      local pending_total = s.total_rows
+      local page_fetch, query_update
       ui.blocking("  querying " .. spinner_label(table_name_arg) .. "...", function()
-        local count_sql = query.build_count_sql(new_spec)
-        local count_result = db.query(count_sql, conn)
-        if count_result and count_result.rows[1] then
-          pending_total = tonumber(count_result.rows[1][1]) or 0
-        end
-        if pending_total then
-          local total_pages = math.max(1, math.ceil(pending_total / new_spec.page_size))
-          if new_spec.page > total_pages then new_spec = query.set_page(new_spec, total_pages) end
-        end
-        new_sql = query.build_sql(new_spec)
-        page_fetch = fetch_refresh(conn, new_sql, table_name_arg, new_spec.is_raw)
+        page_fetch, query_update = fetch_page(conn, new_spec, table_name_arg, true, is_current)
       end)
-      apply_refresh(bid, page_fetch, s, generation,
-        { spec = new_spec, sql = new_sql, total_rows = pending_total })
+      if not is_current() then return end
+      apply_refresh(bid, page_fetch, s, generation, query_update)
     end,
 
     on_apply = function(bid)
