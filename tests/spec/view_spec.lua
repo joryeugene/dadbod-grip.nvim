@@ -176,14 +176,14 @@ end)
 
 -- ── get_cell: NULL originals surface as nil ─────────────────────────────────
 -- grid_fk_follow guards on cell.value == nil before building
--- "ref_column = <value>" SQL. Original NULLs arrive from CSV as "" and must
+-- "ref_column = <value>" SQL. Original NULLs arrive as vim.NIL and must
 -- surface as nil so the guard fires instead of querying for = ''.
 
 test("get_cell: value is nil for NULL original cell (fk-follow NULL guard)", function()
   cleanup()
   local st = data.new({
     columns = { "id", "ref_id" },
-    rows = { { "1", "" } },  -- ref_id is NULL (CSV empty cell)
+    rows = { { "1", vim.NIL } },  -- typed NULL
     primary_keys = { "id" },
     table_name = "orders",
     url = "sqlite:tests/seed_sqlite.db",

@@ -58,33 +58,65 @@ local function sqlite3_args(db_path, opts)
   return args
 end
 
-local function sqlite3(db_path, sql_str, timeout_ms)
+local function sqlite3(db_path, sql_str, timeout_ms, raw_output, cleanup, hooks)
   return adapters.run_cmd(sqlite3_args(db_path, adapters.session_opts()),
-    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT), { stdin = sql_str })
+    timeout_ms or adapters.configured_timeout(DEFAULT_TIMEOUT), { stdin = sql_str, raw_output = raw_output,
+      on_start = hooks and hooks.on_start, on_spawn_error = hooks and hooks.on_spawn_error,
+      on_complete = function() if cleanup then cleanup() end; if hooks then hooks.on_complete() end end,
+      terminate_on_interrupt = cleanup ~= nil or hooks ~= nil })
 end
 
 function M.query(sql_str, url)
-  if vim.fn.executable("sqlite3") == 0 then
-    return nil, "sqlite3 not found. Install sqlite."
-  end
-
+  if vim.fn.executable("sqlite3") == 0 then return nil, "sqlite3 not found. Install sqlite." end
   local db_path = extract_path(url)
   if not db_path then return nil, "Invalid SQLite URL: " .. url end
-
-  local stdout, stderr, code = sqlite3(db_path, sql_str)
-  if code ~= 0 then
-    local msg = stderr ~= "" and stderr or ("sqlite3 exited with code " .. code)
-    return nil, msg
+  local transport = require("dadbod-grip.transport")
+  local single = require("dadbod-grip.engine_timing").statement(sql_str)
+  local head = single and single:match("^%s*(%a+)")
+  local typed = head and ({ SELECT = true, WITH = true, VALUES = true })[head:upper()] or false
+  local wire_sql, cleanup = sql_str, nil
+  if typed then
+    local path, private_cleanup, private_err = transport.private_script()
+    if not path then return nil, "Could not prepare private SQLite transport: " .. tostring(private_err) end
+    cleanup = private_cleanup
+    local path_ok, quoted_path = pcall(transport.cli_path, path)
+    if not path_ok then cleanup(); return nil, tostring(quoted_path) end
+    local view_name = "_grip_read_" .. vim.fn.fnamemodify(path, ":h:t"):gsub("[^%w_]", "")
+    local view_ident = sql_util.quote_ident(view_name)
+    -- Encoding and metadata preparation precede the original read. MATERIALIZED
+    -- is an optimization fence: typeof/hex must inspect one stored evaluation,
+    -- even for volatile expressions whose storage class changes between calls.
+    -- Older SQLite versions reject that syntax before evaluating the view.
+    local material = sql_util.quote_column(view_name .. '_values')
+    wire_sql = 'CREATE TEMP TABLE ' .. sql_util.quote_column(view_name .. '_encoding')
+      .. ' (value TEXT CONSTRAINT "Grip lossless reads require UTF-8 SQLite database encoding" CHECK(value=\'UTF-8\'));\n'
+      .. 'INSERT INTO ' .. sql_util.quote_column(view_name .. '_encoding') .. ' SELECT encoding FROM pragma_encoding;\n'
+      .. "CREATE TEMP VIEW " .. view_ident .. " AS " .. single .. ";\n"
+      .. ".mode list\n.headers off\n.once " .. quoted_path .. "\n"
+      .. [[SELECT 'WITH ]] .. material .. ' AS MATERIALIZED (SELECT * FROM ' .. view_ident .. [[) SELECT ' || group_concat(
+        'CASE typeof(' || ident || ') WHEN ''null'' THEN ''N'' WHEN ''blob'' THEN ''B'' || hex(' || ident
+        || ') WHEN ''real'' THEN ''R'' || hex(CAST(' || ident || ' AS TEXT)) || '':'' || hex(printf(''%!.26g'',' || ident
+        || ')) WHEN ''integer'' THEN ''I'' || hex(CAST(' || ident || ' AS TEXT)) ELSE ''T'' || hex(CAST(' || ident
+        || ' AS TEXT)) END AS ' || ident, ',') || ' FROM ]] .. material .. [[;'
+        FROM (SELECT '"' || replace(name,'"','""') || '"' AS ident FROM pragma_table_info(]]
+      .. sql_util.quote_value(view_name) .. [[) ORDER BY cid);
+.mode csv
+.headers on
+.read ]] .. quoted_path .. "\n"
   end
-
-  local parsed, parse_err = db_util.parse_csv(stdout)
+  local ok, stdout, stderr, code = pcall(sqlite3, db_path, wire_sql, nil, true, cleanup)
+  -- Real children clean up only from on_complete after exit. A spawn/setup
+  -- exception has no live child and must not strand its private file either.
+  if not ok then return nil, tostring(stdout) end
+  if code ~= 0 then return nil, stderr ~= "" and stderr or ("sqlite3 exited with code " .. code) end
+  local parsed, parse_err = db_util.parse_csv(stdout, nil, false, typed)
   if not parsed then return nil, parse_err end
-
-  return {
-    rows = parsed.rows,
-    columns = parsed.columns,
-    primary_keys = {},
-  }, nil
+  if typed then
+    parsed, parse_err = transport.sqlite_values(parsed)
+    if not parsed then return nil, parse_err end
+  end
+  return { rows = parsed.rows, columns = parsed.columns, primary_keys = {}, lossless = typed,
+    cell_types = parsed.cell_types, cell_exact = parsed.cell_exact, storage_adapter = typed and 'sqlite' or nil }, nil
 end
 
 function M.get_primary_keys(table_name, url)
@@ -462,6 +494,27 @@ function M.execute(sql_str, url)
   end
 
   return { affected = n, message = n .. " row(s) affected" }, nil
+end
+
+-- One private CLI session owns identity capture, guards and commit.
+function M.grid_write(plan, url, opts)
+  local transaction = require("dadbod-grip.transaction")
+  local path = extract_path(url)
+  if not path then return nil, "Invalid SQLite URL" end
+  local definition, metadata_err = M.query("SELECT sql FROM sqlite_master WHERE name="
+    .. sql_util.quote_value(bare_table_name(plan.table_name)), url)
+  if not definition then return nil, metadata_err end
+  local ddl = definition.rows[1] and definition.rows[1][1]
+  local rowid = type(ddl) == "string" and not ddl:upper():match("WITHOUT%s+ROWID")
+  local script, err = transaction.compile(plan, "sqlite", { rowid = rowid })
+  if not script then return nil, err end
+  local stdout, stderr, code = transaction.submit('sqlite', opts, function(hooks)
+    return sqlite3(path, script, nil, nil, nil, hooks)
+  end)
+  if code ~= 0 then return nil, stderr ~= "" and stderr or ("sqlite3 exited with code " .. code) end
+  local result, decode_err = transaction.decode(plan, stdout, "sqlite")
+  if result then result.sql = script end
+  return result, decode_err
 end
 
 --- Ping: a SQLite DB is reachable when its file is readable.

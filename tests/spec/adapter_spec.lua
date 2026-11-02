@@ -1061,14 +1061,14 @@ end)
 
 -- ── MySQL sql_mode: NO_BACKSLASH_ESCAPES ─────────────────────────────────────
 
-test("mysql query: stdin session setup includes NO_BACKSLASH_ESCAPES", function()
+test("mysql custom query: stdin session setup includes NO_BACKSLASH_ESCAPES", function()
   with_executable(function()
     local args, opts = capture_system_call("id\n1\n", function()
-      mysql.query("SELECT 1", "mysql://root@localhost/test")
+      mysql.query("SHOW TABLES", "mysql://root@localhost/test")
     end)
     assert(not table.concat(args, " "):find("--init-command", 1, true), "no init command in argv")
     contains(opts.stdin, "NO_BACKSLASH_ESCAPES", "query sql_mode setup")
-    contains(opts.stdin, "SELECT 1", "query delivered via stdin")
+    contains(opts.stdin, "SHOW TABLES", "query delivered via stdin")
   end)
 end)
 
@@ -1093,10 +1093,10 @@ end)
 -- ── MySQL query flags ────────────────────────────────────────────────────────
 -- MySQL and MariaDB are driven identically: --batch for both.
 
-test("mysql query: uses --batch flag", function()
+test("mysql custom query: uses --batch flag", function()
   with_executable(function()
     local args = capture_system_args("id\t1\n", function()
-      mysql.query("SELECT 1", "mysql://root@localhost/test")
+      mysql.query("SHOW TABLES", "mysql://root@localhost/test")
     end)
     has_arg(args, "--batch", "MySQL should use --batch")
   end)

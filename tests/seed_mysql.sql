@@ -6,6 +6,7 @@
 -- binary data, empty tables, type diversity, long values,
 -- foreign keys, pagination-scale data, aggregation targets.
 
+SET NAMES utf8mb4;
 SET sql_mode = 'ANSI_QUOTES';
 
 -- Clean slate (FK-aware drop order)

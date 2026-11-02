@@ -129,9 +129,16 @@ function M.open(grid_bufnr)
     return nil
   end
 
-  local editable = view._is_editable(session)
+  local editable = view._is_editable(session) and cell.storage_type ~= "blob" and cell.storage_type ~= 'raw_unknown'
   local tbl = session.state.table_name or "result"
-  local lines, ft = M.render_value(cell.value, cell.col_name)
+  local lines, ft
+  if cell.storage_type == 'raw_unknown' then
+    lines,ft={require('dadbod-grip.provenance').raw_display(cell.value)},nil
+  elseif cell.storage_type == "blob" then
+    lines, ft = { "<binary: " .. require("dadbod-grip.transport").hex(cell.value or "") .. ">" }, nil
+  else
+    lines,ft=M.render_value(cell.value,cell.col_name)
+  end
 
   -- Split: horizontal ~40% height (default) or vertical ~40% width
   local split_style = require("dadbod-grip").get_opts().cell_split
@@ -173,6 +180,27 @@ function M.open(grid_bufnr)
   -- the baseline stages nothing. Updated after each successful stage so
   -- repeated :w stays quiet.
   local baseline = table.concat(lines, "\n")
+  local is_current = require("dadbod-grip.write").capture_owner(grid_bufnr, session)
+  local function stage(value)
+    local s = view._sessions[grid_bufnr]
+    if not s or not is_current() then
+      vim.notify("Grid changed: nothing staged", vim.log.levels.WARN)
+      return false
+    end
+    view.apply_edit(grid_bufnr, data.add_change(s.state, cell.row_idx, cell.col_name, value))
+    is_current = require("dadbod-grip.write").capture_owner(grid_bufnr, s)
+    return true
+  end
+  vim.api.nvim_buf_create_user_command(buf, "GripCellNull", function()
+    if stage(nil) then vim.api.nvim_set_option_value("modified", false, { buf = buf }) end
+  end, {})
+  vim.api.nvim_buf_create_user_command(buf, "GripCellEmpty", function()
+    if stage("") then
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "" })
+      baseline = ""
+      vim.api.nvim_set_option_value("modified", false, { buf = buf })
+    end
+  end, {})
 
   vim.api.nvim_create_autocmd("BufWriteCmd", {
     group = _ag,
@@ -189,8 +217,7 @@ function M.open(grid_bufnr)
         vim.notify("Grid is gone: nothing staged", vim.log.levels.WARN)
         return
       end
-      -- Empty text stages NULL (add_change convention shared with the grid)
-      view.apply_edit(grid_bufnr, data.add_change(s.state, cell.row_idx, cell.col_name, text))
+      if not stage(text) then return end
       baseline = text
       vim.api.nvim_set_option_value("modified", false, { buf = buf })
       vim.notify("Staged " .. tbl .. "." .. cell.col_name, vim.log.levels.INFO)

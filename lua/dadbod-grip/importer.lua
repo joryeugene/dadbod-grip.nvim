@@ -75,7 +75,7 @@ end
 local function parse_delimited(raw, columns)
   local header = raw:match("^[^\r\n]*") or ""
   local delimiter = header:find("\t", 1, true) and "\t" or ","
-  local parsed, err = db.parse_csv(raw, delimiter, true)
+  local parsed, err = db.parse_csv(raw, delimiter, true, true)
   if not parsed then return nil, err end
   if #parsed.columns == 0 or #parsed.rows == 0 then return nil, "no rows to import" end
 

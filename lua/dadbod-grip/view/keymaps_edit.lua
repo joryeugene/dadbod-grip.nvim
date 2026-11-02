@@ -5,9 +5,14 @@
 
 local data   = require("dadbod-grip.data")
 local qmod   = require("dadbod-grip.query")
-local sql    = require("dadbod-grip.sql")
 
 local M = {}
+local function refuse_unknown(state)
+  if require('dadbod-grip.provenance').has_unknown(state) then
+    vim.notify('Unproven byte encoding; clipboard export is unavailable',vim.log.levels.WARN)
+    return true
+  end
+end
 
 --- Row and cell editing: welcome/query pad entry, refresh, edit, delete,
 --- insert, clone, apply, undo/redo, yank, NULL, column set.
@@ -36,6 +41,7 @@ function M.setup(bufnr, ctx)
   kmap("grid_refresh", function()
     local session = ctx.session()
     if not session then return end
+    if not require('dadbod-grip.write').refresh_allowed(session) then return end
     if data.has_changes(session.state) then
       local staged = data.count_staged(session.state)
       local choice = vim.fn.confirm(
@@ -199,24 +205,39 @@ function M.setup(bufnr, ctx)
     -- Tier 2: transaction undo
     if session._txn_undo_stack and #session._txn_undo_stack > 0 then
       local reverse = session._txn_undo_stack[#session._txn_undo_stack]
-      local count = #reverse
-      local choice = vim.fn.confirm(
-        "Undo last committed transaction? (" .. count .. " statement(s))",
-        "&Yes\n&No", 2)
-      if choice ~= 1 then return end
-      local is_current = require("dadbod-grip.write").capture_owner(bufnr, session)
-      local txn = sql.wrap_transaction(reverse,
-        require("dadbod-grip.adapters").kind(session.url))
-      local written, err, ms, unknown = require("dadbod-grip.write").execute(txn, session.url, "undo transaction")
-      if err then
-        vim.notify((unknown and "" or "Undo failed: ") .. err, vim.log.levels.ERROR)
+      if reverse.version ~= 1 then
+        vim.notify("Undo unavailable: this transaction has no verified row identity", vim.log.levels.WARN)
         return
       end
-      vim.notify("Undid transaction (" .. count .. " statement(s))", vim.log.levels.INFO)
+      if reverse.outcome_unknown then
+        vim.notify("Undo outcome unknown: inspect the database before any further reversal", vim.log.levels.ERROR)
+        return
+      end
+      local count = #reverse.ops
+      local choice = vim.fn.confirm(
+        "Undo last committed transaction on " .. reverse.table_name .. "? (" .. count .. " change(s))",
+        "&Yes\n&No", 2)
+      if choice ~= 1 then return end
+      if not require('dadbod-grip.write').begin_write(session) then return end
+      local is_current = require("dadbod-grip.write").capture_owner(bufnr, session)
+      local written, err, ms, unknown, lifecycle = require("dadbod-grip.write").execute(
+        reverse, reverse.url or session.url, "undo " .. reverse.table_name)
+      session._write_pending = nil
+      if err then
+        if unknown then
+          reverse.outcome_unknown = true
+          session._write_unknown, session._write_lifecycle = true, lifecycle
+        end
+        vim.notify((unknown and "" or "Undo refused or conflicted: ") .. err, vim.log.levels.ERROR)
+        return
+      end
+      vim.notify("Undid transaction (" .. count .. " change(s))", vim.log.levels.INFO)
+      if view._sessions[bufnr] == session and session._txn_undo_stack[#session._txn_undo_stack] == reverse then
+        table.remove(session._txn_undo_stack)
+      end
       if not is_current() then return end
-      table.remove(session._txn_undo_stack)
       if session.on_refresh then
-        session.on_refresh(bufnr, { write_elapsed_ms = ms, write_engine_timing = written and written.engine_timing,
+        session.on_refresh(bufnr, { write_elapsed_ms = ms, write_engine_timing = written.engine_timing,
           is_current = is_current })
       end
       return
@@ -272,6 +293,10 @@ function M.setup(bufnr, ctx)
       vim.notify("Move cursor to a data row to yank", vim.log.levels.INFO)
       return
     end
+    if cell.storage_type=='raw_unknown' then
+      vim.notify('Unproven byte encoding; clipboard export is unavailable',vim.log.levels.WARN)
+      return
+    end
     local val = cell.value or ""
     vim.fn.setreg("+", val)
     vim.notify("Yanked: " .. val, vim.log.levels.INFO)
@@ -287,6 +312,7 @@ function M.setup(bufnr, ctx)
       return
     end
     local st = session.state
+    if refuse_unknown(st) then return end
     local parts = {}
     for _, col in ipairs(st.columns) do
       local val = data.effective_value(st, cell.row_idx, col)
@@ -302,6 +328,7 @@ function M.setup(bufnr, ctx)
     local session = ctx.session()
     if not session then return end
     local st = session.state
+    if refuse_unknown(st) then return end
     local r = session._render
     if not r then return end
     local lines_out = { table.concat(st.columns, ",") }
@@ -322,6 +349,7 @@ function M.setup(bufnr, ctx)
     local session_gy = ctx.session()
     if not session_gy or not session_gy._render then return end
     local st_gy = session_gy.state
+    if refuse_unknown(st_gy) then return end
     local r_gy = session_gy._render
     local cols = st_gy.columns
     local rows_data = {}
@@ -334,7 +362,7 @@ function M.setup(bufnr, ctx)
       end
       table.insert(rows_data, row)
     end
-    vim.fn.setreg("+", table.concat(view._format_export(rows_data, cols, "markdown"), "\n"))
+    vim.fn.setreg("+", table.concat(view._format_export(rows_data, cols, "markdown",nil,st_gy), "\n"))
     vim.notify("Copied as Markdown table (" .. #rows_data .. " rows)", vim.log.levels.INFO)
   end, "Yank table as Markdown")
 

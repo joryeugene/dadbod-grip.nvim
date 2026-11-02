@@ -140,8 +140,12 @@ test("onboarding and process-privacy claims match current behavior", function()
   assert(not readme:find("`A` in the query pad generates SQL", 1, true))
 
   for name, text in pairs({ README = readme, help = help }) do
-    assert(text:find("all database SQL and AI request content through stdin", 1, true),
-      name .. " must document the stdin boundary")
+    assert(text:find("original SQL", 1, true) and text:find("stdin", 1, true),
+      name .. " must document the original-query stdin boundary")
+    local prose = text:gsub("%s+", " ")
+    for _, claim in ipairs({ "0600", "0700", "selected column identifiers", "after the client exits" }) do
+      assert(prose:find(claim, 1, true), name .. " must document private SQLite script handling: " .. claim)
+    end
     assert(text:find("running as your user may still read those environment variables", 1, true),
       name .. " must document the same-user environment limit")
     assert(not text:find("--init-command", 1, true), name .. " still documents removed mysql argv setup")

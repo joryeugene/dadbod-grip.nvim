@@ -41,7 +41,7 @@ local function mock_run(fn, check, probe_capability)
   end
   if not ok then error(err, 0) end
 end
-local function csv() return "value\n42\n", "", 0 end
+local function csv() return "value\nV42\n", "", 0 end
 
 test("collection fixtures restore process and capability boundaries after failure", function()
   local run, options, executable = adapters.run_cmd, timing.options, vim.fn.executable
@@ -74,14 +74,18 @@ test("default adapter calls do not enable or return profiling", function()
   end)
 end)
 test("non-table additive options preserve existing facade and adapter calls", function()
-  mock_run(function(path) eq(path, nil); return csv() end, function()
+  mock_run(function(path, _, _, args)
+    eq(path, nil)
+    if args[1] == "sqlite3" then return "value\nI3432\n", "", 0 end
+    return csv()
+  end, function()
     for _, opts in ipairs({ true, false, 42, "invalid", function() end }) do
       for _, fn in ipairs({ adapter.query, db.query }) do
         local result, err = fn("SELECT 42 AS value", "duckdb::memory:", opts)
         eq(err, nil); eq(result.rows[1][1], "42"); eq(result.engine_timing, nil)
       end
       local result, err = db.query("SELECT 42 AS value", "sqlite::memory:", opts)
-      eq(err, nil); eq(result.engine_timing, nil)
+      eq(err, nil); eq(result.rows[1][1], "42"); eq(result.engine_timing, nil)
     end
   end)
 end)
@@ -144,18 +148,17 @@ test("private directory failure keeps one successful execution and unavailable s
   assert(ok, err)
 end)
 
-test("profile setup failure preserves the existing unprofiled compatibility fallback", function()
+test("wrapper incompatibility never retries the user statement after profile setup failure", function()
   local temp = vim.fn.tempname
   vim.fn.tempname = function() return temp() .. "/nonexistent_parent/profile" end
   local ok, err = xpcall(function()
     mock_run(function(path, _, stdin)
       eq(path, nil)
       if stdin:find("_grip_json", 1, true) then return "", "synthetic wrapper incompatibility", 1 end
-      return csv()
+      return "value\n42\n", "", 0
     end, function(calls)
       local result, query_err = adapter.query("SELECT 42 AS value", "duckdb::memory:", { engine_timing = true })
-      eq(query_err, nil); eq(calls(), 2); eq(result.rows[1][1], "42")
-      eq(result.engine_timing.reason, "profile_setup_failed")
+      eq(result, nil); eq(calls(), 1); eq(query_err, "synthetic wrapper incompatibility")
     end)
   end, debug.traceback)
   vim.fn.tempname = temp

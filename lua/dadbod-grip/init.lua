@@ -613,140 +613,57 @@ local function do_apply(bufnr, url)
   end
 
   local st = session.state
-
-  local updates = data.get_updates(st)
-  local inserts = data.get_inserts(st)
-  local deletes = data.get_deletes(st)
-
-  local total = #updates + #inserts + #deletes
-  if total == 0 then
+  if session._write_unknown then
+    vim.notify("Write outcome unknown: refresh before applying more changes", vim.log.levels.ERROR)
+    return
+  end
+  if not data.has_changes(st) then
     vim.notify("No changes to apply", vim.log.levels.INFO)
     return
   end
-
-  -- Build all statements
-  local stmts = {}
-
-  -- Deletes first (avoids FK conflicts with inserts)
-  for _, del in ipairs(deletes) do
-    table.insert(stmts, sql.build_delete(st.table_name, del.pk_values))
+  local info, metadata_err = db.get_column_info(st.table_name, url)
+  if not info then
+    vim.notify("Apply refused: " .. tostring(metadata_err or "table metadata unavailable"), vim.log.levels.ERROR)
+    return
   end
-  for _, upd in ipairs(updates) do
-    table.insert(stmts, sql.build_update(st.table_name, upd.pk_values, upd.changes))
+  local plan, plan_err = require("dadbod-grip.transaction").plan(st, info)
+  if not plan then
+    vim.notify("Apply refused: " .. plan_err, vim.log.levels.ERROR)
+    return
   end
-  for _, ins in ipairs(inserts) do
-    table.insert(stmts, sql.build_insert(st.table_name, ins.values, ins.columns))
+  if not is_current() then
+    vim.notify("Grid changed: apply cancelled before write", vim.log.levels.WARN)
+    return
   end
-
-  -- Wrap in transaction for atomicity (all or nothing)
-  local txn_sql = sql.wrap_transaction(stmts, require("dadbod-grip.adapters").kind(url))
-  local written, err, apply_ms, unknown = require("dadbod-grip.write").execute(txn_sql, url, st.table_name)
-
+  if not require('dadbod-grip.write').begin_write(session) then return end
+  is_current = require('dadbod-grip.write').capture_owner(bufnr, session)
+  local written, err, apply_ms, unknown, lifecycle = require("dadbod-grip.write").execute(plan, url, st.table_name)
+  session._write_pending = nil
   if err then
-    -- Rollback guarantees differ between engines and statement types.
-    local title = unknown and "Write outcome unknown" or "Apply failed"
-    local err_lines = { "✗ " .. title .. " (" .. total .. " statement(s))", "" }
-    for chunk in (err .. "\n"):gmatch("([^\n]+)\n?") do
-      if chunk ~= "" then table.insert(err_lines, "  " .. chunk) end
+    if unknown and view._sessions[bufnr] == session then
+      session._write_unknown, session._write_lifecycle = true, lifecycle
     end
+    local title = unknown and "Write outcome unknown" or "Apply refused or conflicted"
+    local err_lines = { title, "" }
+    for line in (err .. "\n"):gmatch("([^\n]+)\n?") do table.insert(err_lines, line) end
     table.insert(err_lines, "")
-    table.insert(err_lines, "  Your changes are preserved. Fix the value or press u to undo.")
+    table.insert(err_lines, "Staged changes are preserved. Refresh and inspect before retrying.")
     editor.show_error(title, err_lines)
     return
   end
-
-  -- Report the captured target even if input navigated elsewhere during the write.
-  local parts = {}
-  if #updates > 0 then table.insert(parts, #updates .. " update(s)") end
-  if #deletes > 0 then table.insert(parts, #deletes .. " delete(s)") end
-  if #inserts > 0 then table.insert(parts, #inserts .. " insert(s)") end
-  vim.notify("Applied " .. table.concat(parts, ", ") .. " to " .. (st.table_name or "result"), vim.log.levels.INFO)
-
-  local history = require("dadbod-grip.history")
-  history.record({ sql = txn_sql, url = url, table_name = st.table_name, type = "dml", elapsed_ms = apply_ms })
-
-  if not is_current() then return end
-
-  -- Success: compute reverse SQL for transaction undo before clearing staging
-  local reverse_stmts = {}
-  local col_idx = {}
-  for i, col in ipairs(st.columns) do col_idx[col] = i end
-
-  -- Reverse of DELETE = INSERT with full original row data
-  for _, del in ipairs(deletes) do
-    local row_values = {}
-    for _, col in ipairs(st.columns) do
-      row_values[col] = data.from_csv_raw(st.rows[del.row_idx][col_idx[col]])
-    end
-    table.insert(reverse_stmts, sql.build_insert(st.table_name, row_values, st.columns))
+  vim.notify("Applied " .. #plan.ops .. " change(s) to " .. st.table_name, vim.log.levels.INFO)
+  require("dadbod-grip.history").record({ sql = written.sql, url = url,
+    table_name = st.table_name, type = "dml", elapsed_ms = apply_ms })
+  if not is_current() then
+    vim.notify("The initiating view changed; refresh to inspect the committed write", vim.log.levels.WARN)
+    return
   end
-
-  -- Reverse of UPDATE = UPDATE with original pre-change values
-  for _, upd in ipairs(updates) do
-    local orig_values = {}
-    for col, _ in pairs(upd.changes) do
-      orig_values[col] = data.from_csv_raw(st.rows[upd.row_idx][col_idx[col]])
-    end
-    table.insert(reverse_stmts, sql.build_update(st.table_name, upd.pk_values, orig_values))
-  end
-
-  -- Reverse of INSERT = DELETE by PK.
-  -- If the user typed an explicit PK (plain INSERT), use it directly.
-  -- If PK was auto-assigned (clone / new-row with SERIAL/UUID), find the row
-  -- by matching non-PK values after commit, then build reverse DELETE.
-  for _, ins in ipairs(inserts) do
-    local ins_pk_values = {}
-    for _, pk in ipairs(st.pks) do
-      ins_pk_values[pk] = ins.values[pk]
-    end
-
-    if not next(ins_pk_values) and #st.pks > 0 then
-      -- Auto-assigned PK: locate the row by non-PK values (best-effort)
-      local pk_set = {}
-      for _, pk in ipairs(st.pks) do pk_set[pk] = true end
-      local where_parts = {}
-      for col, val in pairs(ins.values) do
-        if not pk_set[col] and val and val ~= "" and val ~= data.NULL_SENTINEL then
-          table.insert(where_parts, sql.quote_ident(col) .. " = " .. sql.quote_value(tostring(val)))
-        end
-      end
-      if #where_parts > 0 then
-        local pk_cols = table.concat(vim.tbl_map(function(pk)
-          return sql.quote_ident(pk)
-        end, st.pks), ", ")
-        -- ORDER BY pk DESC picks the highest (most recently inserted) matching row
-        local find_sql = "SELECT " .. pk_cols
-          .. " FROM " .. sql.quote_ident(st.table_name)
-          .. " WHERE " .. table.concat(where_parts, " AND ")
-          .. " ORDER BY " .. sql.quote_ident(st.pks[1]) .. " DESC LIMIT 1"
-        local r, _ = db.query(find_sql, url)
-        if r and r.rows and r.rows[1] then
-          for i, pk in ipairs(st.pks) do
-            ins_pk_values[pk] = r.rows[1][i]
-          end
-        end
-      end
-    end
-
-    if next(ins_pk_values) then
-      table.insert(reverse_stmts, sql.build_delete(st.table_name, ins_pk_values))
-    end
-  end
-
-  -- Auto-assigned-PK lookup above can also yield to navigation/input.
-  if not is_current() then return end
-
-  -- Store in transaction undo stack
-  if #reverse_stmts > 0 then
-    session._txn_undo_stack = session._txn_undo_stack or {}
-    table.insert(session._txn_undo_stack, reverse_stmts)
-    if #session._txn_undo_stack > 10 then table.remove(session._txn_undo_stack, 1) end
-  end
-
-  -- Clear local staging undo stack (stale pre-apply states)
+  session._txn_undo_stack = session._txn_undo_stack or {}
+  written.undo.url = url
+  table.insert(session._txn_undo_stack, written.undo)
+  if #session._txn_undo_stack > 10 then table.remove(session._txn_undo_stack, 1) end
   session._undo_stack = {}
-
-  session.on_refresh(bufnr, { write_elapsed_ms = apply_ms, write_engine_timing = written and written.engine_timing,
+  session.on_refresh(bufnr, { write_elapsed_ms = apply_ms, write_engine_timing = written.engine_timing,
     is_current = is_current })
 end
 
@@ -807,6 +724,7 @@ local function apply_refresh(bufnr, fetched, owner, generation, query_update, wr
   local session = view._sessions[bufnr]
   if session ~= owner or not session or not vim.api.nvim_buf_is_valid(bufnr)
       or session._refresh_generation ~= generation then return end
+  if not require('dadbod-grip.write').refresh_allowed(session) then return end
   if write_result and write_result.is_current and not write_result.is_current() then return end
   if not fetched or not fetched.result then
     vim.notify("Grip: query failed: " .. tostring((fetched and fetched.err) or "unknown error"),
@@ -814,6 +732,8 @@ local function apply_refresh(bufnr, fetched, owner, generation, query_update, wr
     return
   end
   local new_state = data.new(fetched.result)
+  session._write_unknown = nil
+  session._write_lifecycle = nil
   -- Publish identity/count/rows/time together only after a successful SELECT.
   if query_update then
     session.query_spec = query_update.spec
@@ -834,6 +754,7 @@ end
 local function begin_refresh(bufnr)
   local session = view._sessions[bufnr]
   if not session or not vim.api.nvim_buf_is_valid(bufnr) then return end
+  if not require('dadbod-grip.write').refresh_allowed(session) then return end
   session._refresh_generation = (session._refresh_generation or 0) + 1
   return session, session._refresh_generation
 end
@@ -857,11 +778,16 @@ local function do_edit(bufnr, cell, url)
 
   -- Binary columns: not editable
   local val = cell.value or ""
-  if val:sub(1, #"<binary") == "<binary" then
+  if cell.storage_type == 'raw_unknown' then
+    vim.notify('Unproven raw bytes: editing is unavailable',vim.log.levels.INFO)
+    return
+  end
+  if cell.storage_type == "blob" or val:sub(1, #"<binary") == "<binary" then
     vim.notify("Binary column: not editable", vim.log.levels.INFO)
     return
   end
 
+  local is_current = require("dadbod-grip.write").capture_owner(bufnr, session)
   local prompt = (session.state.table_name or "row") .. "." .. cell.col_name
   local edited_row_idx = cell.row_idx
   local edited_col    = cell.col_name
@@ -912,6 +838,11 @@ local function do_edit(bufnr, cell, url)
   editor.open(prompt, initial_val, function(new_val)
     if new_val == nil then  -- cancelled
       _restore(_pre_cursor)
+      return
+    end
+
+    if not is_current() then
+      vim.notify("Grid changed: nothing staged", vim.log.levels.WARN)
       return
     end
 

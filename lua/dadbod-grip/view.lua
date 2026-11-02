@@ -316,8 +316,8 @@ local function calc_col_widths(columns, rows, max_width)
   local sample_end = n > 200 and 100 or n
   local function scan_row(row_data)
     for i, col in ipairs(columns) do
-      local v = row_data[i] or ""
-      local display = (v == nil or v == "") and NULL_DISPLAY or tostring(v)
+      local v = row_data[i]
+      local display = (v == nil or v == vim.NIL) and NULL_DISPLAY or (v == "" and '""' or tostring(v):gsub("%z", "␀"))
       local dw = vim.fn.strdisplaywidth(display)
       if dw > natural[col] then natural[col] = dw end
       widths[col] = math.min(math.max(widths[col], dw), max_width)
@@ -355,18 +355,23 @@ function M._distribute_slack(columns, widths, natural, configured_max, available
 end
 
 -- ── cell display formatting ───────────────────────────────────────────────
-local function format_cell(value, width, is_null_staged)
-  if is_null_staged or value == nil then
+local function format_cell(value, width, is_null_staged, storage_type)
+  if is_null_staged or value == nil or value == vim.NIL then
     local s = pad_display(NULL_DISPLAY, width)
     return s, "GripNull"
   end
-  value = tostring(value)
+  if storage_type == "blob" then value = "<binary:" .. #value .. " bytes>" end
+  if storage_type == 'raw_unknown' then
+    value='<raw bytes: '..require('dadbod-grip.transport').hex(tostring(value))..'>'
+    return pad_display(value,width,false),'GripReadonly'
+  end
+  value = tostring(value):gsub("%z", "␀")
   if value:sub(1, #BINARY_PREFIX) == BINARY_PREFIX then
     local s = pad_display(value, width, false)
     return s, "GripReadonly"
   end
-  local display = value ~= "" and value:gsub("\n", "↵"):gsub("\r", "") or NULL_DISPLAY
-  local hl = value == "" and "GripNull" or nil
+  local display = value ~= "" and value:gsub("\n", "↵"):gsub("\r", "") or '""'
+  local hl = nil
   return pad_display(display, width), hl
 end
 
@@ -574,7 +579,9 @@ local function build_render(session, opts, bufnr)
     for i, col in ipairs(columns) do
       local eff = data.effective_value(st, row_idx, col)
       er[i] = eff
-      dr[i] = eff or ""
+      local kind=data.cell_type(st,row_idx,col)
+      dr[i] = eff==nil and vim.NIL or (kind == 'raw_unknown' and require('dadbod-grip.provenance').raw_display(eff)
+        or (kind == "blob" and ("<binary:" .. #eff .. " bytes>") or eff))
     end
     effs[di] = er
     display_rows[di] = dr
@@ -730,7 +737,7 @@ local function build_render(session, opts, bufnr)
         local w = widths[col]
         -- format_cell also returns a highlight group, but the authoritative
         -- one is computed in the highlight pass below; ignore it here.
-        local cell_str = format_cell(eff, w, eff == nil)
+        local cell_str = format_cell(eff, w, eff == nil, data.cell_type(st, row_idx, col))
 
         line_byte_positions[col] = { start = byte_pos, finish = byte_pos + #cell_str - 1 }
 
@@ -768,7 +775,7 @@ local function build_render(session, opts, bufnr)
             else
               cell_hl = "GripModified"
             end
-          elseif eff == nil or eff == "" then
+          elseif eff == nil then
             cell_hl = "GripNull"
           else
             cell_hl = classify_cell(eff, cond_type_map[col])
@@ -1191,6 +1198,7 @@ function M.get_cell(bufnr)
           col_name = col,
           col_idx = i,
           value = value,
+          storage_type = data.cell_type(st, row_idx, col),
         }
       end
     end
@@ -1202,6 +1210,7 @@ function M.get_cell(bufnr)
         col_name = snap.col_name,
         col_idx  = snap.col_idx,
         value    = data.effective_value(st, row_idx, snap.col_name),
+        storage_type = data.cell_type(st, row_idx, snap.col_name),
       }
     end
   end
@@ -1623,42 +1632,43 @@ M._json_to_lines = json_to_lines
 -- rather than iterating the row. Returns a list of strings (lines).
 -- The single formatter behind :GripExport / gX (file), gE (clipboard) and gy
 -- (markdown yank); `format` is one of csv, tsv, json, sql, markdown, grip.
-local function format_export(rows, cols, format, table_name)
+local function format_export(rows, cols, format, table_name, metadata)
+  local problem=require('dadbod-grip.provenance').export_error(metadata,format);assert(not problem,problem)
   local tbl = table_name or "_grip_result"
 
-  if format == "csv" then
-    local lines = { table.concat(cols, ",") }
-    for _, row in ipairs(rows) do
-      local parts = {}
-      for ci = 1, #cols do
-        local v = row[ci]
-        local s = v or ""
-        if tostring(s):find('[,"\n]') then
-          s = '"' .. tostring(s):gsub('"', '""') .. '"'
-        end
-        table.insert(parts, tostring(s))
+  local function delimited(separator)
+    local function cell(value)
+      if value == nil or value == vim.NIL then return "" end
+      local text = tostring(value)
+      if text == "" or text:find(separator, 1, true) or text:find('["\r\n]') then
+        return '"' .. text:gsub('"', '""') .. '"'
       end
-      table.insert(lines, table.concat(parts, ","))
+      return text
+    end
+    local header = {}; for ci, col in ipairs(cols) do header[ci] = cell(col) end
+    local lines = { table.concat(header, separator) }
+    for _, row in ipairs(rows) do
+      local values = {}; for ci = 1, #cols do values[ci] = cell(row[ci]) end
+      lines[#lines + 1] = table.concat(values, separator)
     end
     return lines
+  end
+  if format == "csv" then
+    return delimited(",")
 
   elseif format == "json" then
     local objects = {}
     for _, row in ipairs(rows) do
       local obj_parts = {}
       for ci, col in ipairs(cols) do
-        local v = row[ci]  -- may be nil
+        local v = row[ci]; if v == vim.NIL then v = nil end  -- may be nil
         local json_val
         if v == nil then
           json_val = "null"
-        elseif tonumber(v) then
-          json_val = tostring(v)
-        elseif v == "true" or v == "false" then
-          json_val = v
         else
-          json_val = '"' .. tostring(v):gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\r', '\\r'):gsub('\t', '\\t') .. '"'
+          json_val = vim.json.encode(v)
         end
-        table.insert(obj_parts, '    "' .. col .. '": ' .. json_val)
+        table.insert(obj_parts, '    ' .. vim.json.encode(col) .. ': ' .. json_val)
       end
       table.insert(objects, "  {\n" .. table.concat(obj_parts, ",\n") .. "\n  }")
     end
@@ -1672,17 +1682,15 @@ local function format_export(rows, cols, format, table_name)
   elseif format == "sql" then
     local sql_mod = require("dadbod-grip.sql")
     local col_list = table.concat(
-      vim.tbl_map(function(c) return sql_mod.quote_ident(c) end, cols), ", ")
+      vim.tbl_map(function(c) return sql_mod.quote_column(c) end, cols), ", ")
     local lines = {}
-    for _, row in ipairs(rows) do
+    for ri, row in ipairs(rows) do
       local vals = {}
       for ci = 1, #cols do
-        local v = row[ci]
-        if v == nil then
-          table.insert(vals, "NULL")
-        else
-          table.insert(vals, "'" .. esc(tostring(v)) .. "'")
-        end
+        local v = row[ci]; if v == vim.NIL then v = nil end
+        local types = metadata and metadata.cell_types and metadata.cell_types[ri]
+        local exact = metadata and metadata.cell_exact and metadata.cell_exact[ri]
+        vals[#vals+1] = sql_mod.quote_value(v,metadata and metadata.storage_adapter,types and types[ci],exact and exact[ci])
       end
       table.insert(lines, string.format(
         "INSERT INTO %s (%s) VALUES (%s);",
@@ -1691,13 +1699,7 @@ local function format_export(rows, cols, format, table_name)
     return lines
 
   elseif format == "tsv" then
-    local lines = { table.concat(cols, "\t") }
-    for _, row in ipairs(rows) do
-      local parts = {}
-      for ci = 1, #cols do table.insert(parts, row[ci] or "") end
-      table.insert(lines, table.concat(parts, "\t"))
-    end
-    return lines
+    return delimited("\t")
 
   elseif format == "markdown" then
     local function pipe_esc(s) return (tostring(s):gsub("|", "\\|")) end
@@ -1707,7 +1709,7 @@ local function format_export(rows, cols, format, table_name)
     }
     for _, row in ipairs(rows) do
       local parts = {}
-      for ci = 1, #cols do table.insert(parts, pipe_esc(row[ci] or "")) end
+      for ci = 1, #cols do table.insert(parts, pipe_esc((row[ci] == nil or row[ci] == vim.NIL) and NULL_DISPLAY or row[ci])) end
       table.insert(lines, "| " .. table.concat(parts, " | ") .. " |")
     end
     return lines
@@ -1721,7 +1723,7 @@ local function format_export(rows, cols, format, table_name)
     end
     for _, row in ipairs(rows) do
       for ci = 1, #cols do
-        widths[ci] = math.max(widths[ci], vim.fn.strdisplaywidth(tostring(row[ci] or "NULL")))
+        widths[ci] = math.max(widths[ci], vim.fn.strdisplaywidth(tostring((row[ci] == nil or row[ci] == vim.NIL) and NULL_DISPLAY or row[ci])))
       end
     end
     local rule_parts = {}
@@ -1741,8 +1743,8 @@ local function format_export(rows, cols, format, table_name)
     for _, row in ipairs(rows) do
       local row_parts = {}
       for ci = 1, #cols do
-        local v = row[ci]
-        local display = v or "NULL"
+        local v = row[ci]; if v == vim.NIL then v = nil end
+        local display = v == nil and NULL_DISPLAY or tostring(v)
         local pad = widths[ci] - vim.fn.strdisplaywidth(display)
         if v and tonumber(v) then
           table.insert(row_parts, " " .. string.rep(" ", pad) .. display .. " ")
@@ -1764,17 +1766,22 @@ M._format_export = format_export
 
 local function current_export_rows(session)
   local rows = {}
+  local metadata = require('dadbod-grip.provenance').copy(session.state,true)
+  metadata.cell_types,metadata.cell_exact={},{}
   local cols = session.state.columns or {}
+  metadata.columns=cols -- export span only; never copy projected columns into a write plan
   local ordered = session._render and session._render.ordered
-  if not ordered then return session.state.rows or {}, cols end
+  if not ordered then return session.state.rows or {}, cols, session.state end
   for _, row_idx in ipairs(ordered) do
-    local row = {}
+    local row,types,exact = {},{},{}
     for ci, col in ipairs(cols) do
       row[ci] = data.effective_value(session.state, row_idx, col)
+      types[ci],exact[ci] = data.cell_type(session.state,row_idx,col),data.cell_exact(session.state,row_idx,col)
     end
     rows[#rows + 1] = row
+    metadata.cell_types[#rows],metadata.cell_exact[#rows] = types,exact
   end
-  return rows, cols
+  return rows, cols, metadata
 end
 
 local function matching_count(session)
@@ -1790,7 +1797,7 @@ local function request_export_rows(session, destination, callback)
   vim.ui.select({ "Current page", "All matching rows" }, { prompt = "Export scope:" }, function(scope)
     if not scope then return end
 
-    local rows, cols, count
+    local rows, cols, count, metadata
     if scope == "All matching rows" then
       local count_err
       count, count_err = matching_count(session)
@@ -1818,6 +1825,7 @@ local function request_export_rows(session, destination, callback)
         return
       end
       rows, cols = result.rows or {}, result.columns or session.state.columns or {}
+      metadata = result
       local fetched_count = #rows
       if destination == "clipboard" and fetched_count > 100000 then
         vim.notify("Clipboard export is limited to 100,000 rows; export to a file instead",
@@ -1828,7 +1836,7 @@ local function request_export_rows(session, destination, callback)
           "Export %d matching rows? (y/N): ", fetched_count)) then return end
       count = fetched_count
     else
-      rows, cols = current_export_rows(session)
+      rows, cols, metadata = current_export_rows(session)
       count = #rows
       if destination == "clipboard" and count > 100000 then
         vim.notify("Clipboard export is limited to 100,000 rows; export to a file instead",
@@ -1843,13 +1851,15 @@ local function request_export_rows(session, destination, callback)
       vim.notify("No rows to export", vim.log.levels.WARN)
       return
     end
-    callback(rows, cols, scope)
+    callback(rows, cols, scope, metadata)
   end)
 end
 
 --- Stream an export to a same-directory temporary file, then atomically rename
 --- it into place. Any formatter/write/rename failure removes only the temp file.
-local function write_export_file(rows, cols, format, table_name, path)
+local function write_export_file(rows, cols, format, table_name, path, metadata)
+  local problem=require('dadbod-grip.provenance').export_error(metadata,format)
+  if problem then return nil,problem end -- validate even an empty stream, before creating a file
   local temp = string.format("%s.grip-tmp-%d-%d", path, vim.fn.getpid(), vim.uv.hrtime())
   local file, open_err = io.open(temp, "wb")
   if not file then return nil, open_err end
@@ -1866,8 +1876,19 @@ local function write_export_file(rows, cols, format, table_name, path)
     local first_batch = true
     for start = 1, #rows, batch_size do
       local batch = {}
-      for i = start, math.min(start + batch_size - 1, #rows) do batch[#batch + 1] = rows[i] end
-      local lines = format_export(batch, cols, format, table_name)
+      local batch_meta = metadata and require('dadbod-grip.provenance').copy(metadata,true)
+      if batch_meta then
+        batch_meta.columns=cols -- retain positions even when all type/proof vectors are absent
+        batch_meta.cell_types,batch_meta.cell_exact={},{}
+      end
+      for i = start, math.min(start + batch_size - 1, #rows) do
+        batch[#batch + 1] = rows[i]
+        if batch_meta then
+          batch_meta.cell_types[#batch]=metadata.cell_types and metadata.cell_types[i]
+          batch_meta.cell_exact[#batch]=metadata.cell_exact and metadata.cell_exact[i]
+        end
+      end
+      local lines = format_export(batch, cols, format, table_name, batch_meta)
       if format == "csv" and not first_batch then table.remove(lines, 1) end
       if format == "json" then
         table.remove(lines, 1)
@@ -1904,7 +1925,7 @@ function M.export_to_clipboard(bufnr)
     vim.notify("No grip result to export", vim.log.levels.WARN)
     return
   end
-  request_export_rows(session, "clipboard", function(rows, cols)
+  request_export_rows(session, "clipboard", function(rows, cols, _, metadata)
     local formats = { "CSV", "TSV", "JSON", "SQL INSERT", "Markdown", "Grip Table" }
     vim.ui.select(formats, { prompt = "Export format:" }, function(choice)
       if not choice then return end
@@ -1912,8 +1933,9 @@ function M.export_to_clipboard(bufnr)
         ["CSV"] = "csv", ["TSV"] = "tsv", ["JSON"] = "json",
         ["SQL INSERT"] = "sql", ["Markdown"] = "markdown", ["Grip Table"] = "grip",
       }
-      local output = table.concat(format_export(
-        rows, cols, ids[choice], session.state.table_name or "table_name"), "\n")
+      local problem=require('dadbod-grip.provenance').export_error(metadata,ids[choice])
+      if problem then vim.notify(problem,vim.log.levels.ERROR);return end
+      local output = table.concat(format_export(rows,cols,ids[choice],session.state.table_name or 'table_name',metadata),'\n')
       vim.fn.setreg("+", output)
       vim.notify(string.format("Exported %d rows as %s to clipboard", #rows, choice),
         vim.log.levels.INFO)
@@ -1930,7 +1952,7 @@ function M.do_export(bufnr)
     return
   end
 
-  request_export_rows(session, "file", function(rows, cols)
+  request_export_rows(session, "file", function(rows, cols, _, metadata)
     -- Scope is intentionally chosen before format.
     local fmt = ui.input({ prompt = "Export format [csv/json/sql]: " })
     if not fmt then return end
@@ -1949,7 +1971,7 @@ function M.do_export(bufnr)
     if not path then return end
 
     local ok, err = write_export_file(
-      rows, cols, fmt, session.query_spec and session.query_spec.table_name, path)
+      rows, cols, fmt, session.query_spec and session.query_spec.table_name, path, metadata)
     if ok then
       vim.notify(string.format("Exported %d rows → %s", #rows, path), vim.log.levels.INFO)
     else
