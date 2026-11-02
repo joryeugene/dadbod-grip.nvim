@@ -235,6 +235,55 @@ test("newer nested navigation keeps its rows count and page over an older refres
   eq(ids(session), "1,2", "newer rows")
 end)
 
+for _, action in ipairs({ "close", "stage" }) do
+  test("ownership change during COUNT cancels the page SELECT: " .. action, function()
+    local buf, session = open()
+    local real_query, calls, staged = db.query, 0
+    db.query = function(sql, ...)
+      calls = calls + 1
+      assert(calls == 1, "obsolete page SELECT still submitted")
+      local result, err = real_query(sql, ...)
+      assert(sql:find("COUNT(*)", 1, true), "expected recount before page SELECT")
+      if action == "close" then
+        vim.api.nvim_buf_delete(buf, { force = true })
+      else
+        staged = data.add_change(session.state, 1, "name", "new staging")
+        view.apply_edit(buf, staged)
+      end
+      return result, err
+    end
+    local ok, err = pcall(session.on_refresh, buf)
+    db.query = real_query
+    assert(ok, err)
+    eq(calls, 1, "only the admitted COUNT ran")
+    if action == "close" then
+      eq(view._sessions[buf], nil, "closed session remains closed")
+    else
+      eq(session.state, staged, "new staging owns the grid")
+      eq(data.has_changes(session.state), true, "new staging retained")
+    end
+  end)
+end
+
+test("new staging during the page SELECT cannot be replaced by its old result", function()
+  local buf, session = open()
+  local real_query, staged = db.query
+  db.query = function(sql, ...)
+    local result, err = real_query(sql, ...)
+    if not sql:find("COUNT(*)", 1, true) then
+      staged = data.add_change(session.state, 1, "name", "new staging")
+      view.apply_edit(buf, staged)
+    end
+    return result, err
+  end
+  local ok, err = pcall(session.on_refresh, buf)
+  db.query = real_query
+  assert(ok, err)
+  eq(session.state, staged, "new staging owns the result")
+  eq(data.has_changes(session.state), true, "new staging remains unapplied")
+  eq(native("SELECT name FROM items WHERE id=1"), "one", "no write was issued")
+end)
+
 test("unsettled write refusal does not count query or discard staging", function()
   local buf, session = open()
   view.apply_edit(buf, data.add_change(session.state, 1, "name", "staged"))

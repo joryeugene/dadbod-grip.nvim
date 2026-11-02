@@ -740,7 +740,8 @@ end
 --- the grid past its last page. A failed count is unknown, never the previous
 --- result's total. Raw refreshes avoid adding another evaluation of arbitrary
 --- SQL; explicit requery keeps its existing count contract.
-local function fetch_page(url, spec, table_name, count_raw)
+local function fetch_page(url, spec, table_name, count_raw, is_current)
+  if not is_current() then return { cancelled = true } end
   local total_rows
   if not spec.is_raw or count_raw then
     local counted = db.query(query.build_count_sql(spec), url)
@@ -751,6 +752,9 @@ local function fetch_page(url, spec, table_name, count_raw)
       if spec.page > total_pages then spec = query.set_page(spec, total_pages) end
     end
   end
+  -- A count wait pumps input. Closing, navigating, staging, or starting a
+  -- newer write must cancel this page fetch before another DB round-trip.
+  if not is_current() then return { cancelled = true } end
   local query_sql = query.build_sql(spec)
   return fetch_refresh(url, query_sql, table_name, spec.is_raw),
     { spec = spec, sql = query_sql, total_rows = total_rows }
@@ -802,8 +806,9 @@ end
 local function do_refresh(bufnr, url, query_sql, table_name, write_result)
   local owner, generation = begin_refresh(bufnr)
   if not owner then return end
+  local is_current = require("dadbod-grip.write").capture_owner(bufnr, owner)
   if write_result then
-    write_result.is_current = require("dadbod-grip.write").capture_owner(bufnr, owner)
+    write_result.is_current = is_current
   end
   -- Clearing generations is cheap and cannot start a competing metadata read.
   -- This also lets manual refresh recover schema changed outside Grip.
@@ -811,11 +816,12 @@ local function do_refresh(bufnr, url, query_sql, table_name, write_result)
   local fetched, query_update
   ui.blocking("  querying " .. spinner_label(table_name) .. "...", function()
     if owner.query_spec then
-      fetched, query_update = fetch_page(url, owner.query_spec, table_name, false)
+      fetched, query_update = fetch_page(url, owner.query_spec, table_name, false, is_current)
     else
       fetched = fetch_refresh(url, query_sql, table_name)
     end
   end)
+  if not is_current() then return end
   apply_refresh(bufnr, fetched, owner, generation, query_update, write_result)
 end
 
@@ -1326,14 +1332,16 @@ function M.open(arg, url, opts)
     on_requery = function(bid, new_spec)
       local s, generation = begin_refresh(bid)
       if not s then return end
+      local is_current = require("dadbod-grip.write").capture_owner(bid, s)
 
       -- COUNT and SELECT share a spinner, but pending metadata must not
       -- replace the displayed result's identity if SELECT fails/interruption
       -- returns an error, or a newer refresh completes while this one waits.
       local page_fetch, query_update
       ui.blocking("  querying " .. spinner_label(table_name_arg) .. "...", function()
-        page_fetch, query_update = fetch_page(conn, new_spec, table_name_arg, true)
+        page_fetch, query_update = fetch_page(conn, new_spec, table_name_arg, true, is_current)
       end)
+      if not is_current() then return end
       apply_refresh(bid, page_fetch, s, generation, query_update)
     end,
 
