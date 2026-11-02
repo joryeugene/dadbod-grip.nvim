@@ -160,7 +160,7 @@ test("optional adapter invalidation is clear-only and uses the original connecti
   end)
 end)
 
-test("failed execution cannot clear metadata or call adapter invalidation", function()
+test("failed execution preserves its error while invalidating possibly changed schema", function()
   with_adapter(function(adapter)
     db.get_schema_batch = function() return payload("fresh") end
     completion.invalidate(URL)
@@ -169,7 +169,8 @@ test("failed execution cannot clear metadata or call adapter invalidation", func
     adapter.invalidate_schema = function() calls = calls + 1 end
     local result, err = db.execute("CREATE TABLE bad(id INTEGER)", URL)
     assert(not result and err)
-    assert(calls == 0 and completion.get_schema(URL) == before)
+    assert(err == "controlled SQL rejection" and calls == 1)
+    assert(vim.deep_equal(completion.get_schema(URL), before), "failed DDL invented a schema change")
   end)
 end)
 

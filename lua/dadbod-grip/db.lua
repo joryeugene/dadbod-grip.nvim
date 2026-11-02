@@ -364,7 +364,7 @@ local function after_schema_change(url, adapter, conn)
   if invalidate_schema(url, adapter, conn) then return end
   -- A cache failure cannot turn a committed statement into an SQL refusal.
   vim.schedule(function()
-    vim.notify("Grip: statement completed, but schema cache invalidation failed. Refresh schema manually.", vim.log.levels.WARN)
+    vim.notify("Grip: schema cache invalidation failed. Refresh schema manually.", vim.log.levels.WARN)
   end)
 end
 
@@ -391,7 +391,7 @@ function M.query(sql, url, opts)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
   local result, query_err = via_adapter(url, adapter.query, sql, conn, opts)
-  if result ~= nil and not query_err and query_may_change_schema(sql, adapters.kind(conn)) then
+  if query_may_change_schema(sql, adapters.kind(conn)) then
     after_schema_change(requested, adapter, conn)
   end
   return with_engine_timing(result, conn, opts), query_err
@@ -416,7 +416,9 @@ function M.execute(sql, url, opts)
   local adapter, conn, err = resolve(url)
   if not adapter then return nil, err end
   local result, exec_err = via_adapter(url, adapter.execute, sql, conn, opts)
-  if result ~= nil and not exec_err then after_schema_change(requested, adapter, conn) end
+  -- A later statement can fail after an earlier DDL statement committed. An
+  -- error must preserve its exact SQL outcome, not stale schema knowledge.
+  after_schema_change(requested, adapter, conn)
   return with_engine_timing(result, conn, opts), exec_err
 end
 

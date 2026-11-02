@@ -61,12 +61,12 @@ H.test("successful query-based DDL also invalidates schema", function(c)
   assert(names(c.url).via_query, "db.query DDL kept old completion")
 end)
 
-H.test("failed DDL retains existing usable completion cache", function(c)
+H.test("failed DDL retains accurate completion contents", function(c)
   c.exec("CREATE TABLE items(id INTEGER)")
   local before = completion.get_schema(c.url)
   local result, err = db.execute("ALTER TABLE missing ADD COLUMN fresh TEXT", c.url)
   assert(not result and err)
-  assert(completion.get_schema(c.url) == before, "failed DDL invalidated successful schema")
+  H.eq(completion.get_schema(c.url), before, "failed DDL invented a schema change")
 end)
 
 H.test("explicit connection invalidation cannot follow ambient URL changes", function(c)
@@ -165,5 +165,17 @@ H.test("native DuckDB CREATE ALTER rename and DROP refresh completion", function
   assert(db.execute("DROP TABLE renamed", url))
   assert(not names(url).renamed)
 end)
+
+for _, method in ipairs({ "execute", "query" }) do
+  H.test(method .. " partial DDL failure preserves its error and discards stale schema", function(c)
+    c.exec("CREATE TABLE items(id INTEGER PRIMARY KEY)")
+    assert(not has_column(c.url, "items", "committed"))
+    local result, err = db[method]("ALTER TABLE items ADD COLUMN committed TEXT; SELECT * FROM missing_table", c.url)
+    assert(not result and err and err:find("missing_table", 1, true), "native later-statement error was changed")
+    local native = vim.system({ "sqlite3", c.url:sub(8), "PRAGMA table_info(items)" }, { text = true }):wait()
+    assert(native.code == 0 and native.stdout:find("committed", 1, true), "first statement did not actually commit")
+    assert(has_column(c.url, "items", "committed"), "partial success retained an obsolete schema")
+  end)
+end
 
 H.finish("schema_freshness_native_spec")

@@ -249,8 +249,15 @@ end
 --- Render complete buffer labels; the window viewport handles horizontal clipping.
 local function render(state, anchor)
   if not _sidebar_bufnr or not vim.api.nvim_buf_is_valid(_sidebar_bufnr) then return end
+  local bufnr, winid, generation = _sidebar_bufnr, _sidebar_winid, state._schema_generation
+  if not winid or not vim.api.nvim_win_is_valid(winid) or vim.b[bufnr].db ~= state.url then return end
   anchor = anchor or selection(state)
   local nodes = build_nodes(state)
+  -- Expanding columns performs synchronous adapter calls that pump the event
+  -- loop. A connection switch may have already reused and painted this buffer.
+  if not current_fetch(state, generation) or _sidebar_bufnr ~= bufnr or _sidebar_winid ~= winid
+      or not vim.api.nvim_buf_is_valid(bufnr) or not vim.api.nvim_win_is_valid(winid)
+      or vim.b[bufnr].db ~= state.url then return end
   local lines, highlights = {}, {}
   local function line(text, hl)
     lines[#lines + 1] = text
