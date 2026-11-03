@@ -169,7 +169,11 @@ return function(scenario)
       if scenario == 'write-owned' then
         assert(visible:find('Write: 1.6s client', 1, true), 'owned write timing disappeared in Zen: ' .. visible)
       end
-      if scenario ~= 'unknown' then
+      if scenario == 'metadata' then
+        assert(visible:find('10 rows', 1, true), 'metadata row count clipped: ' .. visible)
+        assert(not visible:find('Page ', 1, true) and not visible:find('100000 rows', 1, true),
+          'records pagination leaked into metadata: ' .. visible)
+      elseif scenario ~= 'unknown' then
         assert(visible:find('Page 376/1000', 1, true) and visible:find('100000 rows', 1, true), 'page/total clipped: ' .. visible)
       else assert(visible:find('more possible', 1, true), 'unknown-total safety warning lost') end
       if scenario == 'readonly' then assert(visible:find('read-only', 1, true), 'read-only status clipped') end

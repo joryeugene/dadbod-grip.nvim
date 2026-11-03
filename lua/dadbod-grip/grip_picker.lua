@@ -59,6 +59,7 @@ function M.open(opts)
   local items    = opts.items or {}
   local filter   = ""
   local cursor   = 1
+  local first_visible = 1
   local _selected = false  -- true once a real selection or action fires
 
   -- ── filter ──
@@ -110,32 +111,51 @@ function M.open(opts)
   vim.b[popup_buf].grip_owned_float = true
 
   local preview_buf, preview_win
-  if preview_fn then
-    preview_buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = preview_buf })
-    vim.bo[preview_buf].filetype = "sql"
-    vim.b[preview_buf].grip_owned_float = true
-  end
 
   -- ── dimension helpers ──
 
   local PREVIEW_W   = 54   -- max preview pane width
   local PREVIEW_GAP = 2    -- columns between picker and preview
 
-  local function calc_width(flist)
-    local min_w = math.max(#title + 6, 30)
-    local max_w = math.min(vim.o.columns - 6, 70)
+  local function footer_parts()
+    local parts = { "Enter:select" }
+    if on_delete then parts[#parts + 1] = "D:delete" end
+    local current = filtered_items()[cursor]
+    for _, action in ipairs(actions) do
+      if not action.when or not current or action.when(current) then parts[#parts + 1] = action.label end
+    end
+    parts[#parts + 1], parts[#parts + 2] = "/:filter", "q:close"
+    return parts
+  end
+
+  local function footer_lines(w, parts)
+    local lines, line = {}, "  "
+    for _, part in ipairs(parts) do
+      part = ui.truncate_display(part, math.max(1, w - 2), true)
+      if line ~= "  " and vim.fn.strdisplaywidth(line .. "  " .. part) > w then
+        lines[#lines + 1], line = line, "  "
+      end
+      line = line .. (line == "  " and "" or "  ") .. part
+    end
+    lines[#lines + 1] = line
+    return lines
+  end
+
+  local function calc_width(flist, parts)
+    local max_w = math.max(1, math.min(vim.o.columns - 6, 70))
+    local min_w = math.min(math.max(vim.fn.strdisplaywidth(title) + 6, 30), max_w)
     local content_w = min_w
     for _, item in ipairs(flist) do
       content_w = math.max(content_w, vim.fn.strdisplaywidth(tostring(display(item))) + 6)
     end
+    content_w = math.max(content_w, vim.fn.strdisplaywidth(table.concat(parts, "  ")) + 2)
     return clamp(content_w, min_w, max_w)
   end
 
-  local function calc_height(flist)
+  local function calc_height(flist, w, parts)
     local item_count = math.max(1, #flist)
-    local overhead = 2  -- separator + footer
-    return math.min(item_count + overhead, math.floor(vim.o.lines * 0.6))
+    local overhead = 1 + #footer_lines(w, parts) + (filter ~= "" and 1 or 0)
+    return math.min(item_count + overhead, math.max(overhead + 1, math.floor(vim.o.lines * 0.6)))
   end
 
   -- Available width for the preview pane given picker_w.
@@ -157,6 +177,41 @@ function M.open(opts)
 
   local win
 
+  local function sync_preview(w, h)
+    if not preview_fn then return end
+    local pvw = get_pv_w(w)
+    if pvw == 0 then
+      if preview_win and vim.api.nvim_win_is_valid(preview_win) then
+        vim.api.nvim_win_close(preview_win, true)
+      end
+      preview_win = nil
+      return
+    end
+    if not preview_buf or not vim.api.nvim_buf_is_valid(preview_buf) then
+      preview_buf = vim.api.nvim_create_buf(false, true)
+      vim.bo[preview_buf].bufhidden = "wipe"
+      vim.bo[preview_buf].filetype = "sql"
+      vim.b[preview_buf].grip_owned_float = true
+    end
+    local cfg = {
+      relative = "editor", row = math.floor((vim.o.lines - h) / 2),
+      col = get_picker_col(w) + w + PREVIEW_GAP, width = pvw, height = h,
+    }
+    if preview_win and vim.api.nvim_win_is_valid(preview_win) then
+      vim.api.nvim_win_set_config(preview_win, cfg)
+    else
+      cfg.style, cfg.border = "minimal", ui.border()
+      cfg.title, cfg.title_pos, cfg.focusable, cfg.zindex = " Preview ", "center", false, 54
+      local eventignore = vim.o.eventignore
+      vim.o.eventignore = "all"
+      local ok, result = pcall(vim.api.nvim_open_win, preview_buf, false, cfg)
+      vim.o.eventignore = eventignore
+      if not ok then error(result) end
+      preview_win = result
+      vim.wo[preview_win].wrap = true
+    end
+  end
+
   local function open_wins(w, h)
     local col = get_picker_col(w)
     local row = math.floor((vim.o.lines - h) / 2)
@@ -172,28 +227,7 @@ function M.open(opts)
       title_pos   = "center",
       zindex      = 55,
     })
-    if preview_fn then
-      local pvw = get_pv_w(w)
-      if pvw >= 20 then
-        local _ei = vim.o.eventignore
-        vim.o.eventignore = "all"
-        preview_win = vim.api.nvim_open_win(preview_buf, false, {
-          relative   = "editor",
-          row        = row,
-          col        = col + w + PREVIEW_GAP,
-          width      = pvw,
-          height     = h,
-          style      = "minimal",
-          border     = ui.border(),
-          title      = " Preview ",
-          title_pos  = "center",
-          focusable  = false,
-          zindex     = 54,
-        })
-        vim.o.eventignore = _ei
-        vim.wo[preview_win].wrap = true
-      end
-    end
+    sync_preview(w, h)
     return new_win
   end
 
@@ -216,27 +250,29 @@ function M.open(opts)
 
     local flist = filtered_items()
     cursor = clamp(cursor, 1, math.max(1, #flist))
+    local parts = footer_parts()
+    local new_w = calc_width(flist, parts)
+    local foot = footer_lines(new_w, parts)
+    local new_h = calc_height(flist, new_w, parts)
+    local item_rows = math.max(1, new_h - #foot - 1 - (filter ~= "" and 1 or 0))
+    first_visible = clamp(first_visible, 1, math.max(1, #flist - item_rows + 1))
+    if cursor < first_visible then first_visible = cursor end
+    if cursor >= first_visible + item_rows then first_visible = cursor - item_rows + 1 end
 
     local lines = {}
 
     -- Filter indicator
     if filter ~= "" then
-      table.insert(lines, "  / " .. filter)
+      local filter_line = ui.truncate_display("  / " .. filter, new_w, true)
+      table.insert(lines, filter_line)
     end
 
     -- Items
     if #flist == 0 then
       table.insert(lines, "  (no items)")
     else
-      local w = vim.api.nvim_win_is_valid(win or 0)
-          and vim.api.nvim_win_get_width(win)
-          or calc_width(flist)
-      local max_name = w - 6
-      for i, item in ipairs(flist) do
-        local label = tostring(display(item))
-        if #label > max_name then
-          label = label:sub(1, max_name - 1) .. "…"
-        end
+      for i = first_visible, math.min(#flist, first_visible + item_rows - 1) do
+        local label = ui.truncate_display(tostring(display(flist[i])), math.max(1, new_w - 6), true)
         local prefix = (i == cursor) and "  ▶ " or "    "
         table.insert(lines, prefix .. label)
       end
@@ -244,27 +280,7 @@ function M.open(opts)
 
     -- Separator + footer
     table.insert(lines, "")
-    local footer_parts = { "Enter:select" }
-    if on_delete then table.insert(footer_parts, "D:delete") end
-    -- Contextual actions: show label only when applicable for current item
-    local flist_for_footer = filtered_items()
-    local cur_item = flist_for_footer[cursor]
-    for _, action in ipairs(actions) do
-      local show = true
-      if action.when and cur_item then
-        show = action.when(cur_item)
-      end
-      if show then
-        table.insert(footer_parts, action.label)
-      end
-    end
-    table.insert(footer_parts, "/:filter")
-    table.insert(footer_parts, "q:close")
-    table.insert(lines, "  " .. table.concat(footer_parts, "  "))
-
-    -- Resize picker float
-    local new_w = calc_width(flist)
-    local new_h = calc_height(flist) + (filter ~= "" and 1 or 0)
+    for _, line in ipairs(foot) do lines[#lines + 1] = line end
 
     vim.bo[popup_buf].modifiable = true
     vim.api.nvim_buf_set_lines(popup_buf, 0, -1, false, lines)
@@ -278,31 +294,29 @@ function M.open(opts)
       })
       -- Move cursor to item row (skip filter line if present)
       local item_offset = (filter ~= "" and 1 or 0)
-      pcall(vim.api.nvim_win_set_cursor, win, { cursor + item_offset, 0 })
+      pcall(vim.api.nvim_win_set_cursor, win, { cursor - first_visible + 1 + item_offset, 0 })
     end
 
-    -- Sync preview window size + position + content
-    if preview_win and vim.api.nvim_win_is_valid(preview_win) then
-      local col    = get_picker_col(new_w)
-      local pvw    = get_pv_w(new_w)
-      local row    = math.floor((vim.o.lines - new_h) / 2)
-      pcall(vim.api.nvim_win_set_config, preview_win, {
-        relative = "editor",
-        row      = row,
-        col      = col + new_w + PREVIEW_GAP,
-        width    = pvw,
-        height   = new_h,
-      })
-    end
+    sync_preview(new_w, new_h)
     update_preview()
   end
 
   -- ── open initial windows ──
 
   local initial_flist = filtered_items()
-  local init_w = calc_width(initial_flist)
-  local init_h = calc_height(initial_flist)
+  local initial_parts = footer_parts()
+  local init_w = calc_width(initial_flist, initial_parts)
+  local init_h = calc_height(initial_flist, init_w, initial_parts)
   win = open_wins(init_w, init_h)
+
+  local resize = vim.api.nvim_create_autocmd("VimResized", {
+    group = _ag,
+    callback = function() if vim.api.nvim_win_is_valid(win) then render() end end,
+  })
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    group = _ag, buffer = popup_buf, once = true,
+    callback = function() pcall(vim.api.nvim_del_autocmd, resize) end,
+  })
 
   -- ── keymaps ──
 

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.20.1] - 2026-11-03
+
+### Fixed
+
+- Metadata views show their own row count instead of the records query's page
+  count and navigation arrows. Reopening a metadata view advertises the
+  configured Records key rather than the SQL-pad key.
+- Built-in pickers wrap their key hints and keep them visible when scrolling
+  long lists. Open pickers reposition on terminal resize; saved-query previews
+  hide when space is tight and return with the selected query when widened.
+- Page changes and grid refreshes keep an existing data-cell cursor on a data
+  row when fewer rows remain, preserving its column instead of landing on the
+  border or footer.
+
 ## [3.20.0] - 2026-11-03
 
 ### Added
