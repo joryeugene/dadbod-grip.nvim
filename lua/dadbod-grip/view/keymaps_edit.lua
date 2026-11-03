@@ -8,6 +8,10 @@ local qmod   = require("dadbod-grip.query")
 
 local M = {}
 local function refuse_unknown(state)
+  if not state then
+    vim.notify('Visible result unavailable; clipboard export canceled',vim.log.levels.WARN)
+    return true
+  end
   if require('dadbod-grip.provenance').has_unknown(state) then
     vim.notify('Unproven byte encoding; clipboard export is unavailable',vim.log.levels.WARN)
     return true
