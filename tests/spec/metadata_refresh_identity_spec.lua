@@ -71,6 +71,16 @@ test('stale refresh cannot relabel the metadata result',function()
  s.on_refresh(b)
  assert(s.current_view=='columns' and s._render==render and vim.api.nvim_buf_get_name(b)==name,'stale refresh changed identity')
 end)
+test('a successful retry restores display eligibility after a caught repaint failure',function()
+ local b,s=open(true);view.switch_view(b,'columns');local set=vim.api.nvim_buf_set_lines
+ vim.api.nvim_buf_set_lines=function(buf,...)if buf==b then error('controlled repaint failure')end;return set(buf,...)end
+ local ok,err=pcall(s.on_refresh,b);vim.api.nvim_buf_set_lines=set;assert(ok,err)
+ assert(s._render.read_failed and not view._is_editable(s) and view.get_cell(b)==nil,'failed paint not quarantined')
+ s.on_refresh(b)
+ assert(not s._render.read_failed and view._is_editable(s),'successful repaint did not restore eligibility')
+ assert(s.current_view=='records' and status(s):find('Page 3/3',1,true),'recovery identity incorrect')
+ assert(not s._render.lines[1]:find('read-only: no PK',1,true),'old failure contaminated successful title')
+end)
 test('metadata refresh issues the same query sequence as Records refresh',function()
  local b,s=open(true);local records,metadata={},{};local target=records
  db.query=function(sql,...)target[#target+1]=sql;return saved.query(sql,...)end

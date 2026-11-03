@@ -459,7 +459,12 @@ local function is_editable(session)
   return session.write_mode == true
     and filetypes.write_format(session.file_path) ~= nil
 end
-M._is_editable = is_editable  -- exposed for cell_buffer.lua
+-- A failed paint has no reliable pixel-to-row mapping. Keep display eligibility
+-- separate from formatting eligibility so a fresh successful render can recover.
+local function displayed_is_editable(session)
+  return is_editable(session) and not (session._render and session._render.read_failed)
+end
+M._is_editable = displayed_is_editable  -- exposed for cell_buffer.lua
 
 -- Build the title bar with connection/table info and staged count.
 local function title_line(session, columns, widths, total_width)
@@ -1205,7 +1210,7 @@ end
 -- M.get_cell(bufnr) → {row_idx, col_name, col_idx, value} | nil
 function M.get_cell(bufnr)
   local session = M._sessions[bufnr]
-  if not session or not session._render then return nil end
+  if not session or not session._render or session._render.read_failed then return nil end
 
   local r = session._render
   local st = session.state
@@ -2803,7 +2808,7 @@ local function make_keymap_ctx(bufnr)
   -- sections live in their own modules. Named for its subject: it answers for
   -- ctx.session(), not for whatever session the caller happens to be holding.
   function ctx.session_is_editable()
-    return is_editable(M._sessions[bufnr])
+    return displayed_is_editable(M._sessions[bufnr])
   end
 
   -- The column under the cursor, wherever the cursor is: a data row, the header
