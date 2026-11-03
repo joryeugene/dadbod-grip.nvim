@@ -11,6 +11,18 @@ local ui      = require("dadbod-grip.ui")
 local filetypes = require("dadbod-grip.filetypes")
 
 local M = {}
+
+-- Read consumers follow the snapshot that produced the visible grid. Metadata
+-- navigation flags can outlive a public refresh that repaints Records.
+local function display_context(session)
+  if not session then return nil end
+  local rendered=session._render
+  if rendered and rendered.read_failed then return nil end
+  if rendered and rendered.read_state then return rendered.read_state,rendered.read_metadata_view end
+  if session.current_view and session.current_view~='records' then return session._meta_state,session.current_view end
+  return session.state
+end
+
 M._sessions = {}  -- [bufnr] = { state, url, query_sql }
 require("dadbod-grip.result_hints").attach(M._sessions)
 
@@ -1013,6 +1025,10 @@ function M.render(bufnr, state)
   local rendered = profile("build_render", function()
     return build_render(session, opts, bufnr)
   end)
+  rendered.read_state = state
+  if state == session._meta_state and session.current_view ~= 'records' then
+    rendered.read_metadata_view = session.current_view
+  end
   session._render = rendered  -- cache for get_cell
   session._col_hl = nil       -- column-highlight memo belongs to the old render
 
@@ -1059,6 +1075,7 @@ function M.render(bufnr, state)
   end
 
   if not ok then
+    rendered.read_state, rendered.read_failed = nil, true
     vim.notify("Grip: render error: " .. tostring(err), vim.log.levels.WARN)
   end
 
@@ -1241,10 +1258,7 @@ end
 
 --- Read context only: editing continues to use the canonical Records state.
 function M.get_display_state(bufnr)
-  local session=M._sessions[bufnr]
-  if not session then return nil end
-  if session.current_view and session.current_view~='records' then return session._meta_state end
-  return session.state
+  return display_context(M._sessions[bufnr])
 end
 function M.get_display_cell(bufnr)
   local state=M.get_display_state(bufnr)
@@ -1803,11 +1817,10 @@ M._format_export = format_export
 
 local function current_export_rows(session)
   local rows = {}
-  local metadata_view = session.current_view and session.current_view ~= 'records'
-  local state = metadata_view and session._meta_state or session.state
+  local state, metadata_view = display_context(session)
   local metadata = require('dadbod-grip.provenance').copy(state,true)
   if metadata_view then
-    metadata.export_view = session.current_view
+    metadata.export_view = metadata_view
     metadata.restorable = false -- metadata has no physical insertion target
   end
   metadata.cell_types,metadata.cell_exact={},{}
@@ -1837,17 +1850,16 @@ end
 
 --- Prompt for page/all scope before any format prompt, then provide the rows.
 local function request_export_rows(session, destination, callback, bufnr)
-  local metadata_view = session.current_view and session.current_view ~= 'records'
-  local requested_view = session.current_view or 'records'
-  local requested_state = metadata_view and session._meta_state or session.state
-  if metadata_view and not session._meta_state then
-    vim.notify('Export failed: metadata result is unavailable', vim.log.levels.ERROR)
+  local requested_state, requested_view = display_context(session)
+  if not requested_state then
+    vim.notify('Export failed: visible metadata/result snapshot is unavailable', vim.log.levels.ERROR)
     return
   end
+  local metadata_view = requested_view ~= nil
   local function current()
-    local active_state = metadata_view and session._meta_state or session.state
+    local active_state, active_view = display_context(session)
     if (bufnr and M._sessions[bufnr] ~= session)
-        or (session.current_view or 'records') ~= requested_view or active_state ~= requested_state then
+        or active_view ~= requested_view or active_state ~= requested_state then
       vim.notify('Export canceled: the visible result changed; choose the export scope again', vim.log.levels.WARN)
       return false
     end
