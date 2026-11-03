@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cell-editor hints show the enabled save and cancel bindings after remapping.
+- Refreshing metadata into Records updates the title, facet and pager together.
+  Metadata and a failed repaint refuse direct cell, row and column staging;
+  applying previously staged Records changes remains available.
 - Metadata CSV and JSON exports use the displayed metadata snapshot for both
   scopes instead of exporting records or adding nonexistent rows. Metadata SQL
   exports refuse without a physical insertion target.
