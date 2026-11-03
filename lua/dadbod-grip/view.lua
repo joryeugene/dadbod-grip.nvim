@@ -2135,7 +2135,7 @@ local function make_meta_state(table_name, columns, rows)
 end
 
 -- Update the buffer name to reflect the current view.
-local function update_buf_name(bufnr, table_name, view_name)
+local function update_buf_name(bufnr, table_name, view_name, unique)
   local base = table_name or "result"
   local name
   if view_name and view_name ~= "records" then
@@ -2147,7 +2147,26 @@ local function update_buf_name(bufnr, table_name, view_name)
   else
     name = "grip://" .. base
   end
+  if unique then
+    local other = vim.fn.bufnr(name)
+    if other ~= -1 and other ~= bufnr then name = name .. "#" .. bufnr end
+  end
   pcall(vim.api.nvim_buf_set_name, bufnr, name)
+end
+
+-- A successful Records refresh replaces any metadata result currently shown.
+-- Its identity and canonical payload must move with the already-fetched rows.
+function M.render_records(bufnr, state)
+  local session = M._sessions[bufnr]
+  if not session then return end
+  local leaving_metadata = session.current_view and session.current_view ~= "records"
+  session.current_view = "records"
+  session._meta_state = nil
+  session._records_state = state
+  M.render(bufnr, state)
+  if leaving_metadata and M._sessions[bufnr] == session then
+    update_buf_name(bufnr, state.table_name, nil, true)
+  end
 end
 
 -- Per-view data fetchers. Each returns (columns, rows, err).

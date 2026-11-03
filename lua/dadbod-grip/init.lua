@@ -806,7 +806,7 @@ local function apply_refresh(bufnr, fetched, owner, generation, query_update, wr
     session._write_engine_times[new_state.rows] = write_result.write_engine_timing
   end
   session._column_info = fetched.column_info
-  view.render(bufnr, new_state)
+  view.render_records(bufnr, new_state)
 end
 
 local function begin_refresh(bufnr)
