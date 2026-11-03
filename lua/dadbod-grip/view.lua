@@ -799,8 +799,10 @@ local function build_render(session, opts, bufnr)
   local display_opts = require("dadbod-grip").get_opts()
   local show_result_time, show_hints = display_opts.show_result_time, display_opts.show_hints
 
+  -- Metadata rows are not a page of the underlying records query.
+  local records_view = not session.current_view or session.current_view == "records"
   -- Row/page info
-  if session.query_spec and session.total_rows then
+  if records_view and session.query_spec and session.total_rows then
     local page_str = qmod.page_info(session.query_spec, session.total_rows)
     -- Directional hints when result spans multiple pages
     local spec = session.query_spec
@@ -815,7 +817,7 @@ local function build_render(session, opts, bufnr)
   else
     local row_str = #st.rows .. " rows"
     -- Safety hint: if result maxed out page_size, more data likely exists
-    if session.query_spec and #st.rows >= session.query_spec.page_size then
+    if records_view and session.query_spec and #st.rows >= session.query_spec.page_size then
       row_str = row_str .. (show_hints and "  →L?" or " (more possible)")
     end
     table.insert(status_parts, row_str)
@@ -851,7 +853,7 @@ local function build_render(session, opts, bufnr)
     if staged_count > 0 then essential(staged_count .. " staged", "GripStatusChg") end
     if st.readonly and not is_editable(session) then essential("read-only", "GripReadonly") end
     if hidden_n > 0 then essential(hidden_n .. " hidden", "GripReadonly") end
-    if session.query_spec and session.total_rows then
+    if records_view and session.query_spec and session.total_rows then
       essential(string.format("Page %d/%d", session.query_spec.page,
         math.max(1, math.ceil(session.total_rows / session.query_spec.page_size))))
       essential(session.total_rows .. " rows")
@@ -1001,6 +1003,7 @@ function M.render(bufnr, state)
 
   -- Save cursor position before re-render
   local saved_cursor
+  local previous_render = session._render
   local win = vim.fn.bufwinid(bufnr)
   if win ~= -1 then
     saved_cursor = vim.api.nvim_win_get_cursor(win)
@@ -1034,6 +1037,24 @@ function M.render(bufnr, state)
 
   -- Restore cursor position
   if saved_cursor and win ~= -1 then
+    -- Page turns and refreshes can replace a full page with fewer rows. Keep
+    -- an existing data-cell cursor in the data range, rather than on a border
+    -- or footer that now occupies the same buffer line. Header inspection is
+    -- left alone, and an empty result never supplies a selectable data row.
+    local old_row = previous_render and saved_cursor[1] - previous_render.data_start + 1
+    if old_row and old_row >= 1 and old_row <= #previous_render.ordered and #rendered.ordered > 0 then
+      local new_row = math.min(old_row, #rendered.ordered)
+      saved_cursor[1] = rendered.data_start + new_row - 1
+      local old_positions = previous_render.byte_positions[old_row] or {}
+      local new_positions = rendered.byte_positions[new_row] or {}
+      for column, pos in pairs(old_positions) do
+        if saved_cursor[2] >= pos.start and saved_cursor[2] <= pos.finish and new_positions[column] then
+          local next_pos = new_positions[column]
+          saved_cursor[2] = next_pos.start + math.min(saved_cursor[2] - pos.start, next_pos.finish - next_pos.start)
+          break
+        end
+      end
+    end
     pcall(vim.api.nvim_win_set_cursor, win, saved_cursor)
   end
 
@@ -2248,7 +2269,9 @@ function M.switch_view(bufnr, view_name)
       indexes = "Indexes", constraints = "Constraints", stats = "Stats", explain = "Explain",
     }
     local label = full_labels[view_name] or view_name
-    vim.notify("Already on " .. label .. " · press 2 for Records", vim.log.levels.INFO)
+    local records_key = require("dadbod-grip.keymaps").get("tab_3")
+    local hint = records_key and (" · press " .. records_key .. " for Records") or ""
+    vim.notify("Already on " .. label .. hint, vim.log.levels.INFO)
     return
   end
 
