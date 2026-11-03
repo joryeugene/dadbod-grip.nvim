@@ -7,10 +7,11 @@ for _,name in ipairs({'old','new'})do
  local out=vim.system({'sqlite3',root..'/'..name..'.sqlite'},{stdin="CREATE TABLE people(id INTEGER PRIMARY KEY,name TEXT);INSERT INTO people VALUES(1,'one'),(2,'two');",text=true}):wait();assert(out.code==0,out.stderr)
 end
 local pass,fail=0,0
-local saved={opts=grip.get_opts(),confirm=ui.confirm,notify=vim.notify,db=vim.g.db,tables=db.list_tables,routines=db.list_routines}
+local saved={opts=grip.get_opts(),confirm=ui.confirm,notify=vim.notify,db=vim.g.db,dbs=vim.deepcopy(vim.g.dbs),editor_open=require('dadbod-grip.editor').open,tables=db.list_tables,routines=db.list_routines}
 local registry=root..'/connections.json'
 local function cleanup()
  db.list_tables,db.list_routines=saved.tables,saved.routines
+ require('dadbod-grip.editor').open=saved.editor_open
  schema.close();local buffers={};for b in pairs(view._sessions)do buffers[#buffers+1]=b end
  for _,b in ipairs(buffers)do pcall(vim.api.nvim_buf_delete,b,{force=true})end
  view.close_all_floats()
@@ -77,5 +78,26 @@ test('forged or invalidated UI receipts cannot repopulate schema',function()
  assert(schema.use_prepared_switch(newurl,token)==nil)
  assert(schema.get_state(newurl).items==nil)
 end)
-cleanup();grip.setup(saved.opts);ui.confirm,vim.notify,vim.g.db=saved.confirm,saved.notify,saved.db;vim.fn.delete(root,'rf')
+test('ordinary delayed editor callback still stages before any switch',function()
+ local b,s=open();local callback
+ require('dadbod-grip.editor').open=function(_,_,save)callback=save end
+ local r=s._render;vim.api.nvim_win_set_cursor(0,{r.data_start,r.byte_positions[1].name.start})
+ s.on_edit(b,assert(view.get_cell(b)));assert(callback,'real editor callback not captured')
+ callback('valid delayed edit');assert(data.effective_value(s.state,1,'name')=='valid delayed edit')
+end)
+test('accepted discard revokes an old editor callback on a surviving background result',function()
+ local b,s=open();local callback
+ require('dadbod-grip.editor').open=function(_,_,save)callback=save end
+ local r=s._render;vim.api.nvim_win_set_cursor(0,{r.data_start,r.byte_positions[1].name.start})
+ s.on_edit(b,assert(view.get_cell(b)));assert(callback,'real editor callback not captured')
+ require('dadbod-grip.editor').open=saved.editor_open
+ grip.open('people',oldurl,{from_pad=true,force_split=true})
+ assert(connections.switch(newurl,'Target','sqlite')==true)
+ assert(view._sessions[b]==s and not data.has_changes(s.state),'background result not retained cleanly')
+ local clean=s.state;callback('stale delayed edit')
+ assert(s.state==clean and not data.has_changes(s.state),'old editor re-staged discarded work')
+ local native=vim.system({'sqlite3',root..'/old.sqlite'},{stdin='SELECT name FROM people WHERE id=1;',text=true}):wait()
+ assert(native.code==0 and vim.trim(native.stdout)=='one','editor callback wrote source database')
+end)
+cleanup();grip.setup(saved.opts);ui.confirm,vim.notify,vim.g.db=saved.confirm,saved.notify,saved.db;vim.g.dbs=saved.dbs;vim.fn.delete(root,'rf')
 print(string.format('connection_prepared_spec: %d passed, %d failed',pass,fail));if fail>0 then os.exit(1)end

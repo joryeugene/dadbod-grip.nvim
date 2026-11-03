@@ -1,5 +1,6 @@
 -- Frozen independent consent/ownership bar. Native fixture DBs, no write SQL after setup.
 local grip,view,data,paths,ui,connections=require('dadbod-grip'),require('dadbod-grip.view'),require('dadbod-grip.data'),require('dadbod-grip.paths'),require('dadbod-grip.ui'),require('dadbod-grip.connections')
+local original_opts,original_db,original_dbs,original_keys=grip.get_opts(),vim.g.db,vim.deepcopy(vim.g.dbs),vim.deepcopy(grip._keymaps)
 local root=vim.fn.tempname()..'_connection_bar';vim.fn.mkdir(root,'p')
 local pass,fail,index=0,0,0
 local function bytes(path)local f=io.open(path,'rb');if not f then return nil end;local r=f:read('*a');f:close();return r end
@@ -78,5 +79,5 @@ end)
 for _,case in ipairs({{name='pending writer refuses switch',opts={accept=true,pending=true}},{name='unsettled unknown writer refuses switch',opts={accept=true,unknown=true}}})do
  run(case.name,case.opts,function(c)c.attempt();unchanged(c)end)
 end
-close();vim.fn.delete(root,'rf')
+close();grip.setup(original_opts);grip._keymaps=original_keys;vim.g.db=original_db;vim.g.dbs=original_dbs;vim.fn.delete(root,'rf')
 print(string.format('independent_connection_spec: %d passed, %d failed',pass,fail));if fail>0 then os.exit(1)end

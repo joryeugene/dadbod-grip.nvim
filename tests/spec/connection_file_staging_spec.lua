@@ -1,5 +1,6 @@
 -- Approved compatibility boundary: staged work -> file profile refuses before any preflight.
 local grip,view,data,connections,db,ui=require('dadbod-grip'),require('dadbod-grip.view'),require('dadbod-grip.data'),require('dadbod-grip.connections'),require('dadbod-grip.db'),require('dadbod-grip.ui')
+local original_opts,original_db,original_dbs,original_keys=grip.get_opts(),vim.g.db,vim.deepcopy(vim.g.dbs),vim.deepcopy(grip._keymaps)
 local root=vim.fn.tempname()..'_file_switch';vim.fn.mkdir(root,'p')
 local sqlite=root..'/fixture.sqlite';local url='sqlite:'..sqlite;local csv=root..'/file.csv';local registry=root..'/connections.json'
 local r=vim.system({'sqlite3',sqlite},{stdin="CREATE TABLE people(id INTEGER PRIMARY KEY,name TEXT);INSERT INTO people VALUES(1,'one');",text=true}):wait();assert(r.code==0,r.stderr)
@@ -25,4 +26,4 @@ test('unstaged file profile still opens native CSV',function()
  local ok,err=pcall(connections.switch,csv,'File','file');local opened=vim.wait(3000,function()for _,s in pairs(view._sessions)do if s.state.rows[1] and s.state.rows[1][2]=='alpha'then return true end end;return false end,10);ui.confirm=old
  assert(ok,err);assert(opened,'no-stage CSV file profile no longer opens');assert(prompts==0,'clean file switch asks to discard')
 end)
-close();vim.fn.delete(root,'rf');print(string.format('file_switch_control: %d passed, %d failed',pass,fail));if fail>0 then os.exit(1)end
+close();grip.setup(original_opts);grip._keymaps=original_keys;vim.g.db=original_db;vim.g.dbs=original_dbs;vim.fn.delete(root,'rf');print(string.format('file_switch_control: %d passed, %d failed',pass,fail));if fail>0 then os.exit(1)end

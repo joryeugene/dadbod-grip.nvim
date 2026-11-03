@@ -698,7 +698,7 @@ local function winbar_for(url)
   local bufnr = vim.api.nvim_create_buf(false, true)
   local orig_buf = vim.api.nvim_get_current_buf()
   vim.api.nvim_set_current_buf(bufnr)
-  view._sessions[bufnr] = { url = url, state = { table_name = "users", url = url } }
+  view._sessions[bufnr] = { url = url, state = { table_name = "users", url = url, changes = {}, deleted = {}, inserted = {} } }
   view._update_winbar(bufnr)
   local bar = vim.wo[vim.api.nvim_get_current_win()].winbar
   view._sessions[bufnr] = nil
@@ -735,7 +735,7 @@ local function with_live_session(url, fn)
   local orig_buf = vim.api.nvim_get_current_buf()
   vim.api.nvim_set_current_buf(bufnr)
   local win = vim.api.nvim_get_current_win()
-  view._sessions[bufnr] = { url = url, state = { table_name = "users", url = url } }
+  view._sessions[bufnr] = { url = url, state = { table_name = "users", url = url, changes = {}, deleted = {}, inserted = {} } }
   -- bar() re-renders the way a CursorMoved does; raw() reads the option as it
   -- stands, which is what the user is looking at until they move the cursor.
   local ok, err = pcall(fn, function()
