@@ -1745,6 +1745,11 @@ then choose one of six clipboard formats:
   Grip Table ....... Box-drawing table matching the grid style
 
 All-row export preserves filters and sorting while removing pagination.
+Metadata views export their displayed snapshot as CSV or JSON in either scope;
+they do not rerun the records query. SQL export is unavailable for metadata
+because it has no physical insertion target. JSON export refuses BLOB cells;
+use SQL to preserve binary bytes. Unsupported formats preserve existing files.
+Changing the visible result while choosing scope cancels that export request.
 Clipboard exports are capped at 100,000 rows; use a file above that.
 
 Export to file ~                                              *:GripExport*

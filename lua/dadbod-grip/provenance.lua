@@ -75,6 +75,16 @@ function M.write_error(metadata)
  end
 end
 function M.export_error(metadata,format)
+ if format=='sql' and metadata and metadata.export_view then
+  return 'Metadata views cannot be exported as SQL; switch to Records for row INSERTs'
+ end
+ if format=='json' then
+  for _,types in pairs(metadata and metadata.cell_types or {}) do
+   for _,kind in pairs(types) do
+    if kind=='blob' then return 'Binary/BLOB values cannot be exported as JSON; use SQL to preserve bytes' end
+   end
+  end
+ end
  if M.has_unknown(metadata) then return 'Unproven byte encoding; raw values cannot be exported' end
  if format=='sql' then return M.restoration_error(metadata) end
 end

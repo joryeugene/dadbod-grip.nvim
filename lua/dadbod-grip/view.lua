@@ -1787,17 +1787,23 @@ M._format_export = format_export
 
 local function current_export_rows(session)
   local rows = {}
-  local metadata = require('dadbod-grip.provenance').copy(session.state,true)
+  local metadata_view = session.current_view and session.current_view ~= 'records'
+  local state = metadata_view and session._meta_state or session.state
+  local metadata = require('dadbod-grip.provenance').copy(state,true)
+  if metadata_view then
+    metadata.export_view = session.current_view
+    metadata.restorable = false -- metadata has no physical insertion target
+  end
   metadata.cell_types,metadata.cell_exact={},{}
-  local cols = session.state.columns or {}
+  local cols = state.columns or {}
   metadata.columns=cols -- export span only; never copy projected columns into a write plan
   local ordered = session._render and session._render.ordered
-  if not ordered then return session.state.rows or {}, cols, session.state end
+  if not ordered then return state.rows or {}, cols, metadata_view and metadata or state end
   for _, row_idx in ipairs(ordered) do
     local row,types,exact = {},{},{}
     for ci, col in ipairs(cols) do
-      row[ci] = data.effective_value(session.state, row_idx, col)
-      types[ci],exact[ci] = data.cell_type(session.state,row_idx,col),data.cell_exact(session.state,row_idx,col)
+      row[ci] = data.effective_value(state, row_idx, col)
+      types[ci],exact[ci] = data.cell_type(state,row_idx,col),data.cell_exact(state,row_idx,col)
     end
     rows[#rows + 1] = row
     metadata.cell_types[#rows],metadata.cell_exact[#rows] = types,exact
@@ -1815,11 +1821,28 @@ end
 
 --- Prompt for page/all scope before any format prompt, then provide the rows.
 local function request_export_rows(session, destination, callback)
+  local metadata_view = session.current_view and session.current_view ~= 'records'
+  local requested_view = session.current_view or 'records'
+  local requested_state = metadata_view and session._meta_state or session.state
+  if metadata_view and not session._meta_state then
+    vim.notify('Export failed: metadata result is unavailable', vim.log.levels.ERROR)
+    return
+  end
   vim.ui.select({ "Current page", "All matching rows" }, { prompt = "Export scope:" }, function(scope)
     if not scope then return end
+    local active_state = metadata_view and session._meta_state or session.state
+    if (session.current_view or 'records') ~= requested_view or active_state ~= requested_state then
+      vim.notify('Export canceled: the visible result changed; choose the export scope again', vim.log.levels.WARN)
+      return
+    end
 
     local rows, cols, count, metadata
-    if scope == "All matching rows" then
+    if metadata_view then
+      -- Metadata views are fully fetched, not pages of the records query.
+      -- Both choices export the shown metadata snapshot without re-querying records.
+      rows, cols, metadata = current_export_rows(session)
+      count = #rows
+    elseif scope == "All matching rows" then
       local count_err
       count, count_err = matching_count(session)
       if count == nil then
@@ -1983,6 +2006,11 @@ function M.do_export(bufnr)
       return
     end
 
+    local problem = require('dadbod-grip.provenance').export_error(metadata, fmt)
+    if problem then
+      vim.notify('Export failed: ' .. problem, vim.log.levels.ERROR)
+      return
+    end
     local ext = fmt == "sql" and "sql" or fmt
     local path = ui.input({
       prompt = "Save to: ",
