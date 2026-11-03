@@ -12,6 +12,10 @@ local _ag = vim.api.nvim_create_augroup("DadbodGripSchema", { clear = true })
 
 -- Active schema state (one per connection URL)
 local _states = {}
+-- Private UI-cache receipts. These never establish physical source identity or
+-- editability; they only let a confirmed connection switch paint one metadata
+-- read without issuing another required query after staging has been discarded.
+local _prepared_switches = setmetatable({}, { __mode = "k" })
 local _sidebar_bufnr = nil
 local _sidebar_winid = nil
 local _sidebar_saved_width = nil  -- persists across open/close cycles
@@ -843,15 +847,45 @@ vim.api.nvim_create_autocmd("VimResized", {
   end,
 })
 
---- Fetch the schema for `url` into state, touching no window.
----
---- Split out of toggle() so a caller assembling the workspace can pay for the
---- DB round-trip while the preloader is still up and the old screen is still
---- whole, instead of behind a sidebar that is already visible and empty.
---- Cached: a second call for the same URL costs nothing.
---- @param url string
---- @return table state
-function M.prefetch(url)
+--- Read fresh target metadata without changing the visible schema/cache.
+--- A private receipt belongs to this schema epoch and is UI data only.
+function M.prepare_switch(url)
+  local state = get_state(url)
+  local generation = state._schema_generation
+  local items, err = db.list_tables(url)
+  if not items then return nil, err or "Could not list target tables" end
+  local routines = db.list_routines(url) or {}
+  if not current_fetch(state, generation) then return nil, "Target schema changed while connecting" end
+  local token = {}
+  _prepared_switches[token] = { url = url, state = state, generation = generation,
+    items = items, routines = routines }
+  return token
+end
+
+function M.use_prepared_switch(url, token)
+  local receipt = _prepared_switches[token]
+  if not receipt or receipt.url ~= url or not current_fetch(receipt.state, receipt.generation) then
+    return nil, "Prepared target schema expired; connection was not opened"
+  end
+  if not receipt.applied then
+    if not db.invalidate_schema(url) then return nil, "Could not invalidate target schema safely" end
+    local state = get_state(url)
+    state.items, state.routines = receipt.items, receipt.routines
+    state.default_schema = require("dadbod-grip.adapters").kind(db.resolved_url(url)) == "duckdb" and "main" or nil
+    require("dadbod-grip.schema_tree").prune(state)
+    receipt.generation, receipt.applied = state._schema_generation, true
+  end
+  return receipt.state
+end
+
+--- Fetch into the sidebar cache, touching no window. Ordinary calls are cached;
+--- confirmed switches can reuse their already validated private UI receipt.
+function M.prefetch(url, prepared)
+  if prepared then
+    local state, err = M.use_prepared_switch(url, prepared)
+    if not state then error(err) end
+    return state
+  end
   local state = get_state(url)
   if not state.items then
     if is_file_url(url) then
@@ -1001,8 +1035,16 @@ end
 --- { switch = true } rebinds the reused sidebar buffer to the new URL.
 function M.refresh(url, opts)
   if not url then return end
-  db.invalidate_schema(url)
-  local state = get_state(url)
+  local prepared = opts and opts.prepared
+  local state
+  if prepared then
+    local err
+    state, err = M.use_prepared_switch(url, prepared)
+    if not state then error(err) end
+  else
+    db.invalidate_schema(url)
+    state = get_state(url)
+  end
   local generation = state._schema_generation
   -- Only re-render if sidebar is currently visible
   if not _sidebar_winid or not vim.api.nvim_win_is_valid(_sidebar_winid) then return end
@@ -1010,10 +1052,12 @@ function M.refresh(url, opts)
   if not (opts and opts.switch) and vim.b[_sidebar_bufnr].db ~= url then return end
   if opts and opts.switch then vim.b[_sidebar_bufnr].db = url end
   local bufnr, winid = _sidebar_bufnr, _sidebar_winid
-  if is_file_url(url) then
-    fetch_file_schema(state)
-  else
-    fetch_tables(state)
+  if not prepared then
+    if is_file_url(url) then
+      fetch_file_schema(state)
+    else
+      fetch_tables(state)
+    end
   end
   if not current_fetch(state, generation) or _sidebar_bufnr ~= bufnr or _sidebar_winid ~= winid
       or not vim.api.nvim_buf_is_valid(bufnr) or not vim.api.nvim_win_is_valid(winid)

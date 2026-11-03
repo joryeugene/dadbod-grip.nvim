@@ -112,6 +112,24 @@ end
 --                       the editor stays context-free)
 function M.open(prompt, initial_value, on_save, opts)
   opts = opts or {}
+  local km = require("dadbod-grip.keymaps")
+  -- These hints belong to this editor's bindings, not a later setup() call.
+  local save_key = km.get("editor_save") or km.get("editor_save_alt")
+  local cancel_keys = {}
+  for _, action in ipairs({ "editor_cancel_q", "editor_cancel" }) do
+    local key = km.get(action)
+    if key then cancel_keys[#cancel_keys + 1] = key end
+  end
+  local function footer(mode)
+    local parts = { mode == "i" and "INSERT" or "NORMAL" }
+    if save_key then parts[#parts + 1] = save_key .. "=save" end
+    if mode == "i" then
+      parts[#parts + 1] = "<Esc>=normal" -- intrinsic Vim behavior, not a mapping
+    elseif #cancel_keys > 0 then
+      parts[#parts + 1] = table.concat(cancel_keys, "/") .. "=cancel"
+    end
+    return "  " .. table.concat(parts, "  ") .. "  "
+  end
   local caller_win = vim.api.nvim_get_current_win()  -- save for restore on close
   local pre_fill = initial_value or ""
   -- Split on newlines so nvim_buf_set_lines receives clean per-line strings
@@ -150,7 +168,7 @@ function M.open(prompt, initial_value, on_save, opts)
     border = ui.border(),
     title = " " .. (prompt or "edit") .. " ",
     title_pos = "center",
-    footer     = "  INSERT  <CR>=save  <Esc>=normal  ",
+    footer     = footer("i"),
     footer_pos = "right",
     zindex = 60,
   })
@@ -212,10 +230,7 @@ function M.open(prompt, initial_value, on_save, opts)
   -- Live footer: updates when mode changes so the user always sees the right hints
   local function _set_footer(mode_char)
     if not vim.api.nvim_win_is_valid(float_win) then return end
-    local f = mode_char == "i"
-      and "  INSERT  <CR>=save  <Esc>=normal  "
-      or  "  NORMAL  <CR>=save  q/<Esc>=cancel  "
-    vim.api.nvim_win_set_config(float_win, { footer = f, footer_pos = "right" })
+    vim.api.nvim_win_set_config(float_win, { footer = footer(mode_char), footer_pos = "right" })
   end
   vim.api.nvim_create_autocmd("InsertEnter", {
     group = _ag, buffer = edit_buf,
@@ -234,7 +249,6 @@ function M.open(prompt, initial_value, on_save, opts)
 
   -- Keymaps (buf-local)
   -- NOTE: INSERT <Esc> is intentionally NOT mapped; natural Vim exits to NORMAL mode
-  local km = require("dadbod-grip.keymaps")
   for _, mode in ipairs({ "i", "n" }) do
     km.bind("cell_editor", edit_buf, "editor_save", mode, do_save, { noremap = true })
     km.bind("cell_editor", edit_buf, "editor_save_alt", mode, do_save, { noremap = true })

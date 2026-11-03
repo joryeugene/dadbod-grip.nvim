@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.20.2] - 2026-11-03
+
+### Fixed
+
+- Cell-editor hints show the enabled save and cancel bindings after remapping.
+- Refreshing metadata into Records updates the title, facet and pager together.
+  Metadata and a failed repaint refuse direct cell, row and column staging;
+  applying previously staged Records changes remains available.
+- Metadata CSV and JSON exports use the displayed metadata snapshot for both
+  scopes instead of exporting records or adding nonexistent rows. Metadata SQL
+  exports refuse without a physical insertion target.
+- Metadata clipboard shortcuts also copy the displayed metadata rather than
+  reading the hidden Records state.
+- JSON export refuses BLOB cells and invalid UTF-8 text before creating or replacing a file. Typed SQL
+  export remains available for preserving binary bytes. Changing the visible
+  result or closing its session while selecting export scope cancels the stale request.
+- Switching database connections asks before discarding pending result changes.
+  Declining or a failed target check preserves those changes and the current
+  connection profile. Pending or uncertain writes must be resolved first.
+  With pending changes, opening a file profile requires applying or discarding
+  them manually before connecting.
+
 ## [3.20.1] - 2026-11-03
 
 ### Fixed
@@ -951,7 +973,8 @@ older tags are left in place so anyone pinned to them keeps working.
 - **joryeugene** — SQL Server adapter, PostgreSQL routines in the schema sidebar, focused ER diagram
   ([PR #17](https://github.com/joryeugene/dadbod-grip.nvim/pull/17)).
 
-[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.20.1...HEAD
+[Unreleased]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.20.2...HEAD
+[3.20.2]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.20.1...v3.20.2
 [3.20.1]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.20.0...v3.20.1
 [3.20.0]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.19.1...v3.20.0
 [3.19.1]: https://github.com/joryeugene/dadbod-grip.nvim/compare/v3.19.0...v3.19.1

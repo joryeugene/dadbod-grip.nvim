@@ -11,6 +11,18 @@ local ui      = require("dadbod-grip.ui")
 local filetypes = require("dadbod-grip.filetypes")
 
 local M = {}
+
+-- Read consumers follow the snapshot that produced the visible grid. Metadata
+-- navigation flags can outlive a public refresh that repaints Records.
+local function display_context(session)
+  if not session then return nil end
+  local rendered=session._render
+  if rendered and rendered.read_failed then return nil end
+  if rendered and rendered.read_state then return rendered.read_state,rendered.read_metadata_view end
+  if session.current_view and session.current_view~='records' then return session._meta_state,session.current_view end
+  return session.state
+end
+
 M._sessions = {}  -- [bufnr] = { state, url, query_sql }
 require("dadbod-grip.result_hints").attach(M._sessions)
 
@@ -447,7 +459,14 @@ local function is_editable(session)
   return session.write_mode == true
     and filetypes.write_format(session.file_path) ~= nil
 end
-M._is_editable = is_editable  -- exposed for cell_buffer.lua
+-- Editing requires a visible Records snapshot. Metadata is readable but is not
+-- the canonical mutation target; a failed paint has no reliable row mapping.
+-- Keep this separate from formatting eligibility so a new render can recover.
+local function displayed_is_editable(session)
+  local state, metadata_view = display_context(session)
+  return state ~= nil and metadata_view == nil and is_editable(session)
+end
+M._is_editable = displayed_is_editable  -- exposed for cell_buffer.lua
 
 -- Build the title bar with connection/table info and staged count.
 local function title_line(session, columns, widths, total_width)
@@ -1013,6 +1032,10 @@ function M.render(bufnr, state)
   local rendered = profile("build_render", function()
     return build_render(session, opts, bufnr)
   end)
+  rendered.read_state = state
+  if state == session._meta_state and session.current_view ~= 'records' then
+    rendered.read_metadata_view = session.current_view
+  end
   session._render = rendered  -- cache for get_cell
   session._col_hl = nil       -- column-highlight memo belongs to the old render
 
@@ -1059,6 +1082,7 @@ function M.render(bufnr, state)
   end
 
   if not ok then
+    rendered.read_state, rendered.read_failed = nil, true
     vim.notify("Grip: render error: " .. tostring(err), vim.log.levels.WARN)
   end
 
@@ -1188,7 +1212,7 @@ end
 -- M.get_cell(bufnr) → {row_idx, col_name, col_idx, value} | nil
 function M.get_cell(bufnr)
   local session = M._sessions[bufnr]
-  if not session or not session._render then return nil end
+  if not session or not session._render or session._render.read_failed then return nil end
 
   local r = session._render
   local st = session.state
@@ -1237,6 +1261,19 @@ function M.get_cell(bufnr)
   end
 
   return nil
+end
+
+--- Read context only: editing continues to use the canonical Records state.
+function M.get_display_state(bufnr)
+  return display_context(M._sessions[bufnr])
+end
+function M.get_display_cell(bufnr)
+  local state=M.get_display_state(bufnr)
+  local cell=M.get_cell(bufnr)
+  if not cell or not state then return nil end
+  cell.value=data.effective_value(state,cell.row_idx,cell.col_name)
+  cell.storage_type=data.cell_type(state,cell.row_idx,cell.col_name)
+  return cell
 end
 
 --- Pure helper: given visible columns, their byte positions, and a cursor byte offset,
@@ -1654,7 +1691,7 @@ M._json_to_lines = json_to_lines
 -- The single formatter behind :GripExport / gX (file), gE (clipboard) and gy
 -- (markdown yank); `format` is one of csv, tsv, json, sql, markdown, grip.
 local function format_export(rows, cols, format, table_name, metadata)
-  local problem=require('dadbod-grip.provenance').export_error(metadata,format);assert(not problem,problem)
+  local problem=require('dadbod-grip.provenance').export_error(metadata,format,rows,cols);assert(not problem,problem)
   local tbl = table_name or "_grip_result"
 
   local function delimited(separator)
@@ -1787,17 +1824,22 @@ M._format_export = format_export
 
 local function current_export_rows(session)
   local rows = {}
-  local metadata = require('dadbod-grip.provenance').copy(session.state,true)
+  local state, metadata_view = display_context(session)
+  local metadata = require('dadbod-grip.provenance').copy(state,true)
+  if metadata_view then
+    metadata.export_view = metadata_view
+    metadata.restorable = false -- metadata has no physical insertion target
+  end
   metadata.cell_types,metadata.cell_exact={},{}
-  local cols = session.state.columns or {}
+  local cols = state.columns or {}
   metadata.columns=cols -- export span only; never copy projected columns into a write plan
   local ordered = session._render and session._render.ordered
-  if not ordered then return session.state.rows or {}, cols, session.state end
+  if not ordered then return state.rows or {}, cols, metadata_view and metadata or state end
   for _, row_idx in ipairs(ordered) do
     local row,types,exact = {},{},{}
     for ci, col in ipairs(cols) do
-      row[ci] = data.effective_value(session.state, row_idx, col)
-      types[ci],exact[ci] = data.cell_type(session.state,row_idx,col),data.cell_exact(session.state,row_idx,col)
+      row[ci] = data.effective_value(state, row_idx, col)
+      types[ci],exact[ci] = data.cell_type(state,row_idx,col),data.cell_exact(state,row_idx,col)
     end
     rows[#rows + 1] = row
     metadata.cell_types[#rows],metadata.cell_exact[#rows] = types,exact
@@ -1814,12 +1856,33 @@ local function matching_count(session)
 end
 
 --- Prompt for page/all scope before any format prompt, then provide the rows.
-local function request_export_rows(session, destination, callback)
+local function request_export_rows(session, destination, callback, bufnr)
+  local requested_state, requested_view = display_context(session)
+  if not requested_state then
+    vim.notify('Export failed: visible metadata/result snapshot is unavailable', vim.log.levels.ERROR)
+    return
+  end
+  local metadata_view = requested_view ~= nil
+  local function current()
+    local active_state, active_view = display_context(session)
+    if (bufnr and M._sessions[bufnr] ~= session)
+        or active_view ~= requested_view or active_state ~= requested_state then
+      vim.notify('Export canceled: the visible result changed; choose the export scope again', vim.log.levels.WARN)
+      return false
+    end
+    return true
+  end
   vim.ui.select({ "Current page", "All matching rows" }, { prompt = "Export scope:" }, function(scope)
     if not scope then return end
+    if not current() then return end
 
     local rows, cols, count, metadata
-    if scope == "All matching rows" then
+    if metadata_view then
+      -- Metadata views are fully fetched, not pages of the records query.
+      -- Both choices export the shown metadata snapshot without re-querying records.
+      rows, cols, metadata = current_export_rows(session)
+      count = #rows
+    elseif scope == "All matching rows" then
       local count_err
       count, count_err = matching_count(session)
       if count == nil then
@@ -1872,14 +1935,14 @@ local function request_export_rows(session, destination, callback)
       vim.notify("No rows to export", vim.log.levels.WARN)
       return
     end
-    callback(rows, cols, scope, metadata)
+    callback(rows, cols, scope, metadata, current)
   end)
 end
 
 --- Stream an export to a same-directory temporary file, then atomically rename
 --- it into place. Any formatter/write/rename failure removes only the temp file.
 local function write_export_file(rows, cols, format, table_name, path, metadata)
-  local problem=require('dadbod-grip.provenance').export_error(metadata,format)
+  local problem=require('dadbod-grip.provenance').export_error(metadata,format,rows,cols)
   if problem then return nil,problem end -- validate even an empty stream, before creating a file
   local temp = string.format("%s.grip-tmp-%d-%d", path, vim.fn.getpid(), vim.uv.hrtime())
   local file, open_err = io.open(temp, "wb")
@@ -1946,22 +2009,23 @@ function M.export_to_clipboard(bufnr)
     vim.notify("No grip result to export", vim.log.levels.WARN)
     return
   end
-  request_export_rows(session, "clipboard", function(rows, cols, _, metadata)
+  request_export_rows(session, "clipboard", function(rows, cols, _, metadata, current)
     local formats = { "CSV", "TSV", "JSON", "SQL INSERT", "Markdown", "Grip Table" }
     vim.ui.select(formats, { prompt = "Export format:" }, function(choice)
       if not choice then return end
+      if not current() then return end
       local ids = {
         ["CSV"] = "csv", ["TSV"] = "tsv", ["JSON"] = "json",
         ["SQL INSERT"] = "sql", ["Markdown"] = "markdown", ["Grip Table"] = "grip",
       }
-      local problem=require('dadbod-grip.provenance').export_error(metadata,ids[choice])
+      local problem=require('dadbod-grip.provenance').export_error(metadata,ids[choice],rows,cols)
       if problem then vim.notify(problem,vim.log.levels.ERROR);return end
       local output = table.concat(format_export(rows,cols,ids[choice],session.state.table_name or 'table_name',metadata),'\n')
       vim.fn.setreg("+", output)
       vim.notify(string.format("Exported %d rows as %s to clipboard", #rows, choice),
         vim.log.levels.INFO)
     end)
-  end)
+  end, bufnr)
 end
 
 --- Export a page or all matching rows to a file.
@@ -1973,16 +2037,22 @@ function M.do_export(bufnr)
     return
   end
 
-  request_export_rows(session, "file", function(rows, cols, _, metadata)
+  request_export_rows(session, "file", function(rows, cols, _, metadata, current)
     -- Scope is intentionally chosen before format.
     local fmt = ui.input({ prompt = "Export format [csv/json/sql]: " })
     if not fmt then return end
+    if not current() then return end
     fmt = fmt:lower()
     if fmt ~= "csv" and fmt ~= "json" and fmt ~= "sql" then
       vim.notify("Unknown format: " .. fmt .. " (use csv, json, or sql)", vim.log.levels.ERROR)
       return
     end
 
+    local problem = require('dadbod-grip.provenance').export_error(metadata, fmt, rows, cols)
+    if problem then
+      vim.notify('Export failed: ' .. problem, vim.log.levels.ERROR)
+      return
+    end
     local ext = fmt == "sql" and "sql" or fmt
     local path = ui.input({
       prompt = "Save to: ",
@@ -1990,6 +2060,7 @@ function M.do_export(bufnr)
       completion = "file",
     })
     if not path then return end
+    if not current() then return end
 
     local ok, err = write_export_file(
       rows, cols, fmt, session.query_spec and session.query_spec.table_name, path, metadata)
@@ -1998,7 +2069,7 @@ function M.do_export(bufnr)
     else
       vim.notify("Export failed: " .. tostring(err), vim.log.levels.ERROR)
     end
-  end)
+  end, bufnr)
 end
 
 -- ── focused info float helper ────────────────────────────────────────────
@@ -2071,7 +2142,7 @@ local function make_meta_state(table_name, columns, rows)
 end
 
 -- Update the buffer name to reflect the current view.
-local function update_buf_name(bufnr, table_name, view_name)
+local function update_buf_name(bufnr, table_name, view_name, unique)
   local base = table_name or "result"
   local name
   if view_name and view_name ~= "records" then
@@ -2083,7 +2154,26 @@ local function update_buf_name(bufnr, table_name, view_name)
   else
     name = "grip://" .. base
   end
+  if unique then
+    local other = vim.fn.bufnr(name)
+    if other ~= -1 and other ~= bufnr then name = name .. "#" .. bufnr end
+  end
   pcall(vim.api.nvim_buf_set_name, bufnr, name)
+end
+
+-- A successful Records refresh replaces any metadata result currently shown.
+-- Its identity and canonical payload must move with the already-fetched rows.
+function M.render_records(bufnr, state)
+  local session = M._sessions[bufnr]
+  if not session then return end
+  local leaving_metadata = session.current_view and session.current_view ~= "records"
+  session.current_view = "records"
+  session._meta_state = nil
+  session._records_state = state
+  M.render(bufnr, state)
+  if leaving_metadata and M._sessions[bufnr] == session then
+    update_buf_name(bufnr, state.table_name, nil, true)
+  end
 end
 
 -- Per-view data fetchers. Each returns (columns, rows, err).
@@ -2571,7 +2661,7 @@ end
 function M._column_set(bufnr)
   local session = M._sessions[bufnr]
   if not session or not session._render then return end
-  if not is_editable(session) then
+  if not displayed_is_editable(session) then
     vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
     return
   end
@@ -2720,6 +2810,10 @@ local function make_keymap_ctx(bufnr)
   -- sections live in their own modules. Named for its subject: it answers for
   -- ctx.session(), not for whatever session the caller happens to be holding.
   function ctx.session_is_editable()
+    return displayed_is_editable(M._sessions[bufnr])
+  end
+  -- Apply targets already staged canonical Records, not the displayed facet.
+  function ctx.session_can_apply()
     return is_editable(M._sessions[bufnr])
   end
 
