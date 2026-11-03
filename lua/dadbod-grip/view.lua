@@ -1239,6 +1239,22 @@ function M.get_cell(bufnr)
   return nil
 end
 
+--- Read context only: editing continues to use the canonical Records state.
+function M.get_display_state(bufnr)
+  local session=M._sessions[bufnr]
+  if not session then return nil end
+  if session.current_view and session.current_view~='records' then return session._meta_state end
+  return session.state
+end
+function M.get_display_cell(bufnr)
+  local state=M.get_display_state(bufnr)
+  local cell=M.get_cell(bufnr)
+  if not cell or not state then return nil end
+  cell.value=data.effective_value(state,cell.row_idx,cell.col_name)
+  cell.storage_type=data.cell_type(state,cell.row_idx,cell.col_name)
+  return cell
+end
+
 --- Pure helper: given visible columns, their byte positions, and a cursor byte offset,
 --- return { col_name, col_idx } for the column the cursor belongs to.
 --- Snaps LEFT (to the previous column) when cursor is in a separator region,
@@ -1654,7 +1670,7 @@ M._json_to_lines = json_to_lines
 -- The single formatter behind :GripExport / gX (file), gE (clipboard) and gy
 -- (markdown yank); `format` is one of csv, tsv, json, sql, markdown, grip.
 local function format_export(rows, cols, format, table_name, metadata)
-  local problem=require('dadbod-grip.provenance').export_error(metadata,format);assert(not problem,problem)
+  local problem=require('dadbod-grip.provenance').export_error(metadata,format,rows,cols);assert(not problem,problem)
   local tbl = table_name or "_grip_result"
 
   local function delimited(separator)
@@ -1820,7 +1836,7 @@ local function matching_count(session)
 end
 
 --- Prompt for page/all scope before any format prompt, then provide the rows.
-local function request_export_rows(session, destination, callback)
+local function request_export_rows(session, destination, callback, bufnr)
   local metadata_view = session.current_view and session.current_view ~= 'records'
   local requested_view = session.current_view or 'records'
   local requested_state = metadata_view and session._meta_state or session.state
@@ -1828,13 +1844,18 @@ local function request_export_rows(session, destination, callback)
     vim.notify('Export failed: metadata result is unavailable', vim.log.levels.ERROR)
     return
   end
+  local function current()
+    local active_state = metadata_view and session._meta_state or session.state
+    if (bufnr and M._sessions[bufnr] ~= session)
+        or (session.current_view or 'records') ~= requested_view or active_state ~= requested_state then
+      vim.notify('Export canceled: the visible result changed; choose the export scope again', vim.log.levels.WARN)
+      return false
+    end
+    return true
+  end
   vim.ui.select({ "Current page", "All matching rows" }, { prompt = "Export scope:" }, function(scope)
     if not scope then return end
-    local active_state = metadata_view and session._meta_state or session.state
-    if (session.current_view or 'records') ~= requested_view or active_state ~= requested_state then
-      vim.notify('Export canceled: the visible result changed; choose the export scope again', vim.log.levels.WARN)
-      return
-    end
+    if not current() then return end
 
     local rows, cols, count, metadata
     if metadata_view then
@@ -1895,14 +1916,14 @@ local function request_export_rows(session, destination, callback)
       vim.notify("No rows to export", vim.log.levels.WARN)
       return
     end
-    callback(rows, cols, scope, metadata)
+    callback(rows, cols, scope, metadata, current)
   end)
 end
 
 --- Stream an export to a same-directory temporary file, then atomically rename
 --- it into place. Any formatter/write/rename failure removes only the temp file.
 local function write_export_file(rows, cols, format, table_name, path, metadata)
-  local problem=require('dadbod-grip.provenance').export_error(metadata,format)
+  local problem=require('dadbod-grip.provenance').export_error(metadata,format,rows,cols)
   if problem then return nil,problem end -- validate even an empty stream, before creating a file
   local temp = string.format("%s.grip-tmp-%d-%d", path, vim.fn.getpid(), vim.uv.hrtime())
   local file, open_err = io.open(temp, "wb")
@@ -1969,22 +1990,23 @@ function M.export_to_clipboard(bufnr)
     vim.notify("No grip result to export", vim.log.levels.WARN)
     return
   end
-  request_export_rows(session, "clipboard", function(rows, cols, _, metadata)
+  request_export_rows(session, "clipboard", function(rows, cols, _, metadata, current)
     local formats = { "CSV", "TSV", "JSON", "SQL INSERT", "Markdown", "Grip Table" }
     vim.ui.select(formats, { prompt = "Export format:" }, function(choice)
       if not choice then return end
+      if not current() then return end
       local ids = {
         ["CSV"] = "csv", ["TSV"] = "tsv", ["JSON"] = "json",
         ["SQL INSERT"] = "sql", ["Markdown"] = "markdown", ["Grip Table"] = "grip",
       }
-      local problem=require('dadbod-grip.provenance').export_error(metadata,ids[choice])
+      local problem=require('dadbod-grip.provenance').export_error(metadata,ids[choice],rows,cols)
       if problem then vim.notify(problem,vim.log.levels.ERROR);return end
       local output = table.concat(format_export(rows,cols,ids[choice],session.state.table_name or 'table_name',metadata),'\n')
       vim.fn.setreg("+", output)
       vim.notify(string.format("Exported %d rows as %s to clipboard", #rows, choice),
         vim.log.levels.INFO)
     end)
-  end)
+  end, bufnr)
 end
 
 --- Export a page or all matching rows to a file.
@@ -1996,17 +2018,18 @@ function M.do_export(bufnr)
     return
   end
 
-  request_export_rows(session, "file", function(rows, cols, _, metadata)
+  request_export_rows(session, "file", function(rows, cols, _, metadata, current)
     -- Scope is intentionally chosen before format.
     local fmt = ui.input({ prompt = "Export format [csv/json/sql]: " })
     if not fmt then return end
+    if not current() then return end
     fmt = fmt:lower()
     if fmt ~= "csv" and fmt ~= "json" and fmt ~= "sql" then
       vim.notify("Unknown format: " .. fmt .. " (use csv, json, or sql)", vim.log.levels.ERROR)
       return
     end
 
-    local problem = require('dadbod-grip.provenance').export_error(metadata, fmt)
+    local problem = require('dadbod-grip.provenance').export_error(metadata, fmt, rows, cols)
     if problem then
       vim.notify('Export failed: ' .. problem, vim.log.levels.ERROR)
       return
@@ -2018,6 +2041,7 @@ function M.do_export(bufnr)
       completion = "file",
     })
     if not path then return end
+    if not current() then return end
 
     local ok, err = write_export_file(
       rows, cols, fmt, session.query_spec and session.query_spec.table_name, path, metadata)
@@ -2026,7 +2050,7 @@ function M.do_export(bufnr)
     else
       vim.notify("Export failed: " .. tostring(err), vim.log.levels.ERROR)
     end
-  end)
+  end, bufnr)
 end
 
 -- ── focused info float helper ────────────────────────────────────────────

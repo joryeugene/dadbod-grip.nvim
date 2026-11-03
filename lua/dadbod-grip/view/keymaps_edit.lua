@@ -290,7 +290,7 @@ function M.setup(bufnr, ctx)
 
   -- y: yank cell value
   kmap("grid_yank_cell", function()
-    local cell = view.get_cell(bufnr)
+    local cell = view.get_display_cell(bufnr)
     if not cell then
       vim.notify("Move cursor to a data row to yank", vim.log.levels.INFO)
       return
@@ -308,12 +308,12 @@ function M.setup(bufnr, ctx)
   kmap("grid_yank_row", function()
     local session = ctx.session()
     if not session then return end
-    local cell = view.get_cell(bufnr)
+    local cell = view.get_display_cell(bufnr)
     if not cell then
       vim.notify("Move cursor to a data row to yank", vim.log.levels.INFO)
       return
     end
-    local st = session.state
+    local st = view.get_display_state(bufnr)
     if refuse_unknown(st) then return end
     local parts = {}
     for _, col in ipairs(st.columns) do
@@ -329,7 +329,7 @@ function M.setup(bufnr, ctx)
   kmap("grid_yank_table", function()
     local session = ctx.session()
     if not session then return end
-    local st = session.state
+    local st = view.get_display_state(bufnr)
     if refuse_unknown(st) then return end
     local r = session._render
     if not r then return end
@@ -350,7 +350,7 @@ function M.setup(bufnr, ctx)
   kmap("grid_yank_md", function()
     local session_gy = ctx.session()
     if not session_gy or not session_gy._render then return end
-    local st_gy = session_gy.state
+    local st_gy = view.get_display_state(bufnr)
     if refuse_unknown(st_gy) then return end
     local r_gy = session_gy._render
     local cols = st_gy.columns

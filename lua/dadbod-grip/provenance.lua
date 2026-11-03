@@ -74,7 +74,23 @@ function M.write_error(metadata)
   if proof.editable~=true or metadata.editable==false then return 'Unproven editable source; result is read-only' end
  end
 end
-function M.export_error(metadata,format)
+local function utf8_valid(s)
+ local i=1
+ while i<=#s do
+  local a=s:byte(i)
+  if a<0x80 then i=i+1 else
+   local count=a>=0xc2 and a<=0xdf and 2 or a>=0xe0 and a<=0xef and 3 or a>=0xf0 and a<=0xf4 and 4
+   if not count or i+count-1>#s then return false end
+   local b=s:byte(i+1)
+   if (a==0xe0 and b<0xa0) or (a==0xed and b>=0xa0)
+     or (a==0xf0 and b<0x90) or (a==0xf4 and b>=0x90) then return false end
+   for j=1,count-1 do local c=s:byte(i+j);if c<0x80 or c>0xbf then return false end end
+   i=i+count
+  end
+ end
+ return true
+end
+function M.export_error(metadata,format,rows,columns)
  if format=='sql' and metadata and metadata.export_view then
   return 'Metadata views cannot be exported as SQL; switch to Records for row INSERTs'
  end
@@ -82,6 +98,16 @@ function M.export_error(metadata,format)
   for _,types in pairs(metadata and metadata.cell_types or {}) do
    for _,kind in pairs(types) do
     if kind=='blob' then return 'Binary/BLOB values cannot be exported as JSON; use SQL to preserve bytes' end
+   end
+  end
+ end
+ if format=='json' then
+  for _,name in ipairs(columns or metadata and metadata.columns or {}) do
+   if type(name)=='string' and not utf8_valid(name) then return 'Invalid UTF-8 column name cannot be exported as JSON' end
+  end
+  for _,row in ipairs(rows or metadata and metadata.rows or {}) do
+   for _,value in pairs(row) do
+    if type(value)=='string' and not utf8_valid(value) then return 'Invalid UTF-8 text cannot be exported as JSON; use SQL to preserve bytes' end
    end
   end
  end

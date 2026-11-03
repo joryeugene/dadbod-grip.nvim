@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Metadata CSV and JSON exports use the displayed metadata snapshot for both
   scopes instead of exporting records or adding nonexistent rows. Metadata SQL
   exports refuse without a physical insertion target.
-- JSON export refuses BLOB cells before creating or replacing a file. Typed SQL
+- Metadata clipboard shortcuts also copy the displayed metadata rather than
+  reading the hidden Records state.
+- JSON export refuses BLOB cells and invalid UTF-8 text before creating or replacing a file. Typed SQL
   export remains available for preserving binary bytes. Changing the visible
-  result while selecting export scope cancels the stale request.
+  result or closing its session while selecting export scope cancels the stale request.
 
 ## [3.20.1] - 2026-11-03
 

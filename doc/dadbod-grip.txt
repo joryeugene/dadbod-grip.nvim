@@ -1748,8 +1748,11 @@ All-row export preserves filters and sorting while removing pagination.
 Metadata views export their displayed snapshot as CSV or JSON in either scope;
 they do not rerun the records query. SQL export is unavailable for metadata
 because it has no physical insertion target. JSON export refuses BLOB cells;
-use SQL to preserve binary bytes. Unsupported formats preserve existing files.
-Changing the visible result while choosing scope cancels that export request.
+use SQL to preserve binary bytes. Invalid UTF-8 text is also refused by JSON
+export. Unsupported formats preserve existing files. Metadata clipboard
+shortcuts copy the displayed metadata, not the hidden Records state.
+Changing the visible result or closing its session while choosing scope
+cancels that export request.
 Clipboard exports are capped at 100,000 rows; use a file above that.
 
 Export to file ~                                              *:GripExport*
