@@ -854,6 +854,14 @@ function M.switch(url, name, conn_type, opts)
     return false
   end
 
+  -- Resolve consent before retaining any registry snapshot across a blocking
+  -- prompt or target read. The mutation path below reads fresh profile data.
+  local selected = M.entry_for(url)
+  local allowed, prepared = require("dadbod-grip.connection_switch").prepare(url,
+    conn_type == "file" or (selected and selected.type == "file") or is_file_url(conn_url),
+    function() return M.expand_url(url) == conn_url end)
+  if not allowed then return false end
+
   -- Find the owning registry independently of conn_type: the picker passes
   -- a type, but a global-only profile must still be touched in its own file.
   -- A deliberate local override wins, matching entry_for()'s precedence.
@@ -1033,7 +1041,7 @@ function M.switch(url, name, conn_type, opts)
 
   local label = name or url
 
-  vim.schedule(function()
+  local function open_workspace()
     local schema = require("dadbod-grip.schema")
     local auto_sidebar = require("dadbod-grip").get_opts().open_sidebar
 
@@ -1043,12 +1051,12 @@ function M.switch(url, name, conn_type, opts)
     -- layout. Built the other way round, each pane appeared empty and filled
     -- in a second later, which read as the plugin assembling itself on screen.
     ui.blocking("connecting to " .. label .. "...", function()
-      if auto_sidebar or schema.is_open() then schema.prefetch(url) end
+      if auto_sidebar or schema.is_open() then schema.prefetch(url, prepared) end
 
       if not schema.is_open() and auto_sidebar then
         schema.toggle(url)
       elseif schema.is_open() then
-        schema.refresh(url, { switch = true })
+        schema.refresh(url, { switch = true, prepared = prepared })
       end
 
       -- Show welcome screen in the main content area
@@ -1078,7 +1086,8 @@ function M.switch(url, name, conn_type, opts)
       end)
     end)
 
-  end)
+  end
+  if prepared then open_workspace() else vim.schedule(open_workspace) end
   return true
 end
 

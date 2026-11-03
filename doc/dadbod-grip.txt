@@ -614,6 +614,11 @@ All commands are global and available after the plugin loads.
                                                               *:GripConnect*
 :GripConnect [url]
   Switch database connection. Shows a picker if no argument is provided.
+  Pending result changes require explicit discard confirmation. Canceling or
+  failing to read the target database preserves the current result changes,
+  connection URL, and saved profiles. Resolve any pending or uncertain write
+  before switching. Apply or discard pending changes manually before opening
+  a file profile; file-profile switching remains unchanged when none exist.
   Reads from .grip/connections.json, g:dbs (DBUI compatible), and
   $DATABASE_URL.
 

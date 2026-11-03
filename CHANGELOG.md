@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSON export refuses BLOB cells and invalid UTF-8 text before creating or replacing a file. Typed SQL
   export remains available for preserving binary bytes. Changing the visible
   result or closing its session while selecting export scope cancels the stale request.
+- Switching database connections asks before discarding pending result changes.
+  Declining or a failed target check preserves those changes and the current
+  connection profile. Pending or uncertain writes must be resolved first.
+  With pending changes, opening a file profile requires applying or discarding
+  them manually before connecting.
 
 ## [3.20.1] - 2026-11-03
 
