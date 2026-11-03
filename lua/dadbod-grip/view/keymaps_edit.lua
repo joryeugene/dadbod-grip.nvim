@@ -155,7 +155,7 @@ function M.setup(bufnr, ctx)
     end
 
     -- Normal mode: apply staged changes
-    if not ctx.session_is_editable() then
+    if not ctx.session_can_apply() then
       vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
       return
     end

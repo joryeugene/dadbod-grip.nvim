@@ -2812,6 +2812,10 @@ local function make_keymap_ctx(bufnr)
   function ctx.session_is_editable()
     return displayed_is_editable(M._sessions[bufnr])
   end
+  -- Apply targets already staged canonical Records, not the displayed facet.
+  function ctx.session_can_apply()
+    return is_editable(M._sessions[bufnr])
+  end
 
   -- The column under the cursor, wherever the cursor is: a data row, the header
   -- or the type row. Column-scoped actions (sort, filter, stats, resize) should

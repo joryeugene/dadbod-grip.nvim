@@ -25,6 +25,15 @@ for _,key in ipairs({'i','d','o','c','x','column'})do
   assert(native('SELECT group_concat(name) FROM people')=='Alice,Bob','native data changed')
  end)
 end
+test('normal Apply still commits the intended previously staged Records edit from metadata',function()
+ local b,s=open();view.switch_view(b,'records')
+ view.apply_edit(b,data.add_change(s.state,1,'name','intended'))
+ view.switch_view(b,'columns')
+ local confirm=vim.fn.confirm;vim.fn.confirm=function()return 1 end
+ local ok,err=pcall(press,b,'a');vim.fn.confirm=confirm;assert(ok,err)
+ assert(native('SELECT group_concat(name) FROM people')=='intended,Bob','canonical Apply capability changed')
+ assert(not data.has_changes(s.state),'successful Apply kept staging')
+end)
 test('successful refreshed Records still permits ordinary cell edit',function()
  local b,s=open();press(b,'r');local save;editor.open=function(_,_,cb)save=cb end
  local r=s._render;vim.api.nvim_win_set_cursor(0,{r.data_start,r.byte_positions[1].name.start});press(b,'i')
