@@ -55,11 +55,17 @@ function M.prepare(url, file_target, target_unchanged)
     return false
   end
   local schema = require("dadbod-grip.schema")
-  local ok, prepared, problem = pcall(function()
-    return ui.blocking("checking target connection...", function() return schema.prepare_switch(url) end)
+  local ok, result = pcall(function()
+    return ui.blocking("checking target connection...", function()
+      local receipt, problem = schema.prepare_switch(url)
+      -- Keep nil/error pairs intact through blocking's Lua 5.1 result list.
+      return { receipt = receipt, problem = problem }
+    end)
   end)
-  if not ok or not prepared then
-    vim.notify("Grip: target connection failed; pending changes were retained. " .. tostring(ok and problem or prepared), vim.log.levels.ERROR)
+  local prepared = ok and result.receipt
+  if not prepared then
+    local problem = ok and result.problem or result
+    vim.notify("Grip: target connection failed; pending changes were retained. " .. tostring(problem or "target metadata unavailable"), vim.log.levels.ERROR)
     return false
   end
   if not unchanged(snapshots) or (target_unchanged and not target_unchanged()) then

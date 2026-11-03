@@ -1,6 +1,7 @@
 -- Frozen independent consent/ownership bar. Native fixture DBs, no write SQL after setup.
 local grip,view,data,paths,ui,connections=require('dadbod-grip'),require('dadbod-grip.view'),require('dadbod-grip.data'),require('dadbod-grip.paths'),require('dadbod-grip.ui'),require('dadbod-grip.connections')
-local original_opts,original_db,original_dbs,original_keys=grip.get_opts(),vim.g.db,vim.deepcopy(vim.g.dbs),vim.deepcopy(grip._keymaps)
+local original_opts,original_db,original_dbs,original_keys=vim.deepcopy(grip.get_opts()),vim.g.db,vim.deepcopy(vim.g.dbs),vim.deepcopy(grip._keymaps)
+local docker=require('dadbod-grip.sources.docker_localdb');local original_fetch=docker.fetch;docker.fetch=function()return {connections={}}end
 local root=vim.fn.tempname()..'_connection_bar';vim.fn.mkdir(root,'p')
 local pass,fail,index=0,0,0
 local function bytes(path)local f=io.open(path,'rb');if not f then return nil end;local r=f:read('*a');f:close();return r end
@@ -20,7 +21,7 @@ local function run(name,options,body)
  for _,file in ipairs({'old.sqlite','new.sqlite'})do local r=vim.system({'sqlite3',folder..'/'..file},{stdin="CREATE TABLE people(id INTEGER PRIMARY KEY,name TEXT); INSERT INTO people VALUES(1,'one'),(2,'two');",text=true}):wait();assert(r.code==0,r.stderr)end
  local registry=folder..(options.global and '/home/.grip/connections.json' or '/project/.grip/connections.json')
  vim.fn.writefile({vim.json.encode({{name='Old',url=oldurl,id='old',type='sqlite',mode='rw',color='blue',last_used=1},{name='Target',url=newurl,id='target',type='sqlite',mode='rw',color='red',last_used=2},{name='Broken',url=badurl,id='broken',type='sqlite',last_used=3}})},registry)
- grip.setup({limit=2,completion=false,ai=false,discovery=false,open_sidebar=false,connections_path=not options.global and registry or nil})
+ grip.setup({limit=2,completion=false,ai=false,open_sidebar=false,connections_path=not options.global and registry or nil})
  vim.g.db=oldurl;vim.g.dbs=nil;view.set_connection_accent('blue')
  grip.open('people',oldurl,{from_pad=true});local b=vim.api.nvim_get_current_buf();local s=assert(view._sessions[b]);assert(vim.wait(1000,function()return s._column_info~=nil end,5))
  local st=data.add_change(s.state,1,'name','pending update');st=data.toggle_delete(st,2);st=data.insert_row_with_values(st,2,{id='99',name='pending insert'});view.apply_edit(b,st)
@@ -79,5 +80,5 @@ end)
 for _,case in ipairs({{name='pending writer refuses switch',opts={accept=true,pending=true}},{name='unsettled unknown writer refuses switch',opts={accept=true,unknown=true}}})do
  run(case.name,case.opts,function(c)c.attempt();unchanged(c)end)
 end
-close();grip.setup(original_opts);grip._keymaps=original_keys;vim.g.db=original_db;vim.g.dbs=original_dbs;vim.fn.delete(root,'rf')
+close();docker.fetch=original_fetch;grip.setup(original_opts);grip._keymaps=original_keys;vim.g.db=original_db;vim.g.dbs=original_dbs;vim.fn.delete(root,'rf')
 print(string.format('independent_connection_spec: %d passed, %d failed',pass,fail));if fail>0 then os.exit(1)end

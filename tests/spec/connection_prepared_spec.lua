@@ -1,13 +1,14 @@
 -- Native metadata and modelled race/transport seams; disposable databases only.
 local grip,view,data,ui=require('dadbod-grip'),require('dadbod-grip.view'),require('dadbod-grip.data'),require('dadbod-grip.ui')
 local db,schema,connections=require('dadbod-grip.db'),require('dadbod-grip.schema'),require('dadbod-grip.connections')
+local docker=require('dadbod-grip.sources.docker_localdb');local original_fetch=docker.fetch;docker.fetch=function()return {connections={}}end
 local root=vim.fn.tempname()..'_prepared_connection';vim.fn.mkdir(root,'p')
 local oldurl,newurl='sqlite:'..root..'/old.sqlite','sqlite:'..root..'/new.sqlite'
 for _,name in ipairs({'old','new'})do
  local out=vim.system({'sqlite3',root..'/'..name..'.sqlite'},{stdin="CREATE TABLE people(id INTEGER PRIMARY KEY,name TEXT);INSERT INTO people VALUES(1,'one'),(2,'two');",text=true}):wait();assert(out.code==0,out.stderr)
 end
 local pass,fail=0,0
-local saved={opts=grip.get_opts(),confirm=ui.confirm,notify=vim.notify,db=vim.g.db,dbs=vim.deepcopy(vim.g.dbs),editor_open=require('dadbod-grip.editor').open,tables=db.list_tables,routines=db.list_routines}
+local saved={opts=vim.deepcopy(grip.get_opts()),confirm=ui.confirm,notify=vim.notify,db=vim.g.db,dbs=vim.deepcopy(vim.g.dbs),editor_open=require('dadbod-grip.editor').open,tables=db.list_tables,routines=db.list_routines}
 local registry=root..'/connections.json'
 local function cleanup()
  db.list_tables,db.list_routines=saved.tables,saved.routines
@@ -20,7 +21,7 @@ local function bytes()return table.concat(vim.fn.readfile(registry,'b'),'\n')end
 local function open()
  cleanup();schema._reset_state()
  vim.fn.writefile({vim.json.encode({{name='Old',url=oldurl,type='sqlite',last_used=1},{name='Target',url=newurl,type='sqlite',last_used=2}})},registry)
- grip.setup({open_sidebar=true,completion=false,ai=false,discovery=false,connections_path=registry})
+ grip.setup({open_sidebar=true,completion=false,ai=false,connections_path=registry})
  ui.confirm=function()return true end;vim.notify=function()end;vim.g.db=oldurl
  schema.toggle(oldurl);grip.open('people',oldurl,{from_pad=true})
  local b=vim.api.nvim_get_current_buf();local s=assert(view._sessions[b]);assert(vim.wait(1000,function()return s._column_info~=nil end,5))
@@ -51,10 +52,12 @@ test('accepted target uses one table read despite a poisoned second read',functi
  for _,s in pairs(view._sessions)do assert(not data.has_changes(s.state),'accepted discard kept old staging')end
 end)
 test('failed first required read retains staging and registry',function()
- local b,s,original=open();local state=s.state
+ local b,s,original=open();local state=s.state;local notices={}
+ vim.notify=function(message)notices[#notices+1]=message end
  db.list_tables=function(url,...)if url==newurl then return nil,'controlled target query failure' end;return saved.tables(url,...)end
  assert(connections.switch(newurl,'Target','sqlite')==false)
  assert(view._sessions[b]==s and s.state==state and data.has_changes(state) and bytes()==original and vim.g.db==oldurl)
+ assert(table.concat(notices,'\n'):find('controlled target query failure',1,true),'failed target diagnostic was lost')
 end)
 test('schema invalidation during preparation cannot admit stale metadata',function()
  local b,s,original=open();local state=s.state
@@ -99,5 +102,5 @@ test('accepted discard revokes an old editor callback on a surviving background 
  local native=vim.system({'sqlite3',root..'/old.sqlite'},{stdin='SELECT name FROM people WHERE id=1;',text=true}):wait()
  assert(native.code==0 and vim.trim(native.stdout)=='one','editor callback wrote source database')
 end)
-cleanup();grip.setup(saved.opts);ui.confirm,vim.notify,vim.g.db=saved.confirm,saved.notify,saved.db;vim.g.dbs=saved.dbs;vim.fn.delete(root,'rf')
+cleanup();docker.fetch=original_fetch;grip.setup(saved.opts);ui.confirm,vim.notify,vim.g.db=saved.confirm,saved.notify,saved.db;vim.g.dbs=saved.dbs;vim.fn.delete(root,'rf')
 print(string.format('connection_prepared_spec: %d passed, %d failed',pass,fail));if fail>0 then os.exit(1)end

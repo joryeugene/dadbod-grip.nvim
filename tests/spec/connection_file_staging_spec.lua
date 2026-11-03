@@ -1,12 +1,13 @@
 -- Approved compatibility boundary: staged work -> file profile refuses before any preflight.
 local grip,view,data,connections,db,ui=require('dadbod-grip'),require('dadbod-grip.view'),require('dadbod-grip.data'),require('dadbod-grip.connections'),require('dadbod-grip.db'),require('dadbod-grip.ui')
-local original_opts,original_db,original_dbs,original_keys=grip.get_opts(),vim.g.db,vim.deepcopy(vim.g.dbs),vim.deepcopy(grip._keymaps)
+local original_opts,original_db,original_dbs,original_keys=vim.deepcopy(grip.get_opts()),vim.g.db,vim.deepcopy(vim.g.dbs),vim.deepcopy(grip._keymaps)
+local docker=require('dadbod-grip.sources.docker_localdb');local original_fetch=docker.fetch;docker.fetch=function()return {connections={}}end
 local root=vim.fn.tempname()..'_file_switch';vim.fn.mkdir(root,'p')
 local sqlite=root..'/fixture.sqlite';local url='sqlite:'..sqlite;local csv=root..'/file.csv';local registry=root..'/connections.json'
 local r=vim.system({'sqlite3',sqlite},{stdin="CREATE TABLE people(id INTEGER PRIMARY KEY,name TEXT);INSERT INTO people VALUES(1,'one');",text=true}):wait();assert(r.code==0,r.stderr)
 vim.fn.writefile({'id,name','1,alpha','2,beta'},csv)
 vim.fn.writefile({vim.json.encode({{name='Old',url=url,type='sqlite',last_used=1},{name='File',url=csv,type='file',last_used=2}})},registry)
-grip.setup({open_sidebar=false,completion=false,ai=false,discovery=false,connections_path=registry})
+grip.setup({open_sidebar=false,completion=false,ai=false,connections_path=registry})
 local pass,fail=0,0
 local function bytes(p)return table.concat(vim.fn.readfile(p,'b'),'\n')end
 local function close()local a={};for b in pairs(view._sessions)do a[#a+1]=b end;for _,b in ipairs(a)do pcall(vim.api.nvim_buf_delete,b,{force=true})end end
@@ -26,4 +27,4 @@ test('unstaged file profile still opens native CSV',function()
  local ok,err=pcall(connections.switch,csv,'File','file');local opened=vim.wait(3000,function()for _,s in pairs(view._sessions)do if s.state.rows[1] and s.state.rows[1][2]=='alpha'then return true end end;return false end,10);ui.confirm=old
  assert(ok,err);assert(opened,'no-stage CSV file profile no longer opens');assert(prompts==0,'clean file switch asks to discard')
 end)
-close();grip.setup(original_opts);grip._keymaps=original_keys;vim.g.db=original_db;vim.g.dbs=original_dbs;vim.fn.delete(root,'rf');print(string.format('file_switch_control: %d passed, %d failed',pass,fail));if fail>0 then os.exit(1)end
+close();docker.fetch=original_fetch;grip.setup(original_opts);grip._keymaps=original_keys;vim.g.db=original_db;vim.g.dbs=original_dbs;vim.fn.delete(root,'rf');print(string.format('file_switch_control: %d passed, %d failed',pass,fail));if fail>0 then os.exit(1)end
