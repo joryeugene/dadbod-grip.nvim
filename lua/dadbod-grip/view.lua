@@ -459,10 +459,12 @@ local function is_editable(session)
   return session.write_mode == true
     and filetypes.write_format(session.file_path) ~= nil
 end
--- A failed paint has no reliable pixel-to-row mapping. Keep display eligibility
--- separate from formatting eligibility so a fresh successful render can recover.
+-- Editing requires a visible Records snapshot. Metadata is readable but is not
+-- the canonical mutation target; a failed paint has no reliable row mapping.
+-- Keep this separate from formatting eligibility so a new render can recover.
 local function displayed_is_editable(session)
-  return is_editable(session) and not (session._render and session._render.read_failed)
+  local state, metadata_view = display_context(session)
+  return state ~= nil and metadata_view == nil and is_editable(session)
 end
 M._is_editable = displayed_is_editable  -- exposed for cell_buffer.lua
 
@@ -2659,7 +2661,7 @@ end
 function M._column_set(bufnr)
   local session = M._sessions[bufnr]
   if not session or not session._render then return end
-  if not is_editable(session) then
+  if not displayed_is_editable(session) then
     vim.notify("Read-only: no primary key detected", vim.log.levels.INFO)
     return
   end
